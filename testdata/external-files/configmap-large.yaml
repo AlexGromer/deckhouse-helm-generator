@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: default
+  labels:
+    app: myapp
+data:
+  small.txt: |
+    This is a small text file.
+  config.json: |
+    {
+      "server": {
+        "host": "0.0.0.0",
+        "port": 8080,
+        "tls": {
+          "enabled": true,
+          "certFile": "/etc/certs/tls.crt",
+          "keyFile": "/etc/certs/tls.key"
+        }
+      },
+      "database": {
+        "host": "postgres.default.svc.cluster.local",
+        "port": 5432,
+        "name": "myapp",
+        "ssl": true,
+        "maxConnections": 100,
+        "connectionTimeout": "30s",
+        "queryTimeout": "60s"
+      },
+      "cache": {
+        "type": "redis",
+        "host": "redis.default.svc.cluster.local",
+        "port": 6379,
+        "ttl": "1h",
+        "maxSize": "100MB"
+      },
+      "logging": {
+        "level": "info",
+        "format": "json",
+        "outputs": ["stdout", "file"],
+        "file": {
+          "path": "/var/log/app.log",
+          "maxSize": "100MB",
+          "maxBackups": 10,
+          "maxAge": 30,
+          "compress": true
+        }
+      },
+      "features": {
+        "authentication": true,
+        "authorization": true,
+        "rateLimit": true,
+        "metrics": true,
+        "tracing": true
+      },
+      "rateLimit": {
+        "enabled": true,
+        "requests": 100,
+        "window": "1m",
+        "burst": 50
+      },
+      "metrics": {
+        "enabled": true,
+        "endpoint": "/metrics",
+        "interval": "15s"
+      }
+    }
+  nginx.conf: |
+    user nginx;
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+
+        access_log /var/log/nginx/access.log main;
+
+        sendfile on;
+        tcp_nopush on;
+        keepalive_timeout 65;
+        gzip on;
+
+        upstream backend {
+            server backend:8080;
+        }
+
+        server {
+            listen 80;
+            server_name localhost;
+
+            location / {
+                proxy_pass http://backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+
+            location /health {
+                access_log off;
+                return 200 "OK\n";
+            }
+        }
+    }

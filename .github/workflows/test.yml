@@ -1,0 +1,276 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+# Cancel in-progress runs on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1: Unit Tests (with coverage) ──────────────────────────
+  unit-tests:
+    name: Unit Tests (Go ${{ matrix.go-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.22', '1.23', '1.24']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go ${{ matrix.go-version }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ matrix.go-version }}-
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Run unit tests with coverage
+      run: |
+        go test -v -race -coverprofile=coverage.txt -covermode=atomic \
+          ./pkg/...
+
+    - name: Upload coverage artifact
+      if: matrix.go-version == '1.24'
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-unit
+        path: coverage.txt
+        retention-days: 1
+
+  # ── Job 2: Integration Tests ───────────────────────────────────
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-1.24-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-1.24-
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Install Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: 'v3.16.0'
+
+    - name: Run integration tests
+      run: |
+        go test -v -coverprofile=coverage-integration.txt -covermode=atomic \
+          ./tests/integration/...
+
+    - name: Upload coverage artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-integration
+        path: coverage-integration.txt
+        retention-days: 1
+
+  # ── Job 3: E2E Tests ───────────────────────────────────────────
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-1.24-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-1.24-
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Install Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: 'v3.16.0'
+
+    - name: Verify Helm installation
+      run: helm version --short
+
+    - name: Run E2E tests
+      run: |
+        go test -v -coverprofile=coverage-e2e.txt -covermode=atomic \
+          ./tests/e2e/...
+
+    - name: Upload coverage artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-e2e
+        path: coverage-e2e.txt
+        retention-days: 1
+
+  # ── Job 4: Lint ────────────────────────────────────────────────
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: latest
+        args: --timeout=5m
+
+  # ── Job 5: Coverage Gate ───────────────────────────────────────
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, e2e-tests]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Download unit coverage
+      uses: actions/download-artifact@v4
+      with:
+        name: coverage-unit
+        path: ./coverage/
+
+    - name: Download integration coverage
+      uses: actions/download-artifact@v4
+      with:
+        name: coverage-integration
+        path: ./coverage/
+
+    - name: Download E2E coverage
+      uses: actions/download-artifact@v4
+      with:
+        name: coverage-e2e
+        path: ./coverage/
+
+    - name: Merge coverage profiles
+      run: |
+        # Install gocovmerge
+        go install github.com/wadey/gocovmerge@latest
+        # Merge all coverage profiles
+        gocovmerge coverage/coverage*.txt > coverage-merged.txt
+        # Display coverage
+        go tool cover -func=coverage-merged.txt
+
+    - name: Check coverage threshold (80%)
+      run: |
+        COVERAGE=$(go tool cover -func=coverage-merged.txt | grep total | awk '{print $3}' | sed 's/%//')
+        echo "Total coverage: ${COVERAGE}%"
+        if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+          echo "::error::Coverage ${COVERAGE}% is below 80% threshold"
+          exit 1
+        else
+          echo "::notice::Coverage ${COVERAGE}% meets 80% threshold"
+        fi
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage-merged.txt
+        flags: unittests
+        name: codecov-umbrella
+
+  # ── Job 6: Build ───────────────────────────────────────────────
+  build:
+    name: Build Binary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, lint]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-1.24-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-1.24-
+          ${{ runner.os }}-go-
+
+    - name: Build binary
+      run: |
+        make build
+        ./bin/dhg --version
+
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: dhg-binary
+        path: bin/dhg
+        retention-days: 7

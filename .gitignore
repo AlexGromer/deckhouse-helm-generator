@@ -1,0 +1,101 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+coverage.out
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+*.zip
+
+# Generated charts (for testing)
+/chart/
+/charts/
+/output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Claude Code
+.claude/
+
+# Secrets and sensitive files
+*.key
+*.pem
+*.p12
+*.pfx
+*.cer
+*.crt
+*.csr
+*.der
+*.rsa
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.ppk
+.env
+.env.*
+!.env.example
+!.env.sample
+secrets.yaml
+secrets.yml
+secret.yaml
+secret.yml
+*-secrets.yaml
+*-secrets.yml
+credentials
+credentials.json
+credentials.yaml
+token
+*.token
+.password
+password.txt
+vault-password
+.vault-pass
+
+# Kubernetes configs
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+.kube/
+!.kube/config.example
+
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+terraform.rc
+
+# Ansible
+*.vault
+vault_pass.txt
+group_vars/*/vault
+host_vars/*/vault

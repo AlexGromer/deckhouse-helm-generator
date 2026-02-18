@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: app-clusterrole
+  labels:
+    app.kubernetes.io/name: myapp
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - nonResourceURLs: ["/healthz", "/readyz"]
+    verbs: ["get"]

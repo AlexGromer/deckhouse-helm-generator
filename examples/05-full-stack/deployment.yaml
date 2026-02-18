@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+  namespace: production
+  labels:
+    app.kubernetes.io/name: api-server
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api-server
+    spec:
+      serviceAccountName: api-sa
+      containers:
+        - name: api
+          image: api-server:2.0
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: host
+            - name: APP_CONFIG
+              valueFrom:
+                configMapKeyRef:
+                  name: api-config
+                  key: config.yaml
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
