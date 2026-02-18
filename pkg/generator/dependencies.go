@@ -12,7 +12,8 @@ type ChartDependencyMap map[string][]helm.Dependency
 
 // DetectCrossChartDeps analyzes relationships between service groups and returns
 // a map of chart dependencies. It also validates there are no circular dependencies.
-func DetectCrossChartDeps(groups []*ServiceGroup, graph *types.ResourceGraph) (ChartDependencyMap, error) {
+// chartVersion specifies the version for generated dependency entries.
+func DetectCrossChartDeps(groups []*ServiceGroup, graph *types.ResourceGraph, chartVersion string) (ChartDependencyMap, error) {
 	if len(groups) <= 1 {
 		return make(ChartDependencyMap), nil
 	}
@@ -59,7 +60,7 @@ func DetectCrossChartDeps(groups []*ServiceGroup, graph *types.ResourceGraph) (C
 		for depName := range depNames {
 			deps = append(deps, helm.Dependency{
 				Name:       depName,
-				Version:    "0.1.0",
+				Version:    chartVersion,
 				Repository: fmt.Sprintf("file://../%s", depName),
 				Condition:  fmt.Sprintf("%s.enabled", depName),
 			})
@@ -79,7 +80,6 @@ func detectCircular(deps map[string]map[string]bool) error {
 	)
 
 	color := make(map[string]int)
-	parent := make(map[string]string)
 
 	var dfs func(node string) error
 	dfs = func(node string) error {
@@ -90,7 +90,6 @@ func detectCircular(deps map[string]map[string]bool) error {
 				return fmt.Errorf("circular dependency detected: %s -> %s", node, neighbor)
 			}
 			if color[neighbor] == white {
-				parent[neighbor] = node
 				if err := dfs(neighbor); err != nil {
 					return err
 				}

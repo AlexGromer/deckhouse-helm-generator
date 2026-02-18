@@ -110,8 +110,7 @@ func extractCommonEnvVars(groups []*ServiceGroup) map[string]interface{} {
 	for key, entry := range envCounts {
 		if entry.count >= 2 {
 			// Extract env var name from key format "NAME=value"
-			envName := key[:len(key)-len("=")-len(entry.value)+1]
-			// Recalculate: key is "NAME=value", extract NAME
+			var envName string
 			for i, c := range key {
 				if c == '=' {
 					envName = key[:i]

@@ -30,7 +30,7 @@ func TestInterChartDeps_DetectCrossChart_ServiceToDeployment(t *testing.T) {
 		t.Fatalf("GroupResources returned error: %v", err)
 	}
 
-	deps, err := DetectCrossChartDeps(groupResult.Groups, graph)
+	deps, err := DetectCrossChartDeps(groupResult.Groups, graph, "0.1.0")
 	if err != nil {
 		t.Fatalf("DetectCrossChartDeps returned error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestInterChartDeps_DetectCrossChart_MultipleRelationships(t *testing.T) {
 		t.Fatalf("GroupResources returned error: %v", err)
 	}
 
-	deps, err := DetectCrossChartDeps(groupResult.Groups, graph)
+	deps, err := DetectCrossChartDeps(groupResult.Groups, graph, "0.1.0")
 	if err != nil {
 		t.Fatalf("DetectCrossChartDeps returned error: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestInterChartDeps_FileRepository_LocalPath(t *testing.T) {
 		t.Fatalf("GroupResources returned error: %v", err)
 	}
 
-	deps, err := DetectCrossChartDeps(groupResult.Groups, graph)
+	deps, err := DetectCrossChartDeps(groupResult.Groups, graph, "0.1.0")
 	if err != nil {
 		t.Fatalf("DetectCrossChartDeps returned error: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestInterChartDeps_FileRepository_RelativeToChart(t *testing.T) {
 		t.Fatalf("GroupResources returned error: %v", err)
 	}
 
-	deps, err := DetectCrossChartDeps(groupResult.Groups, graph)
+	deps, err := DetectCrossChartDeps(groupResult.Groups, graph, "0.1.0")
 	if err != nil {
 		t.Fatalf("DetectCrossChartDeps returned error: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestInterChartDeps_Condition_DefaultPattern(t *testing.T) {
 		t.Fatalf("GroupResources returned error: %v", err)
 	}
 
-	deps, err := DetectCrossChartDeps(groupResult.Groups, graph)
+	deps, err := DetectCrossChartDeps(groupResult.Groups, graph, "0.1.0")
 	if err != nil {
 		t.Fatalf("DetectCrossChartDeps returned error: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestInterChartDeps_CircularDependency_Detection(t *testing.T) {
 		t.Fatalf("GroupResources returned error: %v", err)
 	}
 
-	_, err = DetectCrossChartDeps(groupResult.Groups, graph)
+	_, err = DetectCrossChartDeps(groupResult.Groups, graph, "0.1.0")
 	if err == nil {
 		t.Fatal("expected error for circular dependency, got nil")
 	}
@@ -288,7 +288,7 @@ func TestInterChartDeps_CircularDependency_SelfReference(t *testing.T) {
 		t.Fatalf("GroupResources returned error: %v", err)
 	}
 
-	deps, err := DetectCrossChartDeps(groupResult.Groups, graph)
+	deps, err := DetectCrossChartDeps(groupResult.Groups, graph, "0.1.0")
 	if err != nil {
 		t.Fatalf("unexpected error for intra-chart reference: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestInterChartDeps_NoCrossDeps_IndependentCharts(t *testing.T) {
 		t.Fatalf("GroupResources returned error: %v", err)
 	}
 
-	deps, err := DetectCrossChartDeps(groupResult.Groups, graph)
+	deps, err := DetectCrossChartDeps(groupResult.Groups, graph, "0.1.0")
 	if err != nil {
 		t.Fatalf("DetectCrossChartDeps returned error: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestInterChartDeps_Edge_SingleChart(t *testing.T) {
 		t.Fatalf("GroupResources returned error: %v", err)
 	}
 
-	deps, err := DetectCrossChartDeps(groupResult.Groups, graph)
+	deps, err := DetectCrossChartDeps(groupResult.Groups, graph, "0.1.0")
 	if err != nil {
 		t.Fatalf("DetectCrossChartDeps returned error: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestInterChartDeps_Edge_SingleChart(t *testing.T) {
 func TestInterChartDeps_Edge_EmptyGroups(t *testing.T) {
 	// Input: 0 groups
 	// Expected: No error
-	deps, err := DetectCrossChartDeps([]*ServiceGroup{}, types.NewResourceGraph())
+	deps, err := DetectCrossChartDeps([]*ServiceGroup{}, types.NewResourceGraph(), "0.1.0")
 	if err != nil {
 		t.Fatalf("unexpected error for empty groups: %v", err)
 	}

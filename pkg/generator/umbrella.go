@@ -84,7 +84,10 @@ func (g *UmbrellaGenerator) Generate(ctx context.Context, graph *types.ResourceG
 	globalVals := ExtractGlobalValues(groupResult.Groups)
 
 	// Generate parent chart.
-	parentChart := g.generateParentChart(parentName, deps, parentValues, globalVals, opts)
+	parentChart, err := g.generateParentChart(parentName, deps, parentValues, globalVals, opts)
+	if err != nil {
+		return nil, fmt.Errorf("generating parent chart: %w", err)
+	}
 
 	return append([]*types.GeneratedChart{parentChart}, charts...), nil
 }
@@ -96,7 +99,7 @@ func (g *UmbrellaGenerator) generateParentChart(
 	subValues map[string]interface{},
 	globalVals map[string]interface{},
 	opts Options,
-) *types.GeneratedChart {
+) (*types.GeneratedChart, error) {
 	chartMeta := helm.ChartMetadata{
 		Name:         chartName,
 		Version:      opts.ChartVersion,
@@ -121,7 +124,10 @@ func (g *UmbrellaGenerator) generateParentChart(
 		allValues[name] = vals
 	}
 
-	valuesBytes, _ := yaml.Marshal(allValues)
+	valuesBytes, err := yaml.Marshal(allValues)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal umbrella values: %w", err)
+	}
 	valuesYAML := "# Umbrella chart — override subchart values per-service here\n" + string(valuesBytes)
 
 	return &types.GeneratedChart{
@@ -131,5 +137,5 @@ func (g *UmbrellaGenerator) generateParentChart(
 		ValuesYAML: valuesYAML,
 		Templates:  map[string]string{},
 		Helpers:    helm.GenerateHelpers(chartName),
-	}
+	}, nil
 }

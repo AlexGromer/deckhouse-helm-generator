@@ -77,8 +77,7 @@ func prodProfile() map[string]interface{} {
 								"matchExpressions": []interface{}{
 									map[string]interface{}{
 										"key":      "app.kubernetes.io/name",
-										"operator": "In",
-										"values":   []interface{}{"{{ include \"chart.name\" . }}"},
+										"operator": "Exists",
 									},
 								},
 							},

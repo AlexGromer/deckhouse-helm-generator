@@ -135,7 +135,10 @@ func (g *LibraryGenerator) generateWrapperChart(group *ServiceGroup, libraryName
 	// Build flat values for this service.
 	sep := &SeparateGenerator{}
 	values := sep.buildFlatValues(group)
-	valuesYAML, _ := marshalFlatValues(chartName, values)
+	valuesYAML, err := marshalFlatValues(chartName, values)
+	if err != nil {
+		valuesYAML = fmt.Sprintf("# Default values for %s\n# Error marshalling values: %v\n", chartName, err)
+	}
 
 	return &types.GeneratedChart{
 		Name:       chartName,

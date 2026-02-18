@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -86,6 +87,7 @@ func newGenerateCmd() *cobra.Command {
 		includeREADME  bool
 		includeSchema  bool
 		verbose        bool
+		envValues      bool
 	)
 
 	cmd := &cobra.Command{
@@ -123,6 +125,7 @@ Examples:
 				includeREADME: includeREADME,
 				includeSchema: includeSchema,
 				verbose:       verbose,
+				envValues:     envValues,
 			})
 		},
 	}
@@ -132,7 +135,7 @@ Examples:
 	cmd.Flags().StringVar(&chartName, "chart-name", "", "Name of the chart (required)")
 	cmd.Flags().StringVar(&chartVersion, "chart-version", "0.1.0", "Chart version")
 	cmd.Flags().StringVar(&appVersion, "app-version", "1.0.0", "Application version")
-	cmd.Flags().StringVar(&mode, "mode", "universal", "Output mode: universal, separate, library")
+	cmd.Flags().StringVar(&mode, "mode", "universal", "Output mode: universal, separate, library, umbrella")
 	cmd.Flags().StringVarP(&source, "source", "s", "file", "Source type: file, cluster, gitops")
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
 	cmd.Flags().StringSliceVar(&namespaces, "namespaces", []string{}, "Filter by multiple namespaces")
@@ -146,6 +149,7 @@ Examples:
 	cmd.Flags().BoolVar(&includeREADME, "include-readme", true, "Generate README.md")
 	cmd.Flags().BoolVar(&includeSchema, "include-schema", false, "Generate values.schema.json")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	cmd.Flags().BoolVar(&envValues, "env-values", false, "Generate environment-specific values (dev/staging/prod)")
 
 	cmd.MarkFlagRequired("chart-name")
 
@@ -172,6 +176,7 @@ type generateOptions struct {
 	includeREADME bool
 	includeSchema bool
 	verbose       bool
+	envValues     bool
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -191,8 +196,10 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		outputMode = types.OutputModeSeparate
 	case "library":
 		outputMode = types.OutputModeLibrary
+	case "umbrella":
+		outputMode = types.OutputModeUmbrella
 	default:
-		return fmt.Errorf("invalid mode: %s (must be universal, separate, or library)", opts.mode)
+		return fmt.Errorf("invalid mode: %s (must be universal, separate, library, or umbrella)", opts.mode)
 	}
 
 	// Validate source
@@ -382,6 +389,7 @@ done:
 		IncludeREADME:       opts.includeREADME,
 		IncludeSchema:       opts.includeSchema,
 		ExternalFileManager: externalFileManager,
+		EnvValues:           opts.envValues,
 	}
 
 	charts, err := gen.Generate(ctx, graph, genOpts)
@@ -410,6 +418,26 @@ done:
 		if opts.verbose {
 			fmt.Printf("  Written chart: %s\n", chart.Name)
 			fmt.Printf("    Templates: %d\n", len(chart.Templates))
+		}
+	}
+
+	// Generate environment-specific values if requested
+	if opts.envValues {
+		if opts.verbose {
+			fmt.Printf("\n[5b/5] Generating environment-specific values...\n")
+		}
+		envFiles := generator.GenerateEnvValues(nil)
+		for _, chart := range charts {
+			chartDir := filepath.Join(opts.outputDir, chart.Name)
+			for filename, content := range envFiles {
+				envPath := filepath.Join(chartDir, filename)
+				if err := os.WriteFile(envPath, content, 0644); err != nil {
+					return fmt.Errorf("failed to write %s: %w", filename, err)
+				}
+				if opts.verbose {
+					fmt.Printf("  Written: %s/%s\n", chart.Name, filename)
+				}
+			}
 		}
 	}
 

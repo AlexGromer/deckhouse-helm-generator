@@ -102,11 +102,10 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 			if visited[key] {
 				continue
 			}
-			neighbors, ok := adj[key]
+			_, ok := adj[key]
 			if !ok {
 				continue
 			}
-			_ = neighbors
 
 			// BFS from this ungrouped resource.
 			component := make([]*types.ProcessedResource, 0)
