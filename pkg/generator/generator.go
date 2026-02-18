@@ -41,6 +41,10 @@ type Options struct {
 	// IncludeSchema generates values.schema.json.
 	IncludeSchema bool
 
+	// EnvValues enables generation of environment-specific values overrides
+	// (values-dev.yaml, values-staging.yaml, values-prod.yaml).
+	EnvValues bool
+
 	// ExternalFileManager manages external files for the chart.
 	ExternalFileManager *value.ExternalFileManager
 }
@@ -184,6 +188,8 @@ func (r *Registry) Get(mode types.OutputMode) (Generator, error) {
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	r.Register(NewUniversalGenerator())
-	// TODO: Add separate and library generators
+	r.Register(NewSeparateGenerator())
+	r.Register(NewLibraryGenerator())
+	r.Register(NewUmbrellaGenerator())
 	return r
 }

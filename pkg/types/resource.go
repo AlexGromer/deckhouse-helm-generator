@@ -102,6 +102,9 @@ const (
 
 	// OutputModeLibrary generates a library chart with thin wrappers.
 	OutputModeLibrary OutputMode = "library"
+
+	// OutputModeUmbrella generates a parent umbrella chart with subcharts in charts/.
+	OutputModeUmbrella OutputMode = "umbrella"
 )
 
 // GeneratedChart represents a generated Helm chart.

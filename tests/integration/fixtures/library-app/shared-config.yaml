@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shared-config
+  namespace: default
+  labels:
+    app.kubernetes.io/part-of: library-app
+data:
+  CLUSTER_NAME: production
+  REGION: ru-central1
+  LOG_FORMAT: json

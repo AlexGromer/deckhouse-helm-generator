@@ -1,7 +1,7 @@
 # Deckhouse Helm Generator (DHG)
 
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)
-![Coverage](https://img.shields.io/badge/coverage-89%25-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-71%25-yellow)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 
 CLI-инструмент для генерации Helm charts из Kubernetes/Deckhouse ресурсов с автоматическим обнаружением связей между ресурсами.
@@ -13,7 +13,8 @@ CLI-инструмент для генерации Helm charts из Kubernetes/D
 - 🎯 **Группировка ресурсов** в логические сервисы на основе labels и dependencies
 - 📝 **Генерация готовых Helm charts** с values.yaml, templates и _helpers.tpl
 - 🔧 **Поддержка Deckhouse CRDs** (IngressNginxController, ModuleConfig, DexAuthenticator)
-- 🎨 **Несколько режимов вывода**: Universal (один chart), Separate (chart на сервис), Library (библиотечный chart)
+- 🎨 **4 режима вывода**: Universal (один chart), Separate (chart на сервис), Library (DRY-шаблоны), Umbrella (родительский chart + subcharts)
+- 🌍 **Environment-specific values**: автогенерация `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml` с профилями для каждой среды
 
 ## Установка
 
@@ -45,14 +46,23 @@ sudo mv dhg-darwin-arm64 /usr/local/bin/dhg
 ### Генерация chart из YAML файлов
 
 ```bash
-# Простейший пример
+# Universal mode (по умолчанию) — один chart
 dhg generate -f ./manifests -o ./my-chart --chart-name myapp
+
+# Separate mode — отдельный chart на каждый сервис
+dhg generate -f ./manifests -o ./charts --chart-name myapp --mode separate
+
+# Library mode — DRY-шаблоны + wrapper charts
+dhg generate -f ./manifests -o ./charts --chart-name myapp --mode library
+
+# Umbrella mode — родительский chart + subcharts
+dhg generate -f ./manifests -o ./charts --chart-name myapp --mode umbrella
+
+# С environment-specific values (dev/staging/prod)
+dhg generate -f ./manifests -o ./my-chart --chart-name myapp --env-values
 
 # С verbose выводом
 dhg generate -f ./manifests -o ./my-chart --chart-name myapp --verbose
-
-# Рекурсивное сканирование директорий
-dhg generate -f ./k8s --recursive -o ./chart --chart-name web-app
 ```
 
 ### Генерация из live кластера
@@ -300,24 +310,42 @@ DHG автоматически обнаруживает следующие ти�
 
 ## Режимы вывода
 
+| Режим | Описание | Когда использовать |
+|-------|----------|-------------------|
+| `universal` | Один chart для всех сервисов | Монолитное приложение, простая структура |
+| `separate` | Отдельный chart на каждый сервис | Независимые деплои, разные версии |
+| `library` | Библиотечный chart + тонкие wrapper charts | DRY-шаблоны, максимальное переиспользование |
+| `umbrella` | Родительский chart + subcharts | Helmfile-style, условное включение сервисов |
+
 ### Universal (по умолчанию)
 
 Один chart, все сервисы в `values.yaml`:
 
+```bash
+dhg generate -f ./manifests -o ./my-chart --chart-name myapp
+# или явно:
+dhg generate -f ./manifests -o ./my-chart --chart-name myapp --mode universal
+```
+
 ```yaml
+# values.yaml
 services:
   frontend:
     enabled: true
-    deployment: {...}
-    service: {...}
+    replicaCount: 1
+    image: {repository: nginx, tag: latest}
   backend:
     enabled: true
-    deployment: {...}
+    replicaCount: 2
 ```
 
 ### Separate
 
 Отдельный chart для каждого сервиса:
+
+```bash
+dhg generate -f ./manifests -o ./charts --chart-name myapp --mode separate
+```
 
 ```
 charts/
@@ -333,7 +361,76 @@ charts/
 
 ### Library
 
-Библиотечный chart + тонкие обертки (в разработке).
+Библиотечный chart с именованными шаблонами + тонкие wrapper charts для каждого сервиса:
+
+```bash
+dhg generate -f ./manifests -o ./charts --chart-name myapp --mode library
+```
+
+```
+charts/
+├── myapp/               # library chart (type: library)
+│   ├── Chart.yaml
+│   └── templates/
+│       ├── _deployment.tpl
+│       ├── _service.tpl
+│       └── ...
+├── frontend/            # wrapper chart (вызывает library templates)
+│   ├── Chart.yaml       # зависимость на myapp library
+│   ├── values.yaml
+│   └── templates/
+└── backend/
+    ├── Chart.yaml
+    ├── values.yaml
+    └── templates/
+```
+
+### Umbrella
+
+Родительский chart + subcharts в `charts/` директории. Позволяет условно включать/выключать сервисы через `--set <name>.enabled=false`:
+
+```bash
+dhg generate -f ./manifests -o ./charts --chart-name myapp --mode umbrella
+```
+
+```
+charts/
+└── myapp/               # родительский umbrella chart
+    ├── Chart.yaml       # dependencies: [frontend, backend, database]
+    ├── values.yaml      # frontend.enabled: true, backend.enabled: true
+    └── charts/
+        ├── frontend/    # subchart
+        ├── backend/     # subchart
+        └── database/    # subchart
+```
+
+```bash
+# Деплой без database
+helm upgrade --install myapp ./charts/myapp --set database.enabled=false
+```
+
+## Environment-Specific Values
+
+Флаг `--env-values` генерирует три файла с override-значениями для разных сред:
+
+```bash
+dhg generate -f ./manifests -o ./my-chart --chart-name myapp --env-values
+```
+
+Создаёт:
+- `values-dev.yaml` — расслабленные настройки: `replicaCount: 1`, `logLevel: debug`, без PDB
+- `values-staging.yaml` — промежуточные: `replicaCount: 2`, `logLevel: info`, PDB с `minAvailable: 1`
+- `values-prod.yaml` — production-ready: `replicaCount: 3`, `logLevel: warn`, PDB `minAvailable: 2`, resource limits, anti-affinity
+
+```bash
+# Применить dev профиль
+helm upgrade --install myapp ./my-chart -f ./my-chart/values-dev.yaml
+
+# Применить prod профиль
+helm upgrade --install myapp ./my-chart -f ./my-chart/values-prod.yaml
+```
+
+Файлы содержат только **переопределения** (override-only) — не копию всех значений base chart.
 
 ## Опции CLI
 
@@ -346,7 +443,8 @@ Flags:
       --chart-name string       Chart name (required)
       --chart-version string    Chart version (default "0.1.0")
       --app-version string      App version (default "1.0.0")
-      --mode string             Output mode: universal|separate|library (default "universal")
+      --mode string             Output mode: universal|separate|library|umbrella (default "universal")
+      --env-values              Generate environment-specific value files (dev/staging/prod)
   -s, --source string           Source: file|cluster|gitops (default "file")
   -n, --namespace string        Filter by namespace
       --namespaces strings      Filter by multiple namespaces

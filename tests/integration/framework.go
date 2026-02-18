@@ -96,6 +96,10 @@ type PipelineOptions struct {
 
 	// Namespace is the default Kubernetes namespace for resources.
 	Namespace string
+
+	// Mode is the output mode (universal, separate, library, umbrella).
+	// Defaults to universal if empty.
+	Mode types.OutputMode
 }
 
 // ChartOutput holds the result of a full pipeline execution.
@@ -404,4 +408,150 @@ func CompareGeneratedChart(actual, expected *types.GeneratedChart) []string {
 	}
 
 	return diffs
+}
+
+// ExecutePipelineWithMode runs the full pipeline with a specific output mode.
+func ExecutePipelineWithMode(inputDir string, opts PipelineOptions) (*ChartOutput, error) {
+	ctx := context.Background()
+
+	// ── Stage 1: Extract ──
+	fileExtractor := extractor.NewFileExtractor()
+	extractOpts := extractor.Options{
+		Paths:     []string{inputDir},
+		Recursive: true,
+	}
+
+	resourceCh, errCh := fileExtractor.Extract(ctx, extractOpts)
+
+	var extractedResources []*types.ExtractedResource
+	var extractErrors []error
+
+	for {
+		select {
+		case res, ok := <-resourceCh:
+			if !ok {
+				resourceCh = nil
+			} else {
+				extractedResources = append(extractedResources, res)
+			}
+		case err, ok := <-errCh:
+			if !ok {
+				errCh = nil
+			} else {
+				extractErrors = append(extractErrors, err)
+			}
+		}
+		if resourceCh == nil && errCh == nil {
+			break
+		}
+	}
+
+	if len(extractErrors) > 0 {
+		msgs := make([]string, len(extractErrors))
+		for i, e := range extractErrors {
+			msgs[i] = e.Error()
+		}
+		return nil, fmt.Errorf("extraction errors: %s", strings.Join(msgs, "; "))
+	}
+
+	// ── Stage 2: Process ──
+	registry := processor.NewRegistry()
+	k8s.RegisterAll(registry)
+
+	chartName := opts.ChartName
+	if chartName == "" {
+		chartName = "chart"
+	}
+
+	mode := opts.Mode
+	if mode == "" {
+		mode = types.OutputModeUniversal
+	}
+
+	procCtx := processor.Context{
+		Ctx:        ctx,
+		ChartName:  chartName,
+		OutputMode: mode,
+	}
+
+	var processedResources []*types.ProcessedResource
+	for _, extracted := range extractedResources {
+		result, err := registry.Process(procCtx, extracted.Object)
+		if err != nil {
+			return nil, fmt.Errorf("processing resource %s: %w",
+				extracted.ResourceKey().String(), err)
+		}
+		if result == nil {
+			continue
+		}
+		processed := &types.ProcessedResource{
+			Original:        extracted,
+			ServiceName:     result.ServiceName,
+			TemplatePath:    result.TemplatePath,
+			TemplateContent: result.TemplateContent,
+			ValuesPath:      result.ValuesPath,
+			Values:          result.Values,
+			Dependencies:    result.Dependencies,
+		}
+		processedResources = append(processedResources, processed)
+	}
+
+	// ── Stage 3: Analyze ──
+	defaultAnalyzer := analyzer.NewDefaultAnalyzer()
+	detector.RegisterAll(defaultAnalyzer)
+
+	graph, err := defaultAnalyzer.Analyze(ctx, processedResources)
+	if err != nil {
+		return nil, fmt.Errorf("analyzing resources: %w", err)
+	}
+
+	// ── Stage 4: Generate ──
+	chartVersion := opts.ChartVersion
+	if chartVersion == "" {
+		chartVersion = "0.1.0"
+	}
+	appVersion := opts.AppVersion
+	if appVersion == "" {
+		appVersion = "latest"
+	}
+
+	outputDir, err := os.MkdirTemp("", "dhg-output-*")
+	if err != nil {
+		return nil, fmt.Errorf("creating output dir: %w", err)
+	}
+
+	genOpts := generator.Options{
+		OutputDir:    outputDir,
+		ChartName:    chartName,
+		ChartVersion: chartVersion,
+		AppVersion:   appVersion,
+		Mode:         mode,
+		Namespace:    opts.Namespace,
+	}
+
+	// Select generator based on mode.
+	genRegistry := generator.DefaultRegistry()
+	gen, err := genRegistry.Get(mode)
+	if err != nil {
+		return nil, fmt.Errorf("getting generator for mode %s: %w", mode, err)
+	}
+
+	charts, err := gen.Generate(ctx, graph, genOpts)
+	if err != nil {
+		return nil, fmt.Errorf("generating charts: %w", err)
+	}
+
+	// Write each chart to disk.
+	for _, chart := range charts {
+		if err := generator.WriteChart(chart, outputDir); err != nil {
+			return nil, fmt.Errorf("writing chart %s: %w", chart.Name, err)
+		}
+	}
+
+	return &ChartOutput{
+		Charts:    charts,
+		Graph:     graph,
+		Resources: processedResources,
+		OutputDir: outputDir,
+	}, nil
 }
