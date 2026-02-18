@@ -100,9 +100,9 @@ type Detector interface {
 
 ### CLI (`cmd/dhg/main.go`)
 
-- `--mode`: на `generate`. Значения: `universal`, `separate`, `library`. **Umbrella НЕ экспонирован** (bug/TODO).
+- `--mode`: на `generate`. Значения: `universal`, `separate`, `library`, `umbrella`. ✅ Исправлено в `0f20ef5`.
 - `--output-format`: на `analyze` (text/json/markdown). **НЕ на `generate`.**
-- `--env-values`: **НЕ экспонирован** в CLI (добавлено в Options, не в cobra flags).
+- `--env-values`: экспонирован в CLI, вызывает `GenerateEnvValues()` в pipeline. ✅ Исправлено в `0f20ef5`.
 
 ### Existing Processors (18 шт)
 
@@ -120,25 +120,67 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 
 ---
 
+## Release Criteria (FROZEN)
+
+> Top-level критерии. НЕ менять после согласования — итерировать реализацию.
+
+- [ ] Все 20 новых процессоров реализованы и зарегистрированы в `k8s.RegisterAll()`
+- [ ] Deckhouse Module Scaffold (`--deckhouse-module`) генерирует валидную структуру модуля
+- [ ] Deckhouse Pattern Detection автоматически распознаёт `deckhouse.io` ресурсы
+- [ ] Monitoring stack (ServiceMonitor, PodMonitor, PrometheusRule, GrafanaDashboard) полностью поддержан
+- [ ] Gateway API (HTTPRoute, Gateway) с cross-resource relationships
+- [ ] KEDA (ScaledObject, TriggerAuthentication) с scale-to-zero handling
+- [ ] cert-manager (Certificate, ClusterIssuer) с Ingress annotation detection
+- [ ] Argo Rollouts (canary + blueGreen strategies)
+- [ ] TopologySpread + ExternalDNS detection
+- [ ] Test coverage ≥80% для всех новых файлов
+- [ ] Все существующие тесты проходят (regression)
+- [ ] `go vet ./...` — 0 warnings
+- [ ] `gitleaks detect` — 0 secrets
+- [ ] Documentation: README, CHANGELOG, examples обновлены
+- [ ] Performance: <10s для 100 resources
+- [ ] `git tag v0.4.0`
+
+---
+
+## Scope
+
+**В scope v0.4.0:**
+- Deckhouse CRD processors (7 шт) + Module Scaffold + Pattern Detection
+- Monitoring stack processors (4 шт)
+- Modern K8s: Gateway API, KEDA, cert-manager, Argo Rollouts
+- Integration tests, documentation, release
+
+**Out of scope** (deferred):
+- Cluster extractor (live cluster → Helm chart)
+- GitOps extractor (Flux/ArgoCD → Helm chart)
+- Namespace management (cross-namespace relationships)
+- Security & Compliance checks (RBAC audit, NetworkPolicy validation)
+- Istio/Linkerd service mesh processors
+- Custom metrics autoscaling (beyond KEDA)
+- Helm chart linting as part of pipeline (external tool dependency)
+
+---
+
 ## Phase 0: CLI Fixes (Task 0.1)
 
 > Исправления обнаруженных расхождений перед новыми фичами.
 
 ---
 
-### Task 0.1: CLI Flag Cleanup — Expose `umbrella` + `--env-values`
+### Task 0.1: CLI Flag Cleanup — Expose `umbrella` + `--env-values` ✅ COMPLETED
 
 **Goal**: Все фичи v0.3.0 доступны из CLI без правки кода
 **Result**: `--mode umbrella` и `--env-values` работают из командной строки
 **Criteria** (FROZEN):
-- [ ] Все 7 подзадач выполнены
-- [ ] `dhg generate --mode umbrella` → работает (UmbrellaGenerator)
-- [ ] `dhg generate --env-values` → генерирует values-dev/staging/prod.yaml
-- [ ] `dhg generate --help` показывает: `--mode universal|separate|library|umbrella`
-- [ ] `dhg generate --help` показывает: `--env-values`
-- [ ] Integration test: `TestCLI_UmbrellaMode` → exit 0
-- [ ] Integration test: `TestCLI_EnvValues` → 3 файла сгенерированы
-- [ ] `go test ./...` pass
+- [x] Все 7 подзадач выполнены
+- [x] `dhg generate --mode umbrella` → работает (UmbrellaGenerator)
+- [x] `dhg generate --env-values` → генерирует values-dev/staging/prod.yaml
+- [x] `dhg generate --help` показывает: `--mode universal|separate|library|umbrella`
+- [x] `dhg generate --help` показывает: `--env-values`
+- [x] `go test ./...` pass
+
+**Completed**: commit `0f20ef5` — fix: resolve 11 audit issues (3 HIGH, 4 MEDIUM, 4 LOW)
 
 **Subtasks** (atomic):
 
@@ -250,6 +292,7 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 - **AI-assisted**: 0.40-0.50h
 
 **TDD Workflow**: [0: date] → [1-2: тесты] → [3: FAIL] → [4-6: реализация] → [7: PASS] → [8-9: coverage+регресс] → [date]
+**Lines estimate**: ~250 impl + ~400 tests
 
 ---
 
@@ -290,6 +333,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 **Time Estimate**:
 - **Solo**: 8-10h
 - **AI-assisted**: 0.40-0.50h
+
+**TDD Workflow**: [0: date] → [1-2: тесты] → [3: FAIL] → [4-6: реализация] → [7: PASS] → [8-9: coverage+регресс] → [date]
+**Lines estimate**: ~200 impl + ~350 tests
 
 ---
 
@@ -336,6 +382,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 **Time Estimate**:
 - **Solo**: 9-11h (3 процессора; sensitive field — новый паттерн)
 - **AI-assisted**: 0.45-0.55h
+
+**TDD Workflow**: [0: date] → [1-3: тесты] → [4: FAIL] → [5-8: реализация] → [9: PASS+coverage] → [10: регресс] → [date]
+**Lines estimate**: ~250 impl + ~350 tests
 
 ---
 
@@ -407,6 +456,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 - **Solo**: 14-18h (OpenAPI generation — новый паттерн, helm_lib integration — нужен research)
 - **AI-assisted**: 0.70-0.90h
 
+**TDD Workflow**: [0: date] → [1-2: тесты] → [3: FAIL] → [4-7: реализация] → [8: PASS] → [9-10: coverage+lint] → [11: регресс] → [date]
+**Lines estimate**: ~350 impl + ~300 tests
+
 ---
 
 ### Task 1.5: Deckhouse Pattern Detection
@@ -449,6 +501,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 **Time Estimate**:
 - **Solo**: 5-7h (паттерн аналогичен существующим детекторам)
 - **AI-assisted**: 0.25-0.35h
+
+**TDD Workflow**: [0: date] → [1: тесты] → [2: FAIL] → [3-4: реализация] → [5: PASS] → [6-7: coverage+регресс] → [date]
+**Lines estimate**: ~120 impl + ~250 tests
 
 ---
 
@@ -506,6 +561,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 - **Solo**: 14-16h (4 процессора; PrometheusRule expr шаблонизация — сложная; GrafanaDashboard — ExternalFiles паттерн)
 - **AI-assisted**: 0.70-0.80h
 
+**TDD Workflow**: [0: date] → [1-4: тесты] → [5: FAIL] → [6-10: реализация] → [11: регресс] → [date]
+**Lines estimate**: ~400 impl + ~500 tests
+
 ---
 
 ### Task 2.2: Gateway API Processors (HTTPRoute + Gateway)
@@ -544,6 +602,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 **Time Estimate**:
 - **Solo**: 10-12h
 - **AI-assisted**: 0.50-0.60h
+
+**TDD Workflow**: [0: date] → [1-2: тесты] → [3: FAIL] → [4-7: реализация] → [8: регресс] → [date]
+**Lines estimate**: ~250 impl + ~350 tests
 
 ---
 
@@ -584,6 +645,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 **Time Estimate**:
 - **Solo**: 9-11h
 - **AI-assisted**: 0.45-0.55h
+
+**TDD Workflow**: [0: date] → [1-2: тесты] → [3: FAIL] → [4-7: реализация] → [8: регресс] → [date]
+**Lines estimate**: ~200 impl + ~300 tests
 
 ---
 
@@ -629,6 +693,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 - **Solo**: 9-11h
 - **AI-assisted**: 0.45-0.55h
 
+**TDD Workflow**: [0: date] → [1-3: тесты] → [4: FAIL] → [5-8: реализация] → [9: регресс] → [date]
+**Lines estimate**: ~200 impl + ~300 tests
+
 ---
 
 ### Task 2.5: TopologySpread + ExternalDNS + Argo Rollouts
@@ -670,6 +737,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 **Time Estimate**:
 - **Solo**: 10-12h (3 разных паттерна; Rollout — argo CRD)
 - **AI-assisted**: 0.50-0.60h
+
+**TDD Workflow**: [0: date] → [1-3: тесты] → [4: FAIL] → [5-8: реализация] → [9: регресс] → [date]
+**Lines estimate**: ~300 impl + ~350 tests
 
 ---
 
@@ -716,6 +786,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 - **Solo**: 8-10h
 - **AI-assisted**: 0.40-0.50h
 
+**TDD Workflow**: [0: date] → [1-4: fixtures+тесты] → [5: FAIL] → [6-7: fixes] → [8-9: PASS+регресс] → [date]
+**Lines estimate**: ~500 tests + ~200 fixtures
+
 ---
 
 ### Task 3.2: Documentation & Release Prep
@@ -756,6 +829,9 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 - **Solo**: 5-7h
 - **AI-assisted**: 0.25-0.35h
 
+**TDD Workflow**: Non-TDD (documentation): [0: date] → [1-10: docs] → [date]
+**Lines estimate**: ~300 docs
+
 ---
 
 ### Task 3.3: Release v0.4.0
@@ -794,29 +870,32 @@ Deployment, StatefulSet, DaemonSet, Service, Ingress, NetworkPolicy, ConfigMap, 
 - **Solo**: 4-5h
 - **AI-assisted**: 0.20-0.25h
 
+**TDD Workflow**: Non-TDD (release): [0: date] → [1-9: checks+tag] → [date]
+**Lines estimate**: ~100 release notes
+
 ---
 
 ## v0.4.0 Summary
 
-### Total Tasks: 14 (включая 0.1)
+### Total Tasks: 14 (включая 0.1 ✅)
 
-| Phase | Tasks | Theme | Solo Est (mid) | AI Est (mid) |
-|-------|-------|-------|---------------|--------------|
-| CLI Fixes | 0.1 | umbrella + env-values exposure | 3.5h | 0.18h |
-| Deckhouse Core | 1.1-1.5 | 7 CRD + Module Scaffold + Detection | 49.0h | 2.45h |
-| Monitoring + Modern K8s | 2.1-2.5 | 12 processors (Prom/Gateway/KEDA/cert/Argo) | 55.0h | 2.75h |
-| Integration + Release | 3.1-3.3 | E2E tests + Docs + Release | 19.5h | 0.98h |
-| **Total** | **14** | **20 new processors + scaffold + detection** | **127.0h** | **6.35h** |
+| Phase | Tasks | Theme | Solo Est (mid) | AI Est (mid) | Status |
+|-------|-------|-------|---------------|--------------|--------|
+| CLI Fixes | 0.1 | umbrella + env-values exposure | 3.5h | 0.18h | ✅ DONE |
+| Deckhouse Core | 1.1-1.5 | 7 CRD + Module Scaffold + Detection | 49.0h | 2.45h | Pending |
+| Monitoring + Modern K8s | 2.1-2.5 | 12 processors (Prom/Gateway/KEDA/cert/Argo) | 55.0h | 2.75h | Pending |
+| Integration + Release | 3.1-3.3 | E2E tests + Docs + Release | 19.5h | 0.98h | Pending |
+| **Total** | **14** | **20 new processors + scaffold + detection** | **127.0h** | **6.35h** | |
 
-### Total Subtasks: 135
+### Total Subtasks: 154
 
-| Phase | Tasks | Subtasks |
-|-------|-------|----------|
-| 0.x | 1 | 8 (вкл. date) |
-| 1.x | 5 | 52 |
-| 2.x | 5 | 51 |
-| 3.x | 3 | 31 |
-| **Total** | **14** | **142** (вкл. date subtasks) |
+| Phase | Tasks | Numbered | + END markers | Total |
+|-------|-------|----------|---------------|-------|
+| 0.x | 1 | 8 | 1 | 9 |
+| 1.x | 5 | 51 | 5 | 56 |
+| 2.x | 5 | 50 | 5 | 55 |
+| 3.x | 3 | 31 | 3 | 34 |
+| **Total** | **14** | **140** | **14** | **154** |
 
 ### Dependency Graph
 
@@ -851,6 +930,15 @@ Task 2.5 (Modern Patterns)──┘         ↓                                 
 | Argo CD | 1 | Rollout |
 | Detectors | 2 | TopologySpread, ExternalDNS (extensions) |
 | **Total** | **20** | |
+
+### Lines Estimate Summary
+
+| Phase | Implementation | Tests | Fixtures/Docs | Total |
+|-------|---------------|-------|---------------|-------|
+| 1.x (Deckhouse Core) | ~1,170 | ~1,550 | — | ~2,720 |
+| 2.x (Monitoring+Modern) | ~1,050 | ~1,800 | — | ~2,850 |
+| 3.x (Integration+Release) | — | ~500 | ~600 | ~1,100 |
+| **Total** | **~2,220** | **~3,850** | **~600** | **~6,670** |
 
 ---
 
