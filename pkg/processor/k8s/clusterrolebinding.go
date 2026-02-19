@@ -33,7 +33,7 @@ func (p *ClusterRoleBindingProcessor) Process(ctx processor.Context, obj *unstru
 		return nil, errors.New("ClusterRoleBinding object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

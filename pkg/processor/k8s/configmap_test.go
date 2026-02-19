@@ -465,7 +465,7 @@ func TestProcessConfigMap_ResultMetadata(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	testutil.AssertEqual(t, true, result.Processed, "should be processed")
-	testutil.AssertEqual(t, "my-app", result.ServiceName, "service name from labels")
+	testutil.AssertEqual(t, "myApp", result.ServiceName, "service name from labels")
 	testutil.AssertContains(t, result.TemplatePath, "configmap", "template path should contain configmap")
 	testutil.AssertContains(t, result.ValuesPath, "configMaps", "values path should contain configMaps")
 	testutil.AssertEqual(t, "my-app-config", result.Metadata["name"], "metadata name")

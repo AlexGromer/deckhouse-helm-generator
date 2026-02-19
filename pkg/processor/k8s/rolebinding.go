@@ -33,7 +33,7 @@ func (p *RoleBindingProcessor) Process(ctx processor.Context, obj *unstructured.
 		return nil, errors.New("RoleBinding object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

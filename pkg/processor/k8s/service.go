@@ -32,7 +32,7 @@ func (p *ServiceProcessor) Process(ctx processor.Context, obj *unstructured.Unst
 		return nil, fmt.Errorf("cannot process nil Service")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

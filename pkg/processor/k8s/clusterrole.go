@@ -32,7 +32,7 @@ func (p *ClusterRoleProcessor) Process(ctx processor.Context, obj *unstructured.
 		return nil, errors.New("ClusterRole object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

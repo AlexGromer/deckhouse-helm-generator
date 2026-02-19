@@ -33,7 +33,7 @@ func (p *HPAProcessor) Process(ctx processor.Context, obj *unstructured.Unstruct
 		return nil, errors.New("HPA object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

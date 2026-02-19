@@ -482,7 +482,7 @@ func TestProcessSecret_ResultMetadata(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	testutil.AssertEqual(t, true, result.Processed, "should be processed")
-	testutil.AssertEqual(t, "my-app", result.ServiceName, "service name from labels")
+	testutil.AssertEqual(t, "myApp", result.ServiceName, "service name from labels")
 	testutil.AssertContains(t, result.TemplatePath, "secret", "template path should contain secret")
 	testutil.AssertContains(t, result.ValuesPath, "secrets", "values path should contain secrets")
 	testutil.AssertEqual(t, "my-app-secret", result.Metadata["name"], "metadata name")

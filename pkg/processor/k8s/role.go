@@ -32,7 +32,7 @@ func (p *RoleProcessor) Process(ctx processor.Context, obj *unstructured.Unstruc
 		return nil, errors.New("Role object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

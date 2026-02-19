@@ -32,7 +32,7 @@ func (p *PDBProcessor) Process(ctx processor.Context, obj *unstructured.Unstruct
 		return nil, errors.New("PDB object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

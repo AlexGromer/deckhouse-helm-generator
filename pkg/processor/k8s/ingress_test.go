@@ -653,9 +653,9 @@ func TestProcessIngress_ResultMetadata(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	testutil.AssertEqual(t, true, result.Processed, "should be processed")
-	testutil.AssertEqual(t, "my-app", result.ServiceName, "service name from labels")
-	testutil.AssertEqual(t, "templates/my-app-ingress.yaml", result.TemplatePath, "template path")
-	testutil.AssertEqual(t, "services.my-app.ingress", result.ValuesPath, "values path")
+	testutil.AssertEqual(t, "myApp", result.ServiceName, "service name from labels")
+	testutil.AssertEqual(t, "templates/myApp-ingress.yaml", result.TemplatePath, "template path")
+	testutil.AssertEqual(t, "services.myApp.ingress", result.ValuesPath, "values path")
 	testutil.AssertEqual(t, "my-app-ingress", result.Metadata["name"], "metadata name")
 	testutil.AssertEqual(t, "production", result.Metadata["namespace"], "metadata namespace")
 }

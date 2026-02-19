@@ -33,7 +33,7 @@ func (p *ConfigMapProcessor) Process(ctx processor.Context, obj *unstructured.Un
 		return nil, fmt.Errorf("cannot process nil ConfigMap")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

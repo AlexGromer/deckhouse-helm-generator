@@ -34,7 +34,7 @@ func (p *SecretProcessor) Process(ctx processor.Context, obj *unstructured.Unstr
 		return nil, fmt.Errorf("cannot process nil Secret")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

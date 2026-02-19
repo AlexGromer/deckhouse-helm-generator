@@ -34,7 +34,7 @@ func (p *CronJobProcessor) Process(ctx processor.Context, obj *unstructured.Unst
 		return nil, errors.New("CronJob object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

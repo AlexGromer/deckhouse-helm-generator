@@ -34,7 +34,7 @@ func (p *DeploymentProcessor) Process(ctx processor.Context, obj *unstructured.U
 		return nil, errors.New("deployment object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

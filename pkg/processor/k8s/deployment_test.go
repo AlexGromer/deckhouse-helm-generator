@@ -1295,9 +1295,9 @@ func TestProcessDeployment_ResultMetadata(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	testutil.AssertEqual(t, true, result.Processed, "should be processed")
-	testutil.AssertEqual(t, "my-app", result.ServiceName, "service name from labels")
-	testutil.AssertEqual(t, "templates/my-app-deployment.yaml", result.TemplatePath, "template path")
-	testutil.AssertEqual(t, "services.my-app.deployment", result.ValuesPath, "values path")
+	testutil.AssertEqual(t, "myApp", result.ServiceName, "service name from labels")
+	testutil.AssertEqual(t, "templates/myApp-deployment.yaml", result.TemplatePath, "template path")
+	testutil.AssertEqual(t, "services.myApp.deployment", result.ValuesPath, "values path")
 	testutil.AssertEqual(t, "my-app-deployment", result.Metadata["name"], "metadata name")
 	testutil.AssertEqual(t, "production", result.Metadata["namespace"], "metadata namespace")
 }

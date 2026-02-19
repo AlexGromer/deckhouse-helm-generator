@@ -32,7 +32,7 @@ func (p *NetworkPolicyProcessor) Process(ctx processor.Context, obj *unstructure
 		return nil, errors.New("NetworkPolicy object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
 		serviceName = obj.GetName()
 	}

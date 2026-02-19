@@ -840,9 +840,9 @@ func TestProcessService_ResultMetadata(t *testing.T) {
 	testutil.AssertNoError(t, err)
 
 	testutil.AssertEqual(t, true, result.Processed, "should be processed")
-	testutil.AssertEqual(t, "my-app", result.ServiceName, "service name from labels")
-	testutil.AssertEqual(t, "templates/my-app-service.yaml", result.TemplatePath, "template path")
-	testutil.AssertEqual(t, "services.my-app.service", result.ValuesPath, "values path")
+	testutil.AssertEqual(t, "myApp", result.ServiceName, "service name from labels")
+	testutil.AssertEqual(t, "templates/myApp-service.yaml", result.TemplatePath, "template path")
+	testutil.AssertEqual(t, "services.myApp.service", result.ValuesPath, "values path")
 	testutil.AssertEqual(t, "my-app-service", result.Metadata["name"], "metadata name")
 	testutil.AssertEqual(t, "production", result.Metadata["namespace"], "metadata namespace")
 }
