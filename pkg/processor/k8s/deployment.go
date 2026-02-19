@@ -216,6 +216,11 @@ func (p *DeploymentProcessor) extractValues(obj *unstructured.Unstructured) (map
 		values["affinity"] = affinity
 	}
 
+	// TopologySpreadConstraints
+	if tsc, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "topologySpreadConstraints"); len(tsc) > 0 {
+		values["topologySpreadConstraints"] = tsc
+	}
+
 	// Strategy
 	if strategy, found, _ := unstructured.NestedMap(obj.Object, "spec", "strategy"); found {
 		values["strategy"] = strategy

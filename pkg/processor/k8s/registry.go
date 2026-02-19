@@ -39,4 +39,34 @@ func RegisterAll(r *processor.Registry) {
 	r.Register(NewClusterRoleProcessor())
 	r.Register(NewRoleBindingProcessor())
 	r.Register(NewClusterRoleBindingProcessor())
+
+	// Argo Rollouts
+	r.Register(NewRolloutProcessor())
+
+	// cert-manager
+	r.Register(NewCertificateProcessor())
+	r.Register(NewClusterIssuerProcessor())
+
+	// KEDA
+	r.Register(NewScaledObjectProcessor())
+	r.Register(NewTriggerAuthenticationProcessor())
+
+	// Gateway API
+	r.Register(NewHTTPRouteProcessor())
+	r.Register(NewGatewayProcessor())
+
+	// Monitoring (Prometheus Operator + Grafana)
+	r.Register(NewServiceMonitorProcessor())
+	r.Register(NewPodMonitorProcessor())
+	r.Register(NewPrometheusRuleProcessor())
+	r.Register(NewGrafanaDashboardProcessor())
+
+	// Deckhouse CRDs
+	r.Register(NewModuleConfigProcessor())
+	r.Register(NewIngressNginxControllerProcessor())
+	r.Register(NewClusterAuthorizationRuleProcessor())
+	r.Register(NewNodeGroupProcessor())
+	r.Register(NewDexAuthenticatorProcessor())
+	r.Register(NewUserProcessor())
+	r.Register(NewGroupProcessor())
 }

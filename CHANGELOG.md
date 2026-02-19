@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-19
+
+> Released: Deckhouse CRDs + Monitoring Stack + Modern K8s Patterns (18 new processors, 36 total)
+
+### Added
+
+#### Deckhouse CRD Processors (Phase 1)
+- **ModuleConfig** processor (`deckhouse.io/v1alpha1`): extracts module settings with version tracking
+- **IngressNginxController** processor (`deckhouse.io/v1`): extracts inlet, hostPort/hostWithFailover config, resource requirements
+- **ClusterAuthorizationRule** processor (`deckhouse.io/v1`): extracts subjects, accessLevel, namespace restrictions
+- **NodeGroup** processor (`deckhouse.io/v1`): extracts nodeType, disruption settings, kubelet configuration, cloudInstances
+- **DexAuthenticator** processor (`deckhouse.io/v1`): extracts applicationDomain, sendAuthorizationHeader, allowed groups
+- **User** processor (`deckhouse.io/v1`): extracts email, groups, ttl
+- **Group** processor (`deckhouse.io/v1`): extracts members list
+- **Deckhouse Module Scaffold** (`--deckhouse-module`): generates helm_lib dependency, OpenAPI schemas, `images/` and `hooks/` directories
+- **Deckhouse Pattern Detection**: auto-detects `global.enabledModules`, registry configuration, `global.modules.https`
+
+#### Monitoring Stack (Prometheus Operator + Grafana) (Phase 2.1)
+- **ServiceMonitor** processor (`monitoring.coreos.com/v1`): extracts endpoints, namespaceSelector, selector with Service dependency
+- **PodMonitor** processor (`monitoring.coreos.com/v1`): extracts podMetricsEndpoints, jobLabel, selector
+- **PrometheusRule** processor (`monitoring.coreos.com/v1`): extracts alert/record rule groups with expressions
+- **GrafanaDashboard** processor: detects ConfigMaps with `grafana_dashboard: "1"` label (priority 110, overrides ConfigMapProcessor)
+
+#### Gateway API (Phase 2.2)
+- **HTTPRoute** processor (`gateway.networking.k8s.io/v1`): extracts parentRefs, hostnames, rules with Gateway dependency tracking
+- **Gateway** processor (`gateway.networking.k8s.io/v1`): extracts gatewayClassName, listeners with TLS support
+
+#### KEDA Autoscaling (Phase 2.3)
+- **ScaledObject** processor (`keda.sh/v1alpha1`): extracts scaleTargetRef, triggers, min/maxReplicaCount with scale-to-zero detection
+- **TriggerAuthentication** processor (`keda.sh/v1alpha1`): extracts secretTargetRef, env, podIdentity
+
+#### cert-manager (Phase 2.4)
+- **Certificate** processor (`cert-manager.io/v1`): extracts dnsNames, issuerRef, secretName, duration, renewBefore
+- **ClusterIssuer** processor (`cert-manager.io/v1`): extracts ACME config, selfSigned, CA settings
+
+#### Modern Patterns (Phase 2.5)
+- **Argo Rollouts** processor (`argoproj.io/v1alpha1 Rollout`): extracts canary/blueGreen strategy, pod template
+- **ExternalDNS detection**: auto-detects `external-dns.alpha.kubernetes.io/hostname` annotation on Services and Ingresses
+- **TopologySpreadConstraints**: extraction from Deployment pod specs
+
+#### Relationship Types
+- `gateway_route`: HTTPRoute → Gateway parent reference
+- `scale_target`: ScaledObject → Deployment/StatefulSet target
+
+#### Testing
+- 97 new unit tests across all processors (TDD: tests first → implement)
+- 4 new integration tests: MonitoringStack, GatewayAPI, KEDA, Regression
+- Test coverage: processor/k8s 89.2%, detector 92.5%
+
+### Changed
+- `processor.Registry`: now registers 32 processors (up from 18 in v0.3.0)
+- README.md: updated coverage badge to 89%, expanded capabilities section
+
+---
+
 ## [0.3.0] - 2026-02-18
 
 > Released: 4 new output modes (Separate, Library, Umbrella) + Environment-Specific Values

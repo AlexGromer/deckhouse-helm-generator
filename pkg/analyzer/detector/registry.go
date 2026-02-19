@@ -10,4 +10,5 @@ func RegisterAll(a *analyzer.DefaultAnalyzer) {
 	a.AddDetector(NewNameReferenceDetector())
 	a.AddDetector(NewVolumeMountDetector())
 	a.AddDetector(NewAnnotationDetector())
+	a.AddDetector(NewDeckhouseDetector())
 }

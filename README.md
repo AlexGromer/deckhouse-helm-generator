@@ -1,7 +1,7 @@
 # Deckhouse Helm Generator (DHG)
 
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)
-![Coverage](https://img.shields.io/badge/coverage-71%25-yellow)
+![Coverage](https://img.shields.io/badge/coverage-89%25-brightgreen)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 
 CLI-инструмент для генерации Helm charts из Kubernetes/Deckhouse ресурсов с автоматическим обнаружением связей между ресурсами.
@@ -12,7 +12,10 @@ CLI-инструмент для генерации Helm charts из Kubernetes/D
 - 🔍 **Интеллектуальное обнаружение связей** между ресурсами (Service → Deployment, Ingress → Service, Volume mounts и т.д.)
 - 🎯 **Группировка ресурсов** в логические сервисы на основе labels и dependencies
 - 📝 **Генерация готовых Helm charts** с values.yaml, templates и _helpers.tpl
-- 🔧 **Поддержка Deckhouse CRDs** (IngressNginxController, ModuleConfig, DexAuthenticator)
+- 🔧 **Поддержка Deckhouse CRDs** (ModuleConfig, IngressNginxController, NodeGroup, DexAuthenticator, User, Group, ClusterAuthorizationRule)
+- 🏗️ **Deckhouse Module Scaffold** (`--deckhouse-module`): helm_lib dependency, OpenAPI schemas, images/ и hooks/ directories
+- 📊 **Monitoring Stack**: ServiceMonitor, PodMonitor, PrometheusRule, GrafanaDashboard (Prometheus Operator)
+- 🌐 **Modern K8s**: Gateway API (HTTPRoute, Gateway), KEDA (ScaledObject, TriggerAuthentication), cert-manager (Certificate, ClusterIssuer), Argo Rollouts
 - 🎨 **4 режима вывода**: Universal (один chart), Separate (chart на сервис), Library (DRY-шаблоны), Umbrella (родительский chart + subcharts)
 - 🌍 **Environment-specific values**: автогенерация `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml` с профилями для каждой среды
 
@@ -261,7 +264,7 @@ dhg generate -f ./full-stack --chart-name webapp \
               └───────────────────────┘
 ```
 
-## Поддерживаемые ресурсы
+## Поддерживаемые ресурсы (36 процессоров)
 
 ### Standard Kubernetes (18 processors)
 
@@ -274,24 +277,111 @@ dhg generate -f ./full-stack --chart-name webapp \
 - ✅ **Batch Workloads**: CronJob, Job
 - ✅ **RBAC & Identity**: ServiceAccount, Role, ClusterRole, RoleBinding, ClusterRoleBinding
 
-### Deckhouse CRDs
+### Deckhouse CRDs (7 processors)
 
-- 🚧 IngressNginxController (deckhouse.io/v1)
-- 🚧 ModuleConfig (deckhouse.io/v1alpha1)
-- 🚧 DexAuthenticator, DexProvider, DexClient
-- 🚧 NodeGroup
+- ✅ **ModuleConfig** (`deckhouse.io/v1alpha1`): настройки модулей с version tracking
+- ✅ **IngressNginxController** (`deckhouse.io/v1`): inlet, hostPort/hostWithFailover
+- ✅ **ClusterAuthorizationRule** (`deckhouse.io/v1`): subjects, accessLevel
+- ✅ **NodeGroup** (`deckhouse.io/v1`): nodeType, disruptions, cloudInstances
+- ✅ **DexAuthenticator** (`deckhouse.io/v1`): applicationDomain, allowed groups
+- ✅ **User** (`deckhouse.io/v1`): email, groups, ttl
+- ✅ **Group** (`deckhouse.io/v1`): members list
 
-### Monitoring (Prometheus Operator)
+### Monitoring (4 processors)
 
-- 🚧 PrometheusRule
-- 🚧 ServiceMonitor
+- ✅ **ServiceMonitor** (`monitoring.coreos.com/v1`): endpoints, namespaceSelector, Service dependency
+- ✅ **PodMonitor** (`monitoring.coreos.com/v1`): podMetricsEndpoints, jobLabel
+- ✅ **PrometheusRule** (`monitoring.coreos.com/v1`): alert/record rule groups
+- ✅ **GrafanaDashboard**: ConfigMap с label `grafana_dashboard: "1"`
+
+### Gateway API (2 processors)
+
+- ✅ **HTTPRoute** (`gateway.networking.k8s.io/v1`): parentRefs, hostnames, rules
+- ✅ **Gateway** (`gateway.networking.k8s.io/v1`): gatewayClassName, listeners, TLS
+
+### KEDA (2 processors)
+
+- ✅ **ScaledObject** (`keda.sh/v1alpha1`): scaleTargetRef, triggers, scale-to-zero detection
+- ✅ **TriggerAuthentication** (`keda.sh/v1alpha1`): secretTargetRef, env, podIdentity
+
+### cert-manager (2 processors)
+
+- ✅ **Certificate** (`cert-manager.io/v1`): dnsNames, issuerRef, secretName
+- ✅ **ClusterIssuer** (`cert-manager.io/v1`): ACME, selfSigned, CA
+
+### Argo Rollouts (1 processor)
+
+- ✅ **Rollout** (`argoproj.io/v1alpha1`): canary/blueGreen strategy
+
+## Deckhouse Integration
+
+DHG нативно поддерживает Deckhouse CRDs и может генерировать полноценную структуру модуля Deckhouse:
+
+```bash
+# Генерация Deckhouse модуля из существующих ресурсов
+dhg generate -f ./manifests -o ./my-module --chart-name ingress-nginx --deckhouse-module
+```
+
+Флаг `--deckhouse-module` добавляет:
+- **`Chart.yaml`**: dependency на `helm_lib` (`version: "*"`)
+- **`openapi/config-values.yaml`**: OpenAPI schema для публичных настроек
+- **`openapi/values.yaml`**: internal values schema
+- **`images/`**: директория для Dockerfile
+- **`hooks/`**: директория для Go/Shell hooks
+- **Templates**: автоматическая инъекция `helm_lib_module_labels`, `helm_lib_module_image`
+
+Автодетекция: если во входных ресурсах есть CRDs с group `deckhouse.io`, DHG автоматически распознаёт Deckhouse-контекст.
+
+## Monitoring Stack
+
+Полная поддержка Prometheus Operator + Grafana dashboards:
+
+```bash
+dhg generate -f ./manifests --include-kinds Deployment,Service,ServiceMonitor,PrometheusRule \
+  --chart-name myapp -o ./myapp-chart
+```
+
+- **ServiceMonitor** → автоматическая dependency на Service (через selector)
+- **PrometheusRule** → alert/record rules с шаблонизацией threshold-ов
+- **GrafanaDashboard** → ConfigMap с label `grafana_dashboard: "1"` автоматически детектируется (priority 110)
+- **PodMonitor** → для Pod-level метрик без Service
+
+## Modern K8s Patterns
+
+### Gateway API
+
+Замена Ingress для advanced routing:
+
+```bash
+dhg generate -f ./gateway-manifests --chart-name webapp -o ./webapp-chart
+```
+
+- **Gateway** → `gatewayClassName`, listeners (HTTP/HTTPS/TLS)
+- **HTTPRoute** → parentRefs, hostnames, path-based routing с dependency на Gateway
+
+### KEDA
+
+Event-driven autoscaling:
+
+- **ScaledObject** → `scaleTargetRef` → автоматическая dependency на Deployment/StatefulSet
+- Scale-to-zero: `minReplicaCount: 0` → флаг в metadata
+- **TriggerAuthentication** → секретные ключи для trigger-ов
 
 ### cert-manager
 
-- 🚧 Certificate
-- 🚧 ClusterIssuer
+- **Certificate** → dnsNames, issuerRef, secretName
+- **ClusterIssuer** → ACME (Let's Encrypt), selfSigned, CA
+- Ingress с аннотацией `cert-manager.io/cluster-issuer` → dependency на ClusterIssuer
 
-_Примечание: ✅ = реализовано, 🚧 = в разработке_
+### Argo Rollouts
+
+- **Rollout** → canary/blueGreen strategies
+- Pod template preservation для progressive delivery
+
+### ExternalDNS & TopologySpread
+
+- **ExternalDNS**: аннотация `external-dns.alpha.kubernetes.io/hostname` на Service/Ingress → metadata
+- **TopologySpreadConstraints**: автоизвлечение из pod spec Deployment
 
 ## Обнаружение связей
 
@@ -445,6 +535,7 @@ Flags:
       --app-version string      App version (default "1.0.0")
       --mode string             Output mode: universal|separate|library|umbrella (default "universal")
       --env-values              Generate environment-specific value files (dev/staging/prod)
+      --deckhouse-module        Generate Deckhouse module scaffold (helm_lib, openapi/, images/, hooks/)
   -s, --source string           Source: file|cluster|gitops (default "file")
   -n, --namespace string        Filter by namespace
       --namespaces strings      Filter by multiple namespaces
@@ -492,10 +583,8 @@ make build-all
 ├── pkg/
 │   ├── extractor/        # Извлечение ресурсов
 │   ├── analyzer/         # Анализ связей
-│   ├── processor/        # Обработка ресурсов
-│   │   ├── k8s/          # Стандартные K8s процессоры
-│   │   ├── deckhouse/    # Deckhouse CRD процессоры
-│   │   └── monitoring/   # Prometheus Operator процессоры
+│   ├── processor/        # Обработка ресурсов (32 процессора)
+│   │   └── k8s/          # K8s + Deckhouse + Monitoring + Gateway + KEDA + cert-manager + Argo
 │   ├── generator/        # Генерация charts
 │   ├── helm/             # Helm утилиты
 │   └── types/            # Общие типы
@@ -553,8 +642,6 @@ func RegisterAll(r *processor.Registry) {
 
 - Cluster extractor (извлечение из live кластера) еще не реализован
 - GitOps extractor еще не реализован
-- Deckhouse CRD процессоры в разработке
-- Separate и Library режимы в разработке
 
 ## Contributing
 

@@ -88,6 +88,7 @@ func newGenerateCmd() *cobra.Command {
 		includeSchema  bool
 		verbose        bool
 		envValues      bool
+		deckhouseModule bool
 	)
 
 	cmd := &cobra.Command{
@@ -125,7 +126,8 @@ Examples:
 				includeREADME: includeREADME,
 				includeSchema: includeSchema,
 				verbose:       verbose,
-				envValues:     envValues,
+				envValues:       envValues,
+				deckhouseModule: deckhouseModule,
 			})
 		},
 	}
@@ -150,6 +152,7 @@ Examples:
 	cmd.Flags().BoolVar(&includeSchema, "include-schema", false, "Generate values.schema.json")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 	cmd.Flags().BoolVar(&envValues, "env-values", false, "Generate environment-specific values (dev/staging/prod)")
+	cmd.Flags().BoolVar(&deckhouseModule, "deckhouse-module", false, "Generate Deckhouse module scaffold (helm_lib, openapi/, images/, hooks/)")
 
 	cmd.MarkFlagRequired("chart-name")
 
@@ -175,8 +178,9 @@ type generateOptions struct {
 	includeTests  bool
 	includeREADME bool
 	includeSchema bool
-	verbose       bool
-	envValues     bool
+	verbose         bool
+	envValues       bool
+	deckhouseModule bool
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -390,6 +394,7 @@ done:
 		IncludeSchema:       opts.includeSchema,
 		ExternalFileManager: externalFileManager,
 		EnvValues:           opts.envValues,
+		DeckhouseModule:     opts.deckhouseModule,
 	}
 
 	charts, err := gen.Generate(ctx, graph, genOpts)
@@ -399,6 +404,16 @@ done:
 
 	if len(charts) == 0 {
 		return fmt.Errorf("no charts generated")
+	}
+
+	// Apply Deckhouse module scaffold if requested
+	if opts.deckhouseModule {
+		if opts.verbose {
+			fmt.Printf("\n[4b/5] Applying Deckhouse module scaffold...\n")
+		}
+		for i, chart := range charts {
+			charts[i] = generator.GenerateDeckhouseModule(chart, nil)
+		}
 	}
 
 	// Step 5: Write charts to disk

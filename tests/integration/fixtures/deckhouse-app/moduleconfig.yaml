@@ -1,0 +1,15 @@
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: mymodule
+  namespace: d8-system
+spec:
+  enabled: true
+  settings:
+    replicaCount: 2
+    logLevel: info
+    resources:
+      limits:
+        memory: 512Mi
+      requests:
+        memory: 256Mi

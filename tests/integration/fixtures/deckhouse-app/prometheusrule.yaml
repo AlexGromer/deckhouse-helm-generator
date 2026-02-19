@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: myapp
+  namespace: default
+spec:
+  groups:
+  - name: myapp.rules
+    interval: 30s
+    rules:
+    - alert: MyappHighErrorRate
+      expr: |
+        rate(myapp_errors_total[5m]) > 0.05
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: High error rate detected in myapp
+        description: "Error rate is {{ $value | humanizePercentage }}"

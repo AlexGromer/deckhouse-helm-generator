@@ -47,6 +47,10 @@ type Options struct {
 
 	// ExternalFileManager manages external files for the chart.
 	ExternalFileManager *value.ExternalFileManager
+
+	// DeckhouseModule enables Deckhouse module scaffold generation
+	// (openapi/, images/, hooks/, helm_lib dependency).
+	DeckhouseModule bool
 }
 
 // Generator generates Helm charts from a resource graph.

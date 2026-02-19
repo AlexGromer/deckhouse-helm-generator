@@ -62,6 +62,12 @@ const (
 	// RelationDeckhouse indicates a Deckhouse-specific relationship.
 	RelationDeckhouse RelationshipType = "deckhouse"
 
+	// RelationGatewayRoute indicates an HTTPRoute → Gateway relationship.
+	RelationGatewayRoute RelationshipType = "gateway_route"
+
+	// RelationScaleTarget indicates a ScaledObject → target Deployment/StatefulSet.
+	RelationScaleTarget RelationshipType = "scale_target"
+
 	// RelationStorageClass indicates a StorageClass reference.
 	// Example: PVC referencing a StorageClass.
 	RelationStorageClass RelationshipType = "storage_class"

@@ -46,6 +46,16 @@ func (p *ServiceProcessor) Process(ctx processor.Context, obj *unstructured.Unst
 	// Generate template
 	template := p.generateTemplate(ctx, obj, serviceName)
 
+	metadata := map[string]interface{}{
+		"name":      name,
+		"namespace": namespace,
+	}
+
+	// Detect ExternalDNS annotations
+	if edns := detectExternalDNS(obj); edns != nil {
+		metadata["external_dns"] = edns
+	}
+
 	return &processor.Result{
 		Processed:       true,
 		ServiceName:     serviceName,
@@ -54,10 +64,7 @@ func (p *ServiceProcessor) Process(ctx processor.Context, obj *unstructured.Unst
 		ValuesPath:      fmt.Sprintf("services.%s.service", serviceName),
 		Values:          values,
 		Dependencies:    deps,
-		Metadata: map[string]interface{}{
-			"name":      name,
-			"namespace": namespace,
-		},
+		Metadata:        metadata,
 	}, nil
 }
 
