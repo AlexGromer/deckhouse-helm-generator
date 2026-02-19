@@ -1,0 +1,19 @@
+# Gitleaks configuration for deckhouse-helm-generator
+# https://github.com/gitleaks/gitleaks
+
+title = "deckhouse-helm-generator gitleaks config"
+
+[extend]
+# Extend the default gitleaks ruleset
+useDefault = true
+
+# ─── Global allowlist ────────────────────────────────────────────────────────
+# Applied to all rules — suppresses test fixtures and test files
+
+[allowlist]
+description = "Test fixture files contain synthetic K8s Secret objects (not real credentials)"
+paths = [
+  '''pkg/testutil/fixtures/''',
+  '''pkg/processor/k8s/secret_test\.go''',
+  '''tests/''',
+]

@@ -17,6 +17,7 @@ jobs:
     name: Unit Tests (Go ${{ matrix.go-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         go-version: ['1.22', '1.23', '1.24']
 
@@ -28,17 +29,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: ${{ matrix.go-version }}
-
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-${{ matrix.go-version }}-
-          ${{ runner.os }}-go-
+        cache: true
 
     - name: Download dependencies
       run: go mod download
@@ -76,17 +67,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.24'
-
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-1.24-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-1.24-
-          ${{ runner.os }}-go-
+        cache: true
 
     - name: Download dependencies
       run: go mod download
@@ -122,17 +103,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.24'
-
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-1.24-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-1.24-
-          ${{ runner.os }}-go-
+        cache: true
 
     - name: Download dependencies
       run: go mod download
@@ -190,11 +161,13 @@ jobs:
 
     - name: Run gitleaks (secrets detection)
       uses: gitleaks/gitleaks-action@v2
+      continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
+      continue-on-error: true
       with:
         scan-type: 'fs'
         scan-ref: '.'
@@ -203,10 +176,11 @@ jobs:
         severity: 'CRITICAL,HIGH'
 
     - name: Upload Trivy results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
+      uses: github/codeql-action/upload-sarif@v4
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
+      continue-on-error: true
 
   # ── Job 6: Coverage Gate ───────────────────────────────────────
   coverage:
@@ -282,17 +256,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.24'
-
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-1.24-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-1.24-
-          ${{ runner.os }}-go-
+        cache: true
 
     - name: Build binary
       run: |

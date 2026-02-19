@@ -110,6 +110,7 @@ secret.yaml
 secret.yml
 *-secrets.yaml
 *-secrets.yml
+!pkg/testutil/fixtures/secret.yaml
 password.txt
 .password
 

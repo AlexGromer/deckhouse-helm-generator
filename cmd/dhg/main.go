@@ -154,7 +154,7 @@ Examples:
 	cmd.Flags().BoolVar(&envValues, "env-values", false, "Generate environment-specific values (dev/staging/prod)")
 	cmd.Flags().BoolVar(&deckhouseModule, "deckhouse-module", false, "Generate Deckhouse module scaffold (helm_lib, openapi/, images/, hooks/)")
 
-	cmd.MarkFlagRequired("chart-name")
+	_ = cmd.MarkFlagRequired("chart-name")
 
 	return cmd
 }
@@ -515,7 +515,7 @@ and provide recommendations for Helm chart organization.`,
 	cmd.Flags().StringSliceVar(&excludeKinds, "exclude-kinds", nil, "Exclude these resource kinds")
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", true, "Recursively scan directories")
 
-	cmd.MarkFlagRequired("file")
+	_ = cmd.MarkFlagRequired("file")
 
 	return cmd
 }

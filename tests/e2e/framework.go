@@ -343,7 +343,7 @@ func startMockAPIServer(t *testing.T, tmpDir string) (*http.Server, string) {
 	// /version — K8s version info
 	mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"major": "1", "minor": "28", "gitVersion": "v1.28.0",
 		})
 	})
@@ -351,13 +351,13 @@ func startMockAPIServer(t *testing.T, tmpDir string) (*http.Server, string) {
 	// /api — core API versions
 	mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"kind":"APIVersions","versions":["v1"]}`))
+		_, _ = w.Write([]byte(`{"kind":"APIVersions","versions":["v1"]}`))
 	})
 
 	// /api/v1 — core v1 resources
 	mux.HandleFunc("/api/v1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"v1","resources":[` +
+		_, _ = w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"v1","resources":[` +
 			`{"name":"configmaps","namespaced":true,"kind":"ConfigMap","verbs":["create","delete","get","list","patch","update","watch"]},` +
 			`{"name":"secrets","namespaced":true,"kind":"Secret","verbs":["create","delete","get","list","patch","update","watch"]},` +
 			`{"name":"services","namespaced":true,"kind":"Service","verbs":["create","delete","get","list","patch","update","watch"]},` +
@@ -369,7 +369,7 @@ func startMockAPIServer(t *testing.T, tmpDir string) (*http.Server, string) {
 	// /apis — API group list
 	mux.HandleFunc("/apis", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"kind":"APIGroupList","apiVersion":"v1","groups":[` +
+		_, _ = w.Write([]byte(`{"kind":"APIGroupList","apiVersion":"v1","groups":[` +
 			`{"name":"apps","versions":[{"groupVersion":"apps/v1","version":"v1"}],"preferredVersion":{"groupVersion":"apps/v1","version":"v1"}},` +
 			`{"name":"batch","versions":[{"groupVersion":"batch/v1","version":"v1"}],"preferredVersion":{"groupVersion":"batch/v1","version":"v1"}},` +
 			`{"name":"networking.k8s.io","versions":[{"groupVersion":"networking.k8s.io/v1","version":"v1"}],"preferredVersion":{"groupVersion":"networking.k8s.io/v1","version":"v1"}},` +
@@ -380,7 +380,7 @@ func startMockAPIServer(t *testing.T, tmpDir string) (*http.Server, string) {
 	// /apis/apps/v1 — apps resources (Deployment, StatefulSet, DaemonSet)
 	mux.HandleFunc("/apis/apps/v1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"apps/v1","resources":[` +
+		_, _ = w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"apps/v1","resources":[` +
 			`{"name":"deployments","namespaced":true,"kind":"Deployment","verbs":["create","delete","get","list","patch","update","watch"]},` +
 			`{"name":"statefulsets","namespaced":true,"kind":"StatefulSet","verbs":["create","delete","get","list","patch","update","watch"]},` +
 			`{"name":"daemonsets","namespaced":true,"kind":"DaemonSet","verbs":["create","delete","get","list","patch","update","watch"]}` +
@@ -390,7 +390,7 @@ func startMockAPIServer(t *testing.T, tmpDir string) (*http.Server, string) {
 	// /apis/batch/v1 — batch resources (Job, CronJob)
 	mux.HandleFunc("/apis/batch/v1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"batch/v1","resources":[` +
+		_, _ = w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"batch/v1","resources":[` +
 			`{"name":"jobs","namespaced":true,"kind":"Job","verbs":["create","delete","get","list","patch","update","watch"]},` +
 			`{"name":"cronjobs","namespaced":true,"kind":"CronJob","verbs":["create","delete","get","list","patch","update","watch"]}` +
 			`]}`))
@@ -399,7 +399,7 @@ func startMockAPIServer(t *testing.T, tmpDir string) (*http.Server, string) {
 	// /apis/networking.k8s.io/v1 — networking resources (Ingress)
 	mux.HandleFunc("/apis/networking.k8s.io/v1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"networking.k8s.io/v1","resources":[` +
+		_, _ = w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"networking.k8s.io/v1","resources":[` +
 			`{"name":"ingresses","namespaced":true,"kind":"Ingress","verbs":["create","delete","get","list","patch","update","watch"]}` +
 			`]}`))
 	})
@@ -407,7 +407,7 @@ func startMockAPIServer(t *testing.T, tmpDir string) (*http.Server, string) {
 	// /apis/rbac.authorization.k8s.io/v1 — RBAC resources
 	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"rbac.authorization.k8s.io/v1","resources":[` +
+		_, _ = w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"rbac.authorization.k8s.io/v1","resources":[` +
 			`{"name":"clusterroles","namespaced":false,"kind":"ClusterRole","verbs":["create","delete","get","list","patch","update","watch"]},` +
 			`{"name":"clusterrolebindings","namespaced":false,"kind":"ClusterRoleBinding","verbs":["create","delete","get","list","patch","update","watch"]},` +
 			`{"name":"roles","namespaced":true,"kind":"Role","verbs":["create","delete","get","list","patch","update","watch"]},` +
@@ -423,14 +423,14 @@ func startMockAPIServer(t *testing.T, tmpDir string) (*http.Server, string) {
 		// Specific resource lookups (contain "namespaces/") should return 404
 		if strings.Contains(path, "namespaces/") {
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}`))
+			_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}`))
 			return
 		}
-		w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","resources":[]}`))
+		_, _ = w.Write([]byte(`{"kind":"APIResourceList","apiVersion":"v1","resources":[]}`))
 	})
 
 	server := &http.Server{Handler: mux}
-	go server.Serve(listener)
+	go func() { _ = server.Serve(listener) }()
 
 	addr := listener.Addr().String()
 	kubeconfigContent := fmt.Sprintf(`apiVersion: v1

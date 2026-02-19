@@ -52,10 +52,10 @@ func injectHelmLibIncludes(templates map[string]string) map[string]string {
 }
 
 func addHelmLibComment(content string) string {
-	header := fmt.Sprintf(`{{- /* Deckhouse module: use helm_lib helpers */ -}}
+	header := `{{- /* Deckhouse module: use helm_lib helpers */ -}}
 {{- /* {{ include "helm_lib_module_labels" . }} for labels */ -}}
 {{- /* {{ include "helm_lib_module_image" (list . "imageName") }} for images */ -}}
-`)
+`
 	return header + content
 }
 

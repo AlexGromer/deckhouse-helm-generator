@@ -1,7 +1,7 @@
 name: Auto Approve
 
 # Bot auto-approves PRs from the repo owner after CI passes.
-# This allows enforce_admins branch protection with a single developer.
+# Uses AlexGromer-Claude-Code-Bot GitHub App credentials.
 
 on:
   pull_request:
@@ -15,8 +15,15 @@ jobs:
     if: github.actor == 'AlexGromer'
 
     steps:
+    - name: Generate bot token
+      id: bot-token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ secrets.APP_ID }}
+        private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
     - name: Auto approve PR
       uses: hmarr/auto-approve-action@v4
       with:
-        github-token: ${{ secrets.BOT_TOKEN }}
-        review-message: "Auto-approved by AlexGromer-Claude-Code-Bot: CI checks passed, owner PR."
+        github-token: ${{ steps.bot-token.outputs.token }}
+        review-message: "Auto-approved by AlexGromer-Claude-Code-Bot: owner PR, CI checks required."
