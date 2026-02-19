@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/generator"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
@@ -546,15 +545,3 @@ spec:
 	}
 }
 
-// ============================================================
-// Helper: write umbrella charts to disk for helm commands
-// ============================================================
-
-func writeUmbrellaChartsToDisk(t *testing.T, charts []*types.GeneratedChart, outputDir string) {
-	t.Helper()
-	for _, chart := range charts {
-		if err := generator.WriteChart(chart, outputDir); err != nil {
-			t.Fatalf("WriteChart failed for %s: %v", chart.Name, err)
-		}
-	}
-}
