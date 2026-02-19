@@ -138,7 +138,7 @@ Examples:
 	cmd.Flags().StringVar(&chartVersion, "chart-version", "0.1.0", "Chart version")
 	cmd.Flags().StringVar(&appVersion, "app-version", "1.0.0", "Application version")
 	cmd.Flags().StringVar(&mode, "mode", "universal", "Output mode: universal, separate, library, umbrella")
-	cmd.Flags().StringVarP(&source, "source", "s", "file", "Source type: file, cluster, gitops")
+	cmd.Flags().StringVarP(&source, "source", "s", "file", "Source type: file (default). cluster and gitops are not yet implemented.")
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
 	cmd.Flags().StringSliceVar(&namespaces, "namespaces", []string{}, "Filter by multiple namespaces")
 	cmd.Flags().StringVarP(&labelSelector, "selector", "l", "", "Label selector filter")

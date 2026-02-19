@@ -83,7 +83,7 @@ func (p *Processor) Process(key, value string) *ProcessedValue {
 
 	// Calculate checksum
 	hash := sha256.Sum256([]byte(value))
-	result.Checksum = fmt.Sprintf("%x", hash[:8]) // First 8 bytes
+	result.Checksum = fmt.Sprintf("%x", hash[:])
 
 	// Detect type
 	result.DetectedType = p.detectType(value)
