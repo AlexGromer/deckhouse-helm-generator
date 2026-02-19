@@ -139,7 +139,6 @@ func addCommentsToValues(yaml string) string {
 	lines := strings.Split(yaml, "\n")
 	inGlobal := false
 	inServices := false
-	currentService := ""
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -158,11 +157,8 @@ func addCommentsToValues(yaml string) string {
 			inGlobal = false
 			inServices = true
 		} else if inServices && !strings.HasPrefix(line, " ") && trimmed != "" {
-			// New service
-			currentService = strings.TrimSuffix(trimmed, ":")
-			if currentService != "services:" {
-				sb.WriteString("\n")
-			}
+			// New top-level service entry — add blank line separator.
+			sb.WriteString("\n")
 		}
 
 		sb.WriteString(line)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
@@ -106,8 +107,14 @@ func WriteChart(chart *types.GeneratedChart, outputDir string) error {
 		return fmt.Errorf("failed to write values.yaml: %w", err)
 	}
 
-	// Write templates
-	for path, content := range chart.Templates {
+	// Write templates in sorted order for deterministic output.
+	templatePaths := make([]string, 0, len(chart.Templates))
+	for path := range chart.Templates {
+		templatePaths = append(templatePaths, path)
+	}
+	sort.Strings(templatePaths)
+	for _, path := range templatePaths {
+		content := chart.Templates[path]
 		templatePath := filepath.Join(chartDir, path)
 		if err := os.MkdirAll(filepath.Dir(templatePath), 0755); err != nil {
 			return fmt.Errorf("failed to create template directory for %s: %w", path, err)
