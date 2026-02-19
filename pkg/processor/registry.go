@@ -2,6 +2,7 @@ package processor
 
 import (
 	"sort"
+	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -196,25 +197,39 @@ func toTemplateRef(path string, defaultValue interface{}) string {
 	}
 }
 
-// escapeTemplateString escapes special characters for use in templates.
+// escapeTemplateString escapes special characters for use in Helm templates.
+// Helm delimiters {{ and }} are wrapped so they are not interpreted as actions.
 func escapeTemplateString(s string) string {
-	// Escape backslashes and quotes
-	result := ""
-	for _, c := range s {
-		switch c {
-		case '\\':
-			result += "\\\\"
-		case '"':
-			result += "\\\""
-		case '\n':
-			result += "\\n"
-		case '\t':
-			result += "\\t"
-		default:
-			result += string(c)
+	var b strings.Builder
+	b.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		// Escape Helm delimiters — wrap them so the template engine ignores them.
+		if i+1 < len(s) && s[i] == '{' && s[i+1] == '{' {
+			b.WriteString("{{\"{{\"}}") // outputs literal {{
+			i += 2
+			continue
 		}
+		if i+1 < len(s) && s[i] == '}' && s[i+1] == '}' {
+			b.WriteString("{{\"}}\"}}") // outputs literal }}
+			i += 2
+			continue
+		}
+		switch s[i] {
+		case '\\':
+			b.WriteString("\\\\")
+		case '"':
+			b.WriteString("\\\"")
+		case '\n':
+			b.WriteString("\\n")
+		case '\t':
+			b.WriteString("\\t")
+		default:
+			b.WriteByte(s[i])
+		}
+		i++
 	}
-	return result
+	return b.String()
 }
 
 // All returns all registered processors.
