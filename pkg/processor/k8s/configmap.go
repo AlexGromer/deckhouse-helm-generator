@@ -177,6 +177,7 @@ binaryData:
 }
 
 // sanitizeName converts a Kubernetes resource name to a valid Go/YAML key (camelCase).
+// See also processor.SanitizeServiceName — same algorithm but returns "" for empty input.
 func sanitizeName(name string) string {
 	if name == "" {
 		return "config"

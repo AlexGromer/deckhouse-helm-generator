@@ -254,13 +254,14 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	var extractedResources []*types.ExtractedResource
 	extractErrors := make([]error, 0)
 
+drain:
 	for {
 		select {
 		case resource, ok := <-resourceChan:
 			if !ok {
 				resourceChan = nil
 				if errChan == nil {
-					goto done
+					break drain
 				}
 				continue
 			}
@@ -272,7 +273,7 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 			if !ok {
 				errChan = nil
 				if resourceChan == nil {
-					goto done
+					break drain
 				}
 				continue
 			}
@@ -282,7 +283,6 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 			return ctx.Err()
 		}
 	}
-done:
 
 	if len(extractedResources) == 0 {
 		return fmt.Errorf("no resources extracted")
@@ -563,13 +563,14 @@ func runAnalyze(ctx context.Context, opts analyzeOptions) error {
 
 	var extractedResources []*types.ExtractedResource
 
+drainExtract:
 	for {
 		select {
 		case resource, ok := <-resourceChan:
 			if !ok {
 				resourceChan = nil
 				if errChan == nil {
-					goto extracted
+					break drainExtract
 				}
 				continue
 			}
@@ -581,7 +582,7 @@ func runAnalyze(ctx context.Context, opts analyzeOptions) error {
 			if !ok {
 				errChan = nil
 				if resourceChan == nil {
-					goto extracted
+					break drainExtract
 				}
 				continue
 			}
@@ -590,7 +591,6 @@ func runAnalyze(ctx context.Context, opts analyzeOptions) error {
 			return ctx.Err()
 		}
 	}
-extracted:
 
 	if len(extractedResources) == 0 {
 		return fmt.Errorf("no resources extracted")

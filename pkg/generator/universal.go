@@ -189,18 +189,16 @@ func kindToValuesKey(kind string) string {
 	}
 }
 
-// sanitizeName converts a Kubernetes resource name to a valid Go/YAML key.
+// sanitizeName converts a Kubernetes resource name to a valid Go/YAML key (camelCase).
+// Similar to processor.SanitizeServiceName but also handles _ as separator and
+// always lowercases the first character.
 func sanitizeName(name string) string {
 	result := make([]byte, 0, len(name))
-	for i, c := range name {
+	for _, c := range name {
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
 			result = append(result, byte(c))
 		} else if c == '-' || c == '_' || c == '.' {
-			// Convert to camelCase at separators
-			if i+1 < len(name) && name[i+1] >= 'a' && name[i+1] <= 'z' {
-				// Skip separator, capitalize next
-				continue
-			}
+			// Always use '_' as a camelCase marker for the second pass.
 			result = append(result, '_')
 		}
 	}

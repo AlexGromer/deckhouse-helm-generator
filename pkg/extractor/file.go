@@ -300,6 +300,7 @@ func isYAMLFile(path string) bool {
 // isCommentOnly checks if a YAML document contains only comments and whitespace.
 func isCommentOnly(doc []byte) bool {
 	scanner := bufio.NewScanner(bytes.NewReader(doc))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" && !strings.HasPrefix(line, "#") {

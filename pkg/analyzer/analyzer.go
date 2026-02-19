@@ -35,7 +35,9 @@ type DefaultAnalyzer struct {
 	detectors []Detector
 }
 
-// NewDefaultAnalyzer creates a new default analyzer.
+// NewDefaultAnalyzer creates a new analyzer with no detectors registered.
+// Call detector.RegisterAll(a) to add the standard detector set, or use
+// AddDetector for custom detectors.
 func NewDefaultAnalyzer() *DefaultAnalyzer {
 	return &DefaultAnalyzer{
 		detectors: make([]Detector, 0),
@@ -175,14 +177,3 @@ func (a *DefaultAnalyzer) findRelatedService(key types.ResourceKey, graph *types
 	return ""
 }
 
-// WithDefaultDetectors returns an analyzer with all default detectors registered.
-func WithDefaultDetectors() *DefaultAnalyzer {
-	a := NewDefaultAnalyzer()
-
-	// Note: Detectors are imported from the detector package
-	// and registered by the caller. This function is kept for
-	// backward compatibility but should be used with external
-	// detector registration.
-
-	return a
-}

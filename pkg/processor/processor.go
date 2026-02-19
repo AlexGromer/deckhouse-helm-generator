@@ -266,6 +266,9 @@ func kindToFileName(kind string) string {
 	return stringToLower(kind)
 }
 
+// stringToLower converts ASCII uppercase letters to lowercase without
+// allocating a rune slice. This is intentionally used instead of strings.ToLower
+// because Kubernetes resource names and kinds are always ASCII.
 func stringToLower(s string) string {
 	b := make([]byte, len(s))
 	for i := 0; i < len(s); i++ {

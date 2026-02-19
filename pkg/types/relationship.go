@@ -108,6 +108,10 @@ type ResourceGraph struct {
 
 	// orphans contains resources that couldn't be grouped.
 	Orphans []*ProcessedResource
+
+	// relFrom and relTo are adjacency indexes for O(1) relationship lookup.
+	relFrom map[ResourceKey][]Relationship
+	relTo   map[ResourceKey][]Relationship
 }
 
 // NewResourceGraph creates a new empty resource graph.
@@ -117,6 +121,8 @@ func NewResourceGraph() *ResourceGraph {
 		Relationships: make([]Relationship, 0),
 		Groups:        make([]*ResourceGroup, 0),
 		Orphans:       make([]*ProcessedResource, 0),
+		relFrom:       make(map[ResourceKey][]Relationship),
+		relTo:         make(map[ResourceKey][]Relationship),
 	}
 }
 
@@ -126,9 +132,11 @@ func (g *ResourceGraph) AddResource(r *ProcessedResource) {
 	g.Resources[key] = r
 }
 
-// AddRelationship adds a relationship to the graph.
+// AddRelationship adds a relationship to the graph and updates the adjacency indexes.
 func (g *ResourceGraph) AddRelationship(rel Relationship) {
 	g.Relationships = append(g.Relationships, rel)
+	g.relFrom[rel.From] = append(g.relFrom[rel.From], rel)
+	g.relTo[rel.To] = append(g.relTo[rel.To], rel)
 }
 
 // GetResourceByKey returns a resource by its key.
@@ -137,26 +145,14 @@ func (g *ResourceGraph) GetResourceByKey(key ResourceKey) (*ProcessedResource, b
 	return r, ok
 }
 
-// GetRelationshipsFrom returns all relationships from a given resource.
+// GetRelationshipsFrom returns all relationships from a given resource in O(1).
 func (g *ResourceGraph) GetRelationshipsFrom(key ResourceKey) []Relationship {
-	var result []Relationship
-	for _, rel := range g.Relationships {
-		if rel.From == key {
-			result = append(result, rel)
-		}
-	}
-	return result
+	return g.relFrom[key]
 }
 
-// GetRelationshipsTo returns all relationships to a given resource.
+// GetRelationshipsTo returns all relationships to a given resource in O(1).
 func (g *ResourceGraph) GetRelationshipsTo(key ResourceKey) []Relationship {
-	var result []Relationship
-	for _, rel := range g.Relationships {
-		if rel.To == key {
-			result = append(result, rel)
-		}
-	}
-	return result
+	return g.relTo[key]
 }
 
 // GetResourcesByKind returns all resources of a given kind.
