@@ -1,90 +1,138 @@
-# Binaries
+# ═══════════════════════════════════════════════════════════════════════
+# deckhouse-helm-generator — Comprehensive .gitignore
+# Based on security-focused template v4.0.0
+# ═══════════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────────────────────────────────
+# GO
+# ─────────────────────────────────────────────────────────────────────
 bin/
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary, built with `go test -c`
 *.test
-
-# Output of the go coverage tool
 *.out
 coverage.html
+coverage.txt
 coverage.out
-
-# Go workspace file
+coverage-*.txt
+coverage-merged.txt
 go.work
+go.work.sum
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Build artifacts
+# ─────────────────────────────────────────────────────────────────────
+# BUILD & OUTPUT
+# ─────────────────────────────────────────────────────────────────────
 dist/
 build/
-*.tar.gz
-*.zip
-
-# Generated charts (for testing)
+out/
+output/
 /chart/
 /charts/
 /output/
+*.o
+*.a
+*.lib
 
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# Claude Code
-.claude/
-
-# Secrets and sensitive files
-*.key
-*.pem
-*.p12
-*.pfx
-*.cer
-*.crt
-*.csr
-*.der
-*.rsa
-id_rsa
-id_rsa.pub
-id_ed25519
-id_ed25519.pub
-*.ppk
+# ─────────────────────────────────────────────────────────────────────
+# SECRETS & CREDENTIALS (CRITICAL)
+# ─────────────────────────────────────────────────────────────────────
+# Environment files
 .env
 .env.*
+*.env
+.env.local
+.env.development
+.env.production
+.env.test
+.envrc
 !.env.example
 !.env.sample
+
+# API Keys & Tokens
+*_key
+*_key.*
+*_secret
+*_secret.*
+*_token
+*_token.*
+*.token
+.token
+api_key*
+api-key*
+GITHUB_TOKEN*
+AWS_*_KEY*
+
+# Credentials files
+credentials
+credentials.json
+credentials.yaml
+credentials.yml
+service-account*.json
+*.credentials
+auth.json
+auth.yaml
+
+# Certificates & Keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.csr
+*.jks
+*.keystore
+*.truststore
+*.rsa
+*.ppk
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+*.pub
+
+# Password managers & vaults
+.vault-token
+*.vault
+vault_pass.txt
+vault-password
+.vault-pass
+.secrets/
+secrets/
+secrets.json
 secrets.yaml
 secrets.yml
 secret.yaml
 secret.yml
 *-secrets.yaml
 *-secrets.yml
-credentials
-credentials.json
-credentials.yaml
-token
-*.token
-.password
 password.txt
-vault-password
-.vault-pass
+.password
 
-# Kubernetes configs
+# ─────────────────────────────────────────────────────────────────────
+# CLAUDE CODE (CRITICAL — NEVER COMMIT)
+# ─────────────────────────────────────────────────────────────────────
+.claude/
+.mcp.json
+claude_desktop_config.json
+settings.local.json
+*.claude-session
+*.claude-transcript
+
+# ─────────────────────────────────────────────────────────────────────
+# INFRASTRUCTURE
+# ─────────────────────────────────────────────────────────────────────
+# Kubernetes
 kubeconfig
 kubeconfig.*
 *.kubeconfig
 .kube/
 !.kube/config.example
+k3s.yaml
 
 # Terraform
 *.tfstate
@@ -93,9 +141,185 @@ kubeconfig.*
 !*.tfvars.example
 .terraform/
 terraform.rc
+terraform.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 
 # Ansible
-*.vault
+*.retry
 vault_pass.txt
 group_vars/*/vault
 host_vars/*/vault
+
+# Helm
+.helm/
+
+# Docker
+.docker/
+docker-compose.override.yml
+docker-compose.*.yml
+docker-compose.secrets.yml
+.dockercfg
+
+# ─────────────────────────────────────────────────────────────────────
+# CLOUD PROVIDER CREDENTIALS
+# ─────────────────────────────────────────────────────────────────────
+.aws/
+.aws-sam/
+aws-exports.js
+.gcloud/
+.config/gcloud/
+application_default_credentials.json
+.azure/
+azureProfile.json
+.doctl/
+
+# ─────────────────────────────────────────────────────────────────────
+# SECURITY SCANNING RESULTS
+# ─────────────────────────────────────────────────────────────────────
+*.sarif
+*.sarif.json
+security-scan-*.json
+vulnerability-*.json
+trivy-*.json
+snyk-*.json
+semgrep-*.json
+gitleaks-*.json
+trufflehog-*.json
+.secrets.baseline
+
+# ─────────────────────────────────────────────────────────────────────
+# IDE & EDITORS
+# ─────────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+.idea_modules/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*.swn
+*~
+.*.sw?
+\#*\#
+.\#*
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+.metadata/
+.atom/
+
+# ─────────────────────────────────────────────────────────────────────
+# OS
+# ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.directory
+.Trash-*
+
+# ─────────────────────────────────────────────────────────────────────
+# TEMPORARY & CACHE
+# ─────────────────────────────────────────────────────────────────────
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.draft
+*_backup.*
+.cache/
+cache/
+*.cache
+
+# ─────────────────────────────────────────────────────────────────────
+# ARCHIVES
+# ─────────────────────────────────────────────────────────────────────
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# ─────────────────────────────────────────────────────────────────────
+# LOGS
+# ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+log/
+debug.log
+error.log
+
+# ─────────────────────────────────────────────────────────────────────
+# TESTING
+# ─────────────────────────────────────────────────────────────────────
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.pytest_cache/
+.nyc_output/
+playwright-report/
+test-results/
+
+# ─────────────────────────────────────────────────────────────────────
+# DATABASE
+# ─────────────────────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+*.sql.gz
+dump.sql
+backup.sql
+*.dump
+*.backup
+dump.rdb
+appendonly.aof
+
+# ─────────────────────────────────────────────────────────────────────
+# CI/CD
+# ─────────────────────────────────────────────────────────────────────
+.github/secrets/
+.gitlab-ci-local/
+.gitlab-runner/
+
+# ─────────────────────────────────────────────────────────────────────
+# PATCH & MERGE ARTIFACTS
+# ─────────────────────────────────────────────────────────────────────
+*.patch
+*.diff
+*.rej
+*.BACKUP.*
+*.BASE.*
+*.LOCAL.*
+*.REMOTE.*
+*_BACKUP_*
+*_BASE_*
+*_LOCAL_*
+*_REMOTE_*
+
+# ─────────────────────────────────────────────────────────────────────
+# CORE DUMPS
+# ─────────────────────────────────────────────────────────────────────
+core
+core.*
+vgcore.*
+*.core
+hs_err_pid*
+replay_pid*
