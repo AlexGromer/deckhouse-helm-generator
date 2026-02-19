@@ -162,7 +162,7 @@ func GenerateNOTES(chartName string, services []string) string {
 	sb.WriteString("===================================================================\n\n")
 
 	sb.WriteString("To verify the deployment, run:\n\n")
-	sb.WriteString(fmt.Sprintf("  kubectl get all -l app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }}\n\n"))
+	sb.WriteString("  kubectl get all -l app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }}\n\n")
 
 	if len(services) > 0 {
 		sb.WriteString("Installed services:\n\n")

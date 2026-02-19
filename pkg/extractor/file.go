@@ -166,7 +166,7 @@ func (e *FileExtractor) parseYAMLStream(ctx context.Context, reader io.Reader, s
 		}
 
 		// Skip empty objects
-		if obj.Object == nil || len(obj.Object) == 0 {
+		if len(obj.Object) == 0 {
 			continue
 		}
 

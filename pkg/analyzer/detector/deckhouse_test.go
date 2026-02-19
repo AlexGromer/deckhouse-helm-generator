@@ -32,13 +32,8 @@ func TestDeckhouseDetector_Detected_ModuleConfig(t *testing.T) {
 		mc.Original.ResourceKey(): mc,
 	}
 
-	rels := d.Detect(context.Background(), mc, allResources)
-	// Single deckhouse resource — should create at least metadata relationship
-	if len(rels) == 0 {
-		// OK — single resource may not have any relations to other deckhouse resources
-		// But it should still be detected (verify via Details tag)
-	}
-	// The detector should at least not panic
+	// Single deckhouse resource — may or may not have relations; should not panic
+	_ = d.Detect(context.Background(), mc, allResources)
 }
 
 func TestDeckhouseDetector_Detected_IngressNginx(t *testing.T) {

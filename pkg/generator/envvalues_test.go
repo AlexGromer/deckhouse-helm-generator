@@ -74,7 +74,7 @@ func TestEnvValues_DevProfile_NoPDB(t *testing.T) {
 	// Either no PDB section OR podDisruptionBudget.enabled: false
 	if pdb, ok := parsed["podDisruptionBudget"]; ok {
 		if pdbMap, ok := pdb.(map[string]interface{}); ok {
-			if enabled, _ := pdbMap["enabled"]; enabled == true {
+			if enabled := pdbMap["enabled"]; enabled == true {
 				t.Error("dev profile should have PDB disabled")
 			}
 		}
