@@ -314,6 +314,9 @@ done:
 	}
 
 	for _, extracted := range extractedResources {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		procCtx := processor.Context{
 			Ctx:                 ctx,
 			ChartName:           opts.chartName,

@@ -4,6 +4,7 @@ package analyzer
 
 import (
 	"context"
+	"sort"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
@@ -44,14 +45,10 @@ func NewDefaultAnalyzer() *DefaultAnalyzer {
 // AddDetector adds a detector to the analyzer.
 func (a *DefaultAnalyzer) AddDetector(d Detector) {
 	a.detectors = append(a.detectors, d)
-	// Sort by priority (highest first)
-	for i := len(a.detectors) - 1; i > 0; i-- {
-		if a.detectors[i].Priority() > a.detectors[i-1].Priority() {
-			a.detectors[i], a.detectors[i-1] = a.detectors[i-1], a.detectors[i]
-		} else {
-			break
-		}
-	}
+	// Sort by priority (highest first) using stable full sort.
+	sort.Slice(a.detectors, func(i, j int) bool {
+		return a.detectors[i].Priority() > a.detectors[j].Priority()
+	})
 }
 
 // Analyze builds a resource graph with detected relationships.

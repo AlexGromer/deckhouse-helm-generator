@@ -1,0 +1,6 @@
+# False positive suppressions for gitleaks
+# These are test fixture data, not real secrets.
+
+# pkg/processor/k8s/secret_test.go — dummy "password123" base64 in K8s Secret test fixture
+73c31105f9f48e66c7649c50f0b627547ee951e8:pkg/processor/k8s/secret_test.go:generic-api-key:61
+73c31105f9f48e66c7649c50f0b627547ee951e8:pkg/processor/k8s/secret_test.go:generic-api-key:287

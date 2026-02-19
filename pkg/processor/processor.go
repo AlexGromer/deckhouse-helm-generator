@@ -201,10 +201,7 @@ func ValuesPathForKind(kind, serviceName string) string {
 }
 
 // TemplatePathForResource returns the template path for a resource.
-func TemplatePathForResource(kind, name, namespace string) string {
-	if namespace != "" {
-		return fmt.Sprintf("templates/%s-%s.yaml", kindToFileName(kind), name)
-	}
+func TemplatePathForResource(kind, name, _ string) string {
 	return fmt.Sprintf("templates/%s-%s.yaml", kindToFileName(kind), name)
 }
 

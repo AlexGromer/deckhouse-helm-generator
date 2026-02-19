@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor/value"
@@ -148,12 +149,24 @@ func WriteChart(chart *types.GeneratedChart, outputDir string) error {
 
 	// Write external files
 	if len(chart.ExternalFiles) > 0 {
+		absChartDir, err := filepath.Abs(chartDir)
+		if err != nil {
+			return fmt.Errorf("failed to resolve chart directory: %w", err)
+		}
 		for _, file := range chart.ExternalFiles {
 			filePath := filepath.Join(chartDir, file.Path)
-			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+			absFilePath, err := filepath.Abs(filePath)
+			if err != nil {
+				return fmt.Errorf("failed to resolve external file path %s: %w", file.Path, err)
+			}
+			rel, err := filepath.Rel(absChartDir, absFilePath)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				return fmt.Errorf("invalid external file path %q: outside chart directory", file.Path)
+			}
+			if err := os.MkdirAll(filepath.Dir(absFilePath), 0755); err != nil {
 				return fmt.Errorf("failed to create directory for external file %s: %w", file.Path, err)
 			}
-			if err := os.WriteFile(filePath, []byte(file.Content), 0644); err != nil {
+			if err := os.WriteFile(absFilePath, []byte(file.Content), 0644); err != nil {
 				return fmt.Errorf("failed to write external file %s: %w", file.Path, err)
 			}
 		}

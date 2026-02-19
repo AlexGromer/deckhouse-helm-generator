@@ -76,6 +76,7 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 		if !ok {
 			continue
 		}
+		volumeName, _ := volumeMap["name"].(string)
 
 		// ConfigMap volume
 		if cmMap, ok := volumeMap["configMap"].(map[string]interface{}); ok {
@@ -93,7 +94,7 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 						Type: types.RelationVolumeMount,
 						Field: "spec.template.spec.volumes[].configMap",
 						Details: map[string]string{
-							"volumeName":    volumeMap["name"].(string),
+							"volumeName":    volumeName,
 							"configMapName": cmName,
 						},
 					})
@@ -117,7 +118,7 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 						Type: types.RelationVolumeMount,
 						Field: "spec.template.spec.volumes[].secret",
 						Details: map[string]string{
-							"volumeName": volumeMap["name"].(string),
+							"volumeName": volumeName,
 							"secretName": secretName,
 						},
 					})
@@ -141,7 +142,7 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 						Type: types.RelationPVC,
 						Field: "spec.template.spec.volumes[].persistentVolumeClaim",
 						Details: map[string]string{
-							"volumeName": volumeMap["name"].(string),
+							"volumeName": volumeName,
 							"pvcName":    pvcName,
 						},
 					})
@@ -174,7 +175,7 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 									Type: types.RelationVolumeMount,
 									Field: "spec.template.spec.volumes[].projected.sources[].configMap",
 									Details: map[string]string{
-										"volumeName":    volumeMap["name"].(string),
+										"volumeName":    volumeName,
 										"configMapName": cmName,
 									},
 								})
@@ -198,7 +199,7 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 									Type: types.RelationVolumeMount,
 									Field: "spec.template.spec.volumes[].projected.sources[].secret",
 									Details: map[string]string{
-										"volumeName": volumeMap["name"].(string),
+										"volumeName": volumeName,
 										"secretName": secretName,
 									},
 								})
@@ -351,6 +352,7 @@ func (d *VolumeMountDetector) detectEnvValueFromReferences(resource *types.Proce
 			if !ok {
 				continue
 			}
+			envVarName, _ := envVar["name"].(string)
 
 			valueFrom, ok := envVar["valueFrom"].(map[string]interface{})
 			if !ok {
@@ -374,7 +376,7 @@ func (d *VolumeMountDetector) detectEnvValueFromReferences(resource *types.Proce
 							Field: "spec.template.spec.containers[].env[].valueFrom.configMapKeyRef",
 							Details: map[string]string{
 								"configMapName": cmName,
-								"envVarName":    envVar["name"].(string),
+								"envVarName":    envVarName,
 							},
 						})
 					}
@@ -398,7 +400,7 @@ func (d *VolumeMountDetector) detectEnvValueFromReferences(resource *types.Proce
 							Field: "spec.template.spec.containers[].env[].valueFrom.secretKeyRef",
 							Details: map[string]string{
 								"secretName": secretName,
-								"envVarName": envVar["name"].(string),
+								"envVarName": envVarName,
 							},
 						})
 					}
