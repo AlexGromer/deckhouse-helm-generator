@@ -36,9 +36,9 @@ jobs:
         path: |
           ~/.cache/go-build
           ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
+        key: ${{ runner.os }}-go-${{ matrix.go-version }}-v2-${{ hashFiles('**/go.sum') }}
         restore-keys: |
-          ${{ runner.os }}-go-${{ matrix.go-version }}-
+          ${{ runner.os }}-go-${{ matrix.go-version }}-v2-
           ${{ runner.os }}-go-
 
     - name: Download dependencies
@@ -84,9 +84,9 @@ jobs:
         path: |
           ~/.cache/go-build
           ~/go/pkg/mod
-        key: ${{ runner.os }}-go-1.24-${{ hashFiles('**/go.sum') }}
+        key: ${{ runner.os }}-go-1.24-v2-${{ hashFiles('**/go.sum') }}
         restore-keys: |
-          ${{ runner.os }}-go-1.24-
+          ${{ runner.os }}-go-1.24-v2-
           ${{ runner.os }}-go-
 
     - name: Download dependencies
@@ -130,9 +130,9 @@ jobs:
         path: |
           ~/.cache/go-build
           ~/go/pkg/mod
-        key: ${{ runner.os }}-go-1.24-${{ hashFiles('**/go.sum') }}
+        key: ${{ runner.os }}-go-1.24-v2-${{ hashFiles('**/go.sum') }}
         restore-keys: |
-          ${{ runner.os }}-go-1.24-
+          ${{ runner.os }}-go-1.24-v2-
           ${{ runner.os }}-go-
 
     - name: Download dependencies
@@ -293,9 +293,9 @@ jobs:
         path: |
           ~/.cache/go-build
           ~/go/pkg/mod
-        key: ${{ runner.os }}-go-1.24-${{ hashFiles('**/go.sum') }}
+        key: ${{ runner.os }}-go-1.24-v2-${{ hashFiles('**/go.sum') }}
         restore-keys: |
-          ${{ runner.os }}-go-1.24-
+          ${{ runner.os }}-go-1.24-v2-
           ${{ runner.os }}-go-
 
     - name: Build binary
