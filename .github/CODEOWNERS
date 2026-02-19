@@ -1,5 +1,5 @@
 # Code Owners
-# These owners will be required reviewers for any PR.
+# AlexGromer-Claude-Code-Bot[bot] is the automated reviewer for PRs from the owner.
 # https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
-* @AlexGromer
+* @AlexGromer @AlexGromer-Claude-Code-Bot[bot]

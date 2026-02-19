@@ -1,0 +1,22 @@
+name: Auto Approve
+
+# Bot auto-approves PRs from the repo owner after CI passes.
+# This allows enforce_admins branch protection with a single developer.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  auto-approve:
+    name: Auto Approve (owner PR)
+    runs-on: ubuntu-latest
+    # Only approve PRs from the repo owner
+    if: github.actor == 'AlexGromer'
+
+    steps:
+    - name: Auto approve PR
+      uses: hmarr/auto-approve-action@v4
+      with:
+        github-token: ${{ secrets.BOT_TOKEN }}
+        review-message: "Auto-approved by AlexGromer-Claude-Code-Bot: CI checks passed, owner PR."
