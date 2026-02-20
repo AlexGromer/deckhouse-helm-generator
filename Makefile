@@ -1,4 +1,4 @@
-.PHONY: build test lint clean install deps fmt vet bench
+.PHONY: build test lint clean install deps fmt vet bench ci
 
 BINARY_NAME=dhg
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -83,5 +83,9 @@ bench:
 # Development helper: build and run with sample data
 dev: build
 	./bin/$(BINARY_NAME) generate -f testdata/simple -o /tmp/dhg-dev-chart --chart-name dev-app --verbose
+
+# Run full CI pipeline locally
+ci: deps vet lint test build
+	@echo "CI pipeline passed!"
 
 .DEFAULT_GOAL := build

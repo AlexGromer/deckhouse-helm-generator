@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ['1.22', '1.23', '1.24']
+        go-version: ['1.23', '1.24']
 
     steps:
     - name: Checkout code
@@ -43,7 +43,7 @@ jobs:
     - name: Run unit tests with coverage
       run: |
         go test -v -race -coverprofile=coverage.txt -covermode=atomic \
-          ./pkg/...
+          ./cmd/... ./pkg/...
 
     - name: Upload coverage artifact
       if: matrix.go-version == '1.24'
@@ -224,15 +224,15 @@ jobs:
         # Display coverage
         go tool cover -func=coverage-merged.txt
 
-    - name: Check coverage threshold (55%)
+    - name: Check coverage threshold (70%)
       run: |
         COVERAGE=$(go tool cover -func=coverage-merged.txt | grep total | awk '{print $3}' | sed 's/%//')
         echo "Total coverage: ${COVERAGE}%"
-        if (( $(echo "$COVERAGE < 55" | bc -l) )); then
-          echo "::error::Coverage ${COVERAGE}% is below 55% threshold"
+        if (( $(echo "$COVERAGE < 70" | bc -l) )); then
+          echo "::error::Coverage ${COVERAGE}% is below 70% threshold"
           exit 1
         else
-          echo "::notice::Coverage ${COVERAGE}% meets 55% threshold"
+          echo "::notice::Coverage ${COVERAGE}% meets 70% threshold"
         fi
 
     - name: Upload coverage to Codecov
