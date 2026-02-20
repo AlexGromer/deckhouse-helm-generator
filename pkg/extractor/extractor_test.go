@@ -90,7 +90,9 @@ func TestFileExtractor_Validate_ValidDir(t *testing.T) {
 func TestFileExtractor_Validate_NonYAMLFile(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "readme.txt")
-	os.WriteFile(f, []byte("hello"), 0644)
+	if err := os.WriteFile(f, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	err := fe.Validate(context.Background(), Options{Paths: []string{f}})
@@ -102,7 +104,9 @@ func TestFileExtractor_Validate_NonYAMLFile(t *testing.T) {
 func TestFileExtractor_Validate_YAMLFile(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "deploy.yaml")
-	os.WriteFile(f, []byte("apiVersion: v1"), 0644)
+	if err := os.WriteFile(f, []byte("apiVersion: v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	err := fe.Validate(context.Background(), Options{Paths: []string{f}})
@@ -116,14 +120,16 @@ func TestFileExtractor_Validate_YAMLFile(t *testing.T) {
 func TestFileExtractor_Extract_SingleResource(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "deploy.yaml")
-	os.WriteFile(f, []byte(`apiVersion: apps/v1
+	if err := os.WriteFile(f, []byte(`apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: web
   namespace: default
 spec:
   replicas: 1
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	resCh, errCh := fe.Extract(context.Background(), Options{Paths: []string{f}})
@@ -157,7 +163,7 @@ spec:
 func TestFileExtractor_Extract_MultiDoc(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "resources.yaml")
-	os.WriteFile(f, []byte(`apiVersion: v1
+	if err := os.WriteFile(f, []byte(`apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cfg1
@@ -168,7 +174,9 @@ kind: ConfigMap
 metadata:
   name: cfg2
 data: {}
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	resCh, errCh := fe.Extract(context.Background(), Options{Paths: []string{f}})
@@ -188,7 +196,7 @@ data: {}
 func TestFileExtractor_Extract_SkipsEmptyDocs(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "sparse.yaml")
-	os.WriteFile(f, []byte(`---
+	if err := os.WriteFile(f, []byte(`---
 ---
 apiVersion: v1
 kind: Service
@@ -196,7 +204,9 @@ metadata:
   name: svc
 ---
 ---
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	resCh, errCh := fe.Extract(context.Background(), Options{Paths: []string{f}})
@@ -216,7 +226,7 @@ metadata:
 func TestFileExtractor_Extract_SkipsCommentsOnly(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "comments.yaml")
-	os.WriteFile(f, []byte(`# Just a comment
+	if err := os.WriteFile(f, []byte(`# Just a comment
 # Another comment
 ---
 apiVersion: v1
@@ -224,7 +234,9 @@ kind: ConfigMap
 metadata:
   name: real
 data: {}
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	resCh, errCh := fe.Extract(context.Background(), Options{Paths: []string{f}})
@@ -244,10 +256,16 @@ data: {}
 func TestFileExtractor_Extract_RecursiveDir(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub")
-	os.MkdirAll(sub, 0755)
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
 
-	os.WriteFile(filepath.Join(dir, "a.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\ndata: {}"), 0644)
-	os.WriteFile(filepath.Join(sub, "b.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: b\ndata: {}"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "a.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\ndata: {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "b.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: b\ndata: {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	resCh, errCh := fe.Extract(context.Background(), Options{Paths: []string{dir}, Recursive: true})
@@ -267,10 +285,16 @@ func TestFileExtractor_Extract_RecursiveDir(t *testing.T) {
 func TestFileExtractor_Extract_NonRecursive(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub")
-	os.MkdirAll(sub, 0755)
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
 
-	os.WriteFile(filepath.Join(dir, "a.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\ndata: {}"), 0644)
-	os.WriteFile(filepath.Join(sub, "b.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: b\ndata: {}"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "a.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\ndata: {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "b.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: b\ndata: {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	resCh, errCh := fe.Extract(context.Background(), Options{Paths: []string{dir}, Recursive: false})
@@ -292,7 +316,7 @@ func TestFileExtractor_Extract_NonRecursive(t *testing.T) {
 func TestFileExtractor_Extract_IncludeKinds(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "mixed.yaml")
-	os.WriteFile(f, []byte(`apiVersion: v1
+	if err := os.WriteFile(f, []byte(`apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cfg
@@ -302,7 +326,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: svc
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	resCh, errCh := fe.Extract(context.Background(), Options{
@@ -328,7 +354,7 @@ metadata:
 func TestFileExtractor_Extract_ExcludeKinds(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "mixed.yaml")
-	os.WriteFile(f, []byte(`apiVersion: v1
+	if err := os.WriteFile(f, []byte(`apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cfg
@@ -338,7 +364,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: svc
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	resCh, errCh := fe.Extract(context.Background(), Options{
@@ -364,7 +392,7 @@ metadata:
 func TestFileExtractor_Extract_NamespaceFilter(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "ns.yaml")
-	os.WriteFile(f, []byte(`apiVersion: v1
+	if err := os.WriteFile(f, []byte(`apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cfg1
@@ -377,7 +405,9 @@ metadata:
   name: cfg2
   namespace: dev
 data: {}
-`), 0644)
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	fe := NewFileExtractor()
 	resCh, errCh := fe.Extract(context.Background(), Options{
@@ -403,7 +433,9 @@ data: {}
 func TestFileExtractor_Extract_CancelledContext(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "deploy.yaml")
-	os.WriteFile(f, []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\ndata: {}"), 0644)
+	if err := os.WriteFile(f, []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\ndata: {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -411,9 +443,7 @@ func TestFileExtractor_Extract_CancelledContext(t *testing.T) {
 	fe := NewFileExtractor()
 	resCh, errCh := fe.Extract(ctx, Options{Paths: []string{f}})
 
-	var resources []*types.ExtractedResource
-	for r := range resCh {
-		resources = append(resources, r)
+	for range resCh {
 	}
 	for range errCh {
 	}
