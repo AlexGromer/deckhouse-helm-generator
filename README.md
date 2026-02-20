@@ -24,7 +24,7 @@ CLI-инструмент для генерации Helm charts из Kubernetes/D
 ### Из исходников
 
 ```bash
-git clone https://github.com/deckhouse/deckhouse-helm-generator.git
+git clone https://github.com/AlexGromer/deckhouse-helm-generator.git
 cd deckhouse-helm-generator
 make build
 sudo cp bin/dhg /usr/local/bin/
@@ -34,14 +34,28 @@ sudo cp bin/dhg /usr/local/bin/
 
 ```bash
 # Linux AMD64
-curl -LO https://github.com/deckhouse/deckhouse-helm-generator/releases/latest/download/dhg-linux-amd64
-chmod +x dhg-linux-amd64
-sudo mv dhg-linux-amd64 /usr/local/bin/dhg
+VERSION=$(curl -s https://api.github.com/repos/AlexGromer/deckhouse-helm-generator/releases/latest | grep tag_name | cut -d '"' -f4)
+curl -LO "https://github.com/AlexGromer/deckhouse-helm-generator/releases/download/${VERSION}/dhg_${VERSION#v}_linux_amd64.tar.gz"
+tar xzf "dhg_${VERSION#v}_linux_amd64.tar.gz"
+sudo mv dhg /usr/local/bin/
 
 # macOS ARM64
-curl -LO https://github.com/deckhouse/deckhouse-helm-generator/releases/latest/download/dhg-darwin-arm64
-chmod +x dhg-darwin-arm64
-sudo mv dhg-darwin-arm64 /usr/local/bin/dhg
+curl -LO "https://github.com/AlexGromer/deckhouse-helm-generator/releases/download/${VERSION}/dhg_${VERSION#v}_darwin_arm64.tar.gz"
+tar xzf "dhg_${VERSION#v}_darwin_arm64.tar.gz"
+sudo mv dhg /usr/local/bin/
+```
+
+### Docker
+
+```bash
+docker pull ghcr.io/alexgromer/dhg:latest
+docker run --rm -v $(pwd):/work ghcr.io/alexgromer/dhg generate -f /work/manifests -o /work/chart --chart-name myapp
+```
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew install AlexGromer/tap/dhg
 ```
 
 ## Быстрый старт

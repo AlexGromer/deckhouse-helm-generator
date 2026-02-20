@@ -35,13 +35,51 @@ checksum:
   name_template: "checksums.txt"
 
 changelog:
+  use: github
   sort: asc
+  groups:
+    - title: "New Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: "Bug Fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: "Improvements"
+      regexp: '^.*?(perf|refactor)(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: "Other"
+      order: 999
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
-      - "^ci:"
+      - "^Merge pull request"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/alexgromer/dhg:{{ .Version }}"
+      - "ghcr.io/alexgromer/dhg:latest"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.source=https://github.com/AlexGromer/deckhouse-helm-generator"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+    goos: linux
+    goarch: amd64
+
+brews:
+  - repository:
+      owner: AlexGromer
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/AlexGromer/deckhouse-helm-generator"
+    description: "CLI tool for generating Helm charts from Kubernetes/Deckhouse resources"
+    license: "Apache-2.0"
+    test: |
+      system "#{bin}/dhg", "version"
+    install: |
+      bin.install "dhg"
 
 release:
   github:
