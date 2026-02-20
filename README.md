@@ -653,7 +653,7 @@ func RegisterAll(r *processor.Registry) {
 
 ## Лицензия
 
-MIT
+Apache License 2.0 — см. [LICENSE](LICENSE).
 
 ## Авторы
 
