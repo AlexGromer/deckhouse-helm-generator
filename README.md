@@ -1,7 +1,7 @@
 # Deckhouse Helm Generator (DHG)
 
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)
-![Coverage](https://img.shields.io/badge/coverage-56%25-yellow)
+[![codecov](https://codecov.io/gh/AlexGromer/deckhouse-helm-generator/graph/badge.svg)](https://codecov.io/gh/AlexGromer/deckhouse-helm-generator)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 
 CLI-инструмент для генерации Helm charts из Kubernetes/Deckhouse ресурсов с автоматическим обнаружением связей между ресурсами.
