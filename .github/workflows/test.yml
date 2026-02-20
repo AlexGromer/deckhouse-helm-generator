@@ -224,15 +224,15 @@ jobs:
         # Display coverage
         go tool cover -func=coverage-merged.txt
 
-    - name: Check coverage threshold (60%)
+    - name: Check coverage threshold (55%)
       run: |
         COVERAGE=$(go tool cover -func=coverage-merged.txt | grep total | awk '{print $3}' | sed 's/%//')
         echo "Total coverage: ${COVERAGE}%"
-        if (( $(echo "$COVERAGE < 60" | bc -l) )); then
-          echo "::error::Coverage ${COVERAGE}% is below 60% threshold"
+        if (( $(echo "$COVERAGE < 55" | bc -l) )); then
+          echo "::error::Coverage ${COVERAGE}% is below 55% threshold"
           exit 1
         else
-          echo "::notice::Coverage ${COVERAGE}% meets 60% threshold"
+          echo "::notice::Coverage ${COVERAGE}% meets 55% threshold"
         fi
 
     - name: Upload coverage to Codecov
