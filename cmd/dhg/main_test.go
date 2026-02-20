@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"io"
-	"os"
 	"strings"
 	"testing"
 )
@@ -12,8 +10,7 @@ import (
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // executeCmd runs the root command with the given arguments, capturing cobra's
-// output writer.  Commands that use fmt.Printf directly (like newVersionCmd)
-// write to os.Stdout and are NOT captured here — use captureStdout for those.
+// output writer.
 func executeCmd(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 
@@ -25,33 +22,6 @@ func executeCmd(t *testing.T, args ...string) (string, error) {
 
 	err := root.ExecuteContext(context.Background())
 	return buf.String(), err
-}
-
-// captureStdout redirects os.Stdout to a pipe, calls fn, then returns what was
-// written.  Use this for commands that call fmt.Printf instead of
-// cmd.OutOrStdout().
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-
-	orig := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-
-	fn()
-
-	w.Close()
-	os.Stdout = orig
-
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatalf("io.Copy from pipe: %v", err)
-	}
-	r.Close()
-
-	return buf.String()
 }
 
 // ── TestNewRootCmd ────────────────────────────────────────────────────────────
@@ -239,20 +209,11 @@ func TestNewVersionCmd(t *testing.T) {
 // ── TestVersionCmd_Execute ────────────────────────────────────────────────────
 
 // TestVersionCmd_Execute verifies that running the version subcommand prints
-// the default version string.  newVersionCmd uses fmt.Printf (writing to
-// os.Stdout directly) rather than cobra's OutOrStdout(), so we capture real
-// stdout via an OS pipe.
+// the default version string via cobra's OutOrStdout().
 func TestVersionCmd_Execute(t *testing.T) {
-	var execErr error
-
-	out := captureStdout(t, func() {
-		root := newRootCmd()
-		root.SetArgs([]string{"version"})
-		execErr = root.ExecuteContext(context.Background())
-	})
-
-	if execErr != nil {
-		t.Fatalf("unexpected error executing version command: %v", execErr)
+	out, err := executeCmd(t, "version")
+	if err != nil {
+		t.Fatalf("unexpected error executing version command: %v", err)
 	}
 
 	if !strings.Contains(out, "dev") {

@@ -719,7 +719,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("dhg version %s (built: %s)\n", version, buildTime)
+			fmt.Fprintf(cmd.OutOrStdout(), "dhg version %s (built: %s)\n", version, buildTime)
 		},
 	}
 }
