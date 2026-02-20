@@ -1010,3 +1010,488 @@ func TestReferenceDetector_PVCMissingStorageClass(t *testing.T) {
 		}
 	}
 }
+
+// TestReferenceDetector_PVCEmptyStorageClassName verifies that a PVC with an empty
+// storageClassName string (field present but blank) produces no relationship.
+func TestReferenceDetector_PVCEmptyStorageClassName(t *testing.T) {
+	pvc := makeProcessedResourceExtra(
+		"v1", "PersistentVolumeClaim", "my-pvc", "default",
+		map[string]interface{}{
+			"spec": map[string]interface{}{
+				"storageClassName": "",
+				"accessModes":      []interface{}{"ReadWriteOnce"},
+			},
+		},
+	)
+
+	allResources := buildAllResources(pvc)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), pvc, allResources)
+
+	for _, rel := range rels {
+		if rel.Type == types.RelationStorageClass {
+			t.Errorf("expected no storage_class relationship for empty storageClassName, got: %v", rel)
+		}
+	}
+}
+
+// TestReferenceDetector_StatefulSetEmptyServiceName verifies that a StatefulSet with
+// spec.serviceName set to an empty string produces no relationship (the "" guard).
+func TestReferenceDetector_StatefulSetEmptyServiceName(t *testing.T) {
+	const ns = "default"
+
+	sts := makeProcessedResource(
+		"apps/v1", "StatefulSet", "my-sts", ns,
+		nil, nil,
+		map[string]interface{}{
+			"serviceName": "",
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "main",
+							"image": "nginx:latest",
+						},
+					},
+				},
+			},
+		},
+	)
+
+	svc := makeProcessedResource("v1", "Service", "some-svc", ns, nil, nil, nil)
+	allResources := buildAllResources(sts, svc)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), sts, allResources)
+
+	for _, rel := range rels {
+		if rel.Type == types.RelationNameReference {
+			t.Errorf("expected no name_reference for empty serviceName, but got: %v", rel)
+		}
+	}
+}
+
+// TestReferenceDetector_PodServiceAccount verifies that a Pod with
+// spec.serviceAccountName produces a service_account relationship.
+func TestReferenceDetector_PodServiceAccount(t *testing.T) {
+	const (
+		ns     = "default"
+		saName = "pod-sa"
+	)
+
+	pod := makeProcessedResource(
+		"v1", "Pod", "my-pod", ns,
+		nil, nil,
+		map[string]interface{}{
+			"serviceAccountName": saName,
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":  "main",
+					"image": "nginx:latest",
+				},
+			},
+		},
+	)
+
+	sa := makeProcessedResource("v1", "ServiceAccount", saName, ns, nil, nil, nil)
+	allResources := buildAllResources(pod, sa)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), pod, allResources)
+
+	saKey := sa.Original.ResourceKey()
+	found := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationServiceAccount && rel.To == saKey {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("expected service_account relationship from Pod to ServiceAccount %q, got: %v", saName, rels)
+	}
+}
+
+// TestReferenceDetector_CronJobServiceAccount verifies that a CronJob with
+// spec.jobTemplate.spec.template.spec.serviceAccountName produces a
+// service_account relationship.
+func TestReferenceDetector_CronJobServiceAccount(t *testing.T) {
+	const (
+		ns     = "default"
+		saName = "cron-sa"
+	)
+
+	cronJob := makeProcessedResource(
+		"batch/v1", "CronJob", "my-cronjob", ns,
+		nil, nil,
+		map[string]interface{}{
+			"jobTemplate": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"serviceAccountName": saName,
+							"containers": []interface{}{
+								map[string]interface{}{
+									"name":  "job",
+									"image": "job:latest",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+
+	sa := makeProcessedResource("v1", "ServiceAccount", saName, ns, nil, nil, nil)
+	allResources := buildAllResources(cronJob, sa)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), cronJob, allResources)
+
+	saKey := sa.Original.ResourceKey()
+	found := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationServiceAccount && rel.To == saKey {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("expected service_account relationship from CronJob to ServiceAccount %q, got: %v", saName, rels)
+	}
+}
+
+// TestReferenceDetector_PodImagePullSecrets verifies that a Pod with imagePullSecrets
+// at spec.imagePullSecrets produces image_pull_secret relationships.
+func TestReferenceDetector_PodImagePullSecrets(t *testing.T) {
+	const (
+		ns         = "default"
+		secretName = "pod-registry-secret"
+	)
+
+	pod := makeProcessedResource(
+		"v1", "Pod", "my-pod", ns,
+		nil, nil,
+		map[string]interface{}{
+			"imagePullSecrets": []interface{}{
+				map[string]interface{}{"name": secretName},
+			},
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":  "main",
+					"image": "private/app:latest",
+				},
+			},
+		},
+	)
+
+	secret := makeProcessedResource("v1", "Secret", secretName, ns, nil, nil, nil)
+	allResources := buildAllResources(pod, secret)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), pod, allResources)
+
+	secretKey := secret.Original.ResourceKey()
+	found := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationImagePullSecret && rel.To == secretKey {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("expected image_pull_secret relationship from Pod to Secret %q, got: %v", secretName, rels)
+	}
+}
+
+// TestReferenceDetector_CronJobImagePullSecrets verifies that a CronJob with
+// imagePullSecrets in the pod template produces image_pull_secret relationships.
+func TestReferenceDetector_CronJobImagePullSecrets(t *testing.T) {
+	const (
+		ns         = "default"
+		secretName = "cron-registry-secret"
+	)
+
+	cronJob := makeProcessedResource(
+		"batch/v1", "CronJob", "my-cronjob", ns,
+		nil, nil,
+		map[string]interface{}{
+			"jobTemplate": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"imagePullSecrets": []interface{}{
+								map[string]interface{}{"name": secretName},
+							},
+							"containers": []interface{}{
+								map[string]interface{}{
+									"name":  "job",
+									"image": "private/job:latest",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+
+	secret := makeProcessedResource("v1", "Secret", secretName, ns, nil, nil, nil)
+	allResources := buildAllResources(cronJob, secret)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), cronJob, allResources)
+
+	secretKey := secret.Original.ResourceKey()
+	found := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationImagePullSecret && rel.To == secretKey {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("expected image_pull_secret relationship from CronJob to Secret %q, got: %v", secretName, rels)
+	}
+}
+
+// TestReferenceDetector_ImagePullSecretsMalformed verifies that malformed entries in
+// imagePullSecrets (non-map entries, missing name field, empty name) are skipped without
+// panicking and produce no relationships.
+func TestReferenceDetector_ImagePullSecretsMalformed(t *testing.T) {
+	const ns = "default"
+
+	deploy := makeProcessedResource(
+		"apps/v1", "Deployment", "my-deploy", ns,
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"imagePullSecrets": []interface{}{
+						"not-a-map",
+						map[string]interface{}{"name": ""},
+						map[string]interface{}{"notname": "something"},
+					},
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "main",
+							"image": "nginx:latest",
+						},
+					},
+				},
+			},
+		},
+	)
+
+	allResources := buildAllResources(deploy)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), deploy, allResources)
+
+	for _, rel := range rels {
+		if rel.Type == types.RelationImagePullSecret {
+			t.Errorf("expected no image_pull_secret relationships for malformed entries, got: %v", rel)
+		}
+	}
+}
+
+// TestReferenceDetector_RoleBindingNoRoleRefKind verifies that a RoleBinding whose
+// roleRef.kind is not "Role" or "ClusterRole" produces no role_binding to a role
+// (but may still produce subject relationships if subjects exist).
+func TestReferenceDetector_RoleBindingNoRoleRefKind(t *testing.T) {
+	const ns = "default"
+
+	rb := makeProcessedResourceExtra(
+		"rbac.authorization.k8s.io/v1", "RoleBinding", "my-rb", ns,
+		map[string]interface{}{
+			"roleRef": map[string]interface{}{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     "UnknownKind",
+				"name":     "some-role",
+			},
+		},
+	)
+
+	allResources := buildAllResources(rb)
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), rb, allResources)
+
+	for _, rel := range rels {
+		if rel.Type == types.RelationRoleBinding && rel.Field == "roleRef" {
+			t.Errorf("expected no roleRef relationship for unknown roleRef kind, got: %v", rel)
+		}
+	}
+}
+
+// TestReferenceDetector_RoleBindingSubjectWithoutNamespace verifies that a subject
+// without an explicit namespace defaults to the RoleBinding's namespace.
+func TestReferenceDetector_RoleBindingSubjectWithoutNamespace(t *testing.T) {
+	const (
+		ns     = "mynamespace"
+		saName = "my-sa"
+	)
+
+	rb := makeProcessedResourceExtra(
+		"rbac.authorization.k8s.io/v1", "RoleBinding", "my-rb", ns,
+		map[string]interface{}{
+			"roleRef": map[string]interface{}{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     "Role",
+				"name":     "some-role",
+			},
+			"subjects": []interface{}{
+				map[string]interface{}{
+					"kind": "ServiceAccount",
+					"name": saName,
+					// no "namespace" key — should default to RoleBinding's namespace
+				},
+			},
+		},
+	)
+
+	sa := makeProcessedResource("v1", "ServiceAccount", saName, ns, nil, nil, nil)
+	allResources := buildAllResources(rb, sa)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), rb, allResources)
+
+	saKey := sa.Original.ResourceKey()
+	found := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationRoleBinding && rel.To == saKey {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("expected role_binding relationship to SA %q using RoleBinding namespace, got: %v", saName, rels)
+	}
+}
+
+// TestReferenceDetector_IngressEmptyServiceName verifies that an Ingress path whose
+// backend service name is present in the object but set to an empty string ("")
+// produces no relationship. This covers the `serviceName == ""` branch of the
+// `!found || serviceName == ""` guard in detectIngressToService.
+func TestReferenceDetector_IngressEmptyServiceName(t *testing.T) {
+	const ns = "default"
+
+	ingress := makeProcessedResource(
+		"networking.k8s.io/v1", "Ingress", "my-ingress", ns,
+		nil, nil,
+		map[string]interface{}{
+			"rules": []interface{}{
+				map[string]interface{}{
+					"host": "example.com",
+					"http": map[string]interface{}{
+						"paths": []interface{}{
+							map[string]interface{}{
+								"path":     "/",
+								"pathType": "Prefix",
+								"backend": map[string]interface{}{
+									"service": map[string]interface{}{
+										// name field is present but empty string
+										"name": "",
+										"port": map[string]interface{}{
+											"number": int64(80),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	)
+
+	// Add a Service so the lookup would succeed if the guard were bypassed.
+	svc := makeProcessedResource("v1", "Service", "any-service", ns, nil, nil, nil)
+	allResources := buildAllResources(ingress, svc)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), ingress, allResources)
+
+	for _, rel := range rels {
+		if rel.Type == types.RelationNameReference {
+			t.Errorf("expected no name_reference for empty backend service name, but got: %v", rel)
+		}
+	}
+}
+
+// TestReferenceDetector_RoleBindingNonServiceAccountSubjects verifies that subjects
+// of kind "User" or "Group" — which are not ServiceAccounts — are skipped and produce
+// no role_binding relationships. Also covers a ServiceAccount subject with an empty
+// name (the `name != ""` guard).
+func TestReferenceDetector_RoleBindingNonServiceAccountSubjects(t *testing.T) {
+	const (
+		ns     = "default"
+		saName = "real-sa"
+	)
+
+	rb := makeProcessedResourceExtra(
+		"rbac.authorization.k8s.io/v1", "RoleBinding", "my-rb", ns,
+		map[string]interface{}{
+			"roleRef": map[string]interface{}{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     "Role",
+				"name":     "my-role",
+			},
+			"subjects": []interface{}{
+				// kind "User" — not a ServiceAccount, must be skipped
+				map[string]interface{}{
+					"kind": "User",
+					"name": "alice",
+				},
+				// kind "Group" — not a ServiceAccount, must be skipped
+				map[string]interface{}{
+					"kind": "Group",
+					"name": "developers",
+				},
+				// ServiceAccount with empty name — the `name != ""` guard must skip it
+				map[string]interface{}{
+					"kind":      "ServiceAccount",
+					"name":      "",
+					"namespace": ns,
+				},
+				// A valid ServiceAccount to confirm the loop continues past the skipped entries
+				map[string]interface{}{
+					"kind":      "ServiceAccount",
+					"name":      saName,
+					"namespace": ns,
+				},
+			},
+		},
+	)
+
+	sa := makeProcessedResource("v1", "ServiceAccount", saName, ns, nil, nil, nil)
+	allResources := buildAllResources(rb, sa)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), rb, allResources)
+
+	saKey := sa.Original.ResourceKey()
+	foundSA := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationRoleBinding {
+			// There must not be a relationship pointing to "alice" or "developers"
+			if rel.To.Name == "alice" || rel.To.Name == "developers" {
+				t.Errorf("unexpected relationship to User/Group subject: %v", rel)
+			}
+			// The valid ServiceAccount should be found
+			if rel.To == saKey {
+				foundSA = true
+			}
+		}
+	}
+
+	if !foundSA {
+		t.Errorf("expected role_binding relationship to ServiceAccount %q to still be found, got: %v", saName, rels)
+	}
+}

@@ -686,3 +686,187 @@ func TestMatchesNamespaceFilters_MultipleNamespaces(t *testing.T) {
 		t.Error("should not match dev in multi-ns filter")
 	}
 }
+
+func TestMatchesNamespaceFilters_ClusterScopedWithMultiNs(t *testing.T) {
+	fe := NewFileExtractor()
+	// Cluster-scoped resources should be included even with multi-namespace filter
+	if !fe.matchesNamespaceFilters("", Options{Namespaces: []string{"prod", "staging"}}) {
+		t.Error("cluster-scoped resources should be included with multi-ns filter")
+	}
+}
+
+// ── Edge cases for coverage ──────────────────────────────────────────────────
+
+func TestFileExtractor_Extract_NonexistentPath(t *testing.T) {
+	fe := NewFileExtractor()
+	resCh, errCh := fe.Extract(context.Background(), Options{
+		Paths: []string{"/nonexistent/path/file.yaml"},
+	})
+
+	for range resCh {
+	}
+	var gotErr bool
+	for e := range errCh {
+		if e != nil {
+			gotErr = true
+		}
+	}
+	if !gotErr {
+		t.Error("expected error for nonexistent path")
+	}
+}
+
+func TestFileExtractor_Extract_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(f, []byte("key: [invalid yaml {{{\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fe := NewFileExtractor()
+	resCh, errCh := fe.Extract(context.Background(), Options{Paths: []string{f}})
+
+	var resources []*types.ExtractedResource
+	for r := range resCh {
+		resources = append(resources, r)
+	}
+	var errors []error
+	for e := range errCh {
+		errors = append(errors, e)
+	}
+
+	if len(errors) == 0 {
+		t.Error("expected parse error for invalid YAML")
+	}
+	if len(resources) != 0 {
+		t.Errorf("got %d resources; want 0 from invalid YAML", len(resources))
+	}
+}
+
+func TestFileExtractor_Extract_NoAPIVersionOrKind(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "noapi.yaml")
+	if err := os.WriteFile(f, []byte("key: value\nfoo: bar\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fe := NewFileExtractor()
+	resCh, errCh := fe.Extract(context.Background(), Options{Paths: []string{f}})
+
+	var resources []*types.ExtractedResource
+	for r := range resCh {
+		resources = append(resources, r)
+	}
+	for range errCh {
+	}
+
+	if len(resources) != 0 {
+		t.Errorf("got %d resources; want 0 (no apiVersion/kind)", len(resources))
+	}
+}
+
+func TestFileExtractor_Extract_NonYAMLFilesSkipped(t *testing.T) {
+	dir := t.TempDir()
+	// Create a non-YAML file in the directory
+	if err := os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Create a valid YAML file
+	if err := os.WriteFile(filepath.Join(dir, "deploy.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\ndata: {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fe := NewFileExtractor()
+	resCh, errCh := fe.Extract(context.Background(), Options{
+		Paths:     []string{dir},
+		Recursive: true,
+	})
+
+	var resources []*types.ExtractedResource
+	for r := range resCh {
+		resources = append(resources, r)
+	}
+	for range errCh {
+	}
+
+	if len(resources) != 1 {
+		t.Errorf("got %d resources; want 1 (non-YAML should be skipped)", len(resources))
+	}
+}
+
+func TestFileExtractor_Extract_EmptyObject(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "empty.yaml")
+	// YAML that parses to empty object
+	if err := os.WriteFile(f, []byte("---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fe := NewFileExtractor()
+	resCh, errCh := fe.Extract(context.Background(), Options{Paths: []string{f}})
+
+	var resources []*types.ExtractedResource
+	for r := range resCh {
+		resources = append(resources, r)
+	}
+	for range errCh {
+	}
+
+	if len(resources) != 0 {
+		t.Errorf("got %d resources; want 0 for empty object", len(resources))
+	}
+}
+
+func TestFileExtractor_Extract_MultiplePaths(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir1, "a.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\ndata: {}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir2, "b.yaml"), []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: b\ntype: Opaque"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fe := NewFileExtractor()
+	resCh, errCh := fe.Extract(context.Background(), Options{
+		Paths: []string{
+			filepath.Join(dir1, "a.yaml"),
+			filepath.Join(dir2, "b.yaml"),
+		},
+	})
+
+	var resources []*types.ExtractedResource
+	for r := range resCh {
+		resources = append(resources, r)
+	}
+	for range errCh {
+	}
+
+	if len(resources) != 2 {
+		t.Errorf("got %d resources; want 2 from multiple paths", len(resources))
+	}
+}
+
+func TestParseGVK_EmptyAPIVersion(t *testing.T) {
+	data := []byte("kind: Service")
+	gvk, err := ParseGVK(data)
+	if err != nil {
+		t.Fatalf("ParseGVK() error: %v", err)
+	}
+	// Empty apiVersion should still parse (group and version will be empty)
+	if gvk.Kind != "Service" {
+		t.Errorf("Kind = %q; want Service", gvk.Kind)
+	}
+}
+
+func TestParseGVK_CRD(t *testing.T) {
+	data := []byte("apiVersion: deckhouse.io/v1alpha1\nkind: ModuleConfig")
+	gvk, err := ParseGVK(data)
+	if err != nil {
+		t.Fatalf("ParseGVK() error: %v", err)
+	}
+	if gvk.Group != "deckhouse.io" || gvk.Version != "v1alpha1" || gvk.Kind != "ModuleConfig" {
+		t.Errorf("GVK = %v; want deckhouse.io/v1alpha1/ModuleConfig", gvk)
+	}
+}
