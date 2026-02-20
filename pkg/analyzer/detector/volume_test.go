@@ -1148,7 +1148,7 @@ func TestVolumeDetector_DaemonSetNoVolumes(t *testing.T) {
 // TestVolumeDetector_DeploymentVolumesButNoContainers verifies that a Deployment with
 // a volumes field (found=true) but no containers key in spec.template.spec causes
 // detectEnvFromReferences and detectEnvValueFromReferences to return early via their
-// own !found guard (line ~243 in volume.go).
+// own !found guard.
 func TestVolumeDetector_DeploymentVolumesButNoContainers(t *testing.T) {
 	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
 		nil, nil,
@@ -1181,10 +1181,62 @@ func TestVolumeDetector_DeploymentVolumesButNoContainers(t *testing.T) {
 	}
 }
 
+// TestVolumeDetector_ProjectedVolumeNonMapSource verifies that a projected volume whose
+// "sources" field is a valid []interface{} but contains a non-map element (e.g., a
+// string) causes the inner `sourceMap, ok := source.(map[string]interface{})` type
+// assertion to fail, triggering the `if !ok { continue }` guard at line 157-159 of
+// volume.go. The non-map source must be skipped gracefully.
+func TestVolumeDetector_ProjectedVolumeNonMapSource(t *testing.T) {
+	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"volumes": []interface{}{
+						map[string]interface{}{
+							"name": "projected-vol",
+							"projected": map[string]interface{}{
+								// sources IS a []interface{} (outer assertion passes),
+								// but contains a non-map entry first — triggers !ok continue.
+								// The second entry is a valid map but has no configMap/secret
+								// so no relationship is produced.
+								"sources": []interface{}{
+									"not-a-map-source",
+									map[string]interface{}{
+										"serviceAccountToken": map[string]interface{}{
+											"expirationSeconds": int64(3600),
+										},
+									},
+								},
+							},
+						},
+					},
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "app",
+							"image": "app:latest",
+						},
+					},
+				},
+			},
+		})
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		deployment.Original.ResourceKey(): deployment,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), deployment, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("expected 0 relationships for projected volume with non-map source entry, got %d: %v", len(rels), rels)
+	}
+}
+
 // TestVolumeDetector_ProjectedVolumeNonSliceSources verifies that a projected volume
-// whose "sources" field is not a []interface{} (e.g., is a string) is handled
-// gracefully without panicking and produces no relationships. This covers the
-// `projectedMap["sources"].([]interface{})` type assertion failing branch in Detect.
+// whose "sources" field is not a []interface{} (e.g., is a string) is skipped without
+// panicking. This covers the outer `if sources, ok := projectedMap["sources"].([]interface{}); ok`
+// assertion failing.
 func TestVolumeDetector_ProjectedVolumeNonSliceSources(t *testing.T) {
 	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
 		nil, nil,
@@ -1196,9 +1248,7 @@ func TestVolumeDetector_ProjectedVolumeNonSliceSources(t *testing.T) {
 							"name": "projected-vol",
 							"projected": map[string]interface{}{
 								// "sources" is a string, not a []interface{} —
-								// the type assertion `.([]interface{})` must fail
-								// gracefully (the `if sources, ok := ...; ok` branch
-								// is skipped).
+								// the outer type assertion `.([]interface{})` fails gracefully.
 								"sources": "not-a-slice",
 							},
 						},
