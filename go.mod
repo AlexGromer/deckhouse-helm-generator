@@ -8,7 +8,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	k8s.io/api v0.31.0
 	k8s.io/apimachinery v0.31.0
-	sigs.k8s.io/yaml v1.4.0
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -22,6 +22,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
