@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-20
+
+> Released: Repository infrastructure — GoReleaser, Docker, Homebrew, test coverage boost
+
+### Added
+
+#### Distribution
+- **GoReleaser** release pipeline: multi-platform binaries (linux/darwin/windows, amd64/arm64), checksums, grouped changelog
+- **Docker image** via GHCR (`ghcr.io/alexgromer/dhg`) with OCI labels, built by GoReleaser
+- **Homebrew tap** formula (`brew install AlexGromer/tap/dhg`) via GoReleaser
+- Docker and Homebrew installation sections in README
+
+#### Testing
+- Test coverage boost: 53.1% → 78.3% across all packages
+- New test suites: types (100%), helm (98.7%), processor (98.1%), analyzer (98.3%), extractor (88.9%), value processor (93.0%)
+- CLI smoke tests: 13 tests for command constructors, flags, required flags, help output
+- CI now includes `./cmd/...` in unit test coverage
+
+#### Infrastructure
+- Apache-2.0 LICENSE, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md
+- Issue templates (bug report, feature request), PR template
+- Dependabot for Go modules, GitHub Actions, Docker
+- CodeQL security analysis workflow
+- CODEOWNERS for branch protection
+- Codecov integration with dynamic coverage badge
+
+### Changed
+- Coverage gate raised from 55% to 70%
+- Go CI matrix: removed 1.22 (incompatible with go.mod 1.24), kept 1.23 + 1.24
+- GoReleaser ldflags aligned with actual `main.go` vars
+
+### Fixed
+- `newVersionCmd` bug: `fmt.Printf` → `fmt.Fprintf(cmd.OutOrStdout())` — output now capturable by cobra
+- README download links fixed to match GoReleaser archive naming
+- Git clone URL corrected from `deckhouse/` to `AlexGromer/`
+
+---
+
+## [0.5.0] - 2026-02-19
+
+> Released: Breaking change — SanitizeServiceName for all K8s processors
+
+### Changed
+
+- **BREAKING**: Service names derived from resource labels/names are now converted to camelCase (e.g. `my-app` → `myApp`) for consistency with Deckhouse CRD processors and correct Go template access. Users upgrading should rename hyphenated values keys to camelCase equivalents.
+
+### Fixed
+
+#### Code Review Findings (2 CRITICAL + 3 HIGH + 9 MEDIUM + 6 LOW)
+- **CRITICAL**: Fix path traversal in volume detector — validate mount paths
+- **CRITICAL**: Add Helm template injection escaping — `{{` / `}}` in resource values no longer break templates
+- Fix `sanitizeName` bug — `continue` skipped camelCase marker
+- Add `relFrom`/`relTo` adjacency indexes to `ResourceGraph` — O(1) lookups replace O(N) scans
+- Remove dead `WithDefaultDetectors()` function
+- Apply consistent 1MB scanner buffer to `isCommentOnly()`
+- Upgrade `golang.org/x/net` v0.26.0 → v0.50.0
+- Sort template keys before writing for deterministic output
+- Remove unused `currentService` variable in values annotator
+- Use `strings.Builder` for O(1) amortized string concatenation
+- Use full SHA-256 (32 bytes) for ExternalFileManager checksum
+- Clarify `--source` flag description — cluster/gitops sources not yet implemented
+- Replace `goto` with labeled `break` in channel-draining loops
+
+---
+
 ## [0.4.0] - 2026-02-19
 
 > Released: Deckhouse CRDs + Monitoring Stack + Modern K8s Patterns (18 new processors, 36 total)
