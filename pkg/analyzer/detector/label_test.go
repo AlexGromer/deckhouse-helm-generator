@@ -412,3 +412,177 @@ func TestLabelDetector_ServiceMonitorToService(t *testing.T) {
 		t.Errorf("To = %v; want %v", rel.To, svc.Original.ResourceKey())
 	}
 }
+
+// TestLabelDetector_ServiceMonitorNoSelector verifies that a ServiceMonitor with no
+// spec.selector field produces no relationships.
+func TestLabelDetector_ServiceMonitorNoSelector(t *testing.T) {
+	sm := makeProcessedResource(
+		"monitoring.coreos.com/v1", "ServiceMonitor", "my-sm", "default",
+		nil, nil,
+		map[string]interface{}{
+			"endpoints": []interface{}{
+				map[string]interface{}{"port": "metrics"},
+			},
+		},
+	)
+
+	svc := makeProcessedResource(
+		"v1", "Service", "my-svc", "default",
+		map[string]interface{}{
+			"app": "my-app",
+		},
+		nil,
+		nil,
+	)
+
+	allResources := buildAllResources(sm, svc)
+
+	d := NewLabelSelectorDetector()
+	rels := d.Detect(context.Background(), sm, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("ServiceMonitor without selector: expected 0 relationships, got %d", len(rels))
+	}
+}
+
+// TestLabelDetector_ServiceMonitorEmptyMatchLabels verifies that a ServiceMonitor with
+// an empty matchLabels map produces no relationships (guard: len(matchLabels) == 0).
+func TestLabelDetector_ServiceMonitorEmptyMatchLabels(t *testing.T) {
+	sm := makeProcessedResource(
+		"monitoring.coreos.com/v1", "ServiceMonitor", "my-sm", "default",
+		nil, nil,
+		map[string]interface{}{
+			"selector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{},
+			},
+		},
+	)
+
+	svc := makeProcessedResource(
+		"v1", "Service", "my-svc", "default",
+		map[string]interface{}{
+			"app": "my-app",
+		},
+		nil,
+		nil,
+	)
+
+	allResources := buildAllResources(sm, svc)
+
+	d := NewLabelSelectorDetector()
+	rels := d.Detect(context.Background(), sm, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("ServiceMonitor with empty matchLabels: expected 0 relationships, got %d", len(rels))
+	}
+}
+
+// TestLabelDetector_ServiceMonitorServiceWithNoLabels verifies that a ServiceMonitor
+// with a valid matchLabels does not match a Service that has no labels
+// (the len(serviceLabels) == 0 branch in detectServiceMonitorToService).
+func TestLabelDetector_ServiceMonitorServiceWithNoLabels(t *testing.T) {
+	sm := makeProcessedResource(
+		"monitoring.coreos.com/v1", "ServiceMonitor", "my-sm", "default",
+		nil, nil,
+		map[string]interface{}{
+			"selector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{
+					"app": "my-app",
+				},
+			},
+		},
+	)
+
+	// Service has no labels — should not match
+	svc := makeProcessedResource(
+		"v1", "Service", "unlabeled-svc", "default",
+		nil, // no labels
+		nil,
+		nil,
+	)
+
+	allResources := buildAllResources(sm, svc)
+
+	d := NewLabelSelectorDetector()
+	rels := d.Detect(context.Background(), sm, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("ServiceMonitor vs unlabeled Service: expected 0 relationships, got %d", len(rels))
+	}
+}
+
+// TestLabelDetector_ServiceMonitorCrossNamespace verifies that a ServiceMonitor does not
+// match a Service in a different namespace.
+func TestLabelDetector_ServiceMonitorCrossNamespace(t *testing.T) {
+	sm := makeProcessedResource(
+		"monitoring.coreos.com/v1", "ServiceMonitor", "my-sm", "ns-a",
+		nil, nil,
+		map[string]interface{}{
+			"selector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{
+					"app": "my-app",
+				},
+			},
+		},
+	)
+
+	svc := makeProcessedResource(
+		"v1", "Service", "my-svc", "ns-b",
+		map[string]interface{}{
+			"app": "my-app",
+		},
+		nil,
+		nil,
+	)
+
+	allResources := buildAllResources(sm, svc)
+
+	d := NewLabelSelectorDetector()
+	rels := d.Detect(context.Background(), sm, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("cross-namespace ServiceMonitor→Service: expected 0 relationships, got %d", len(rels))
+	}
+}
+
+// TestLabelDetector_WorkloadWithEmptyPodTemplateLabels verifies that a Service selector
+// does not match a workload that has no pod template labels
+// (the len(podLabels) == 0 branch in detectServiceToWorkload).
+func TestLabelDetector_WorkloadWithEmptyPodTemplateLabels(t *testing.T) {
+	svc := makeProcessedResource(
+		"v1", "Service", "my-svc", "default",
+		nil, nil,
+		map[string]interface{}{
+			"selector": map[string]interface{}{
+				"app": "my-app",
+			},
+		},
+	)
+
+	// Deployment with no pod template labels
+	deploy := makeProcessedResource(
+		"apps/v1", "Deployment", "my-deploy", "default",
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "app",
+							"image": "app:latest",
+						},
+					},
+				},
+			},
+		},
+	)
+
+	allResources := buildAllResources(svc, deploy)
+
+	d := NewLabelSelectorDetector()
+	rels := d.Detect(context.Background(), svc, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("workload with empty pod template labels: expected 0 relationships, got %d", len(rels))
+	}
+}

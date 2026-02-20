@@ -739,3 +739,488 @@ func TestVolumeDetector_MissingTarget(t *testing.T) {
 		t.Errorf("expected 0 relationships when target ConfigMap is missing from allResources, got %d", len(rels))
 	}
 }
+
+// ============================================================
+// CronJob / Pod paths for envFrom and env valueFrom
+// ============================================================
+
+// TestVolumeDetector_CronJobEnvFrom verifies that a CronJob with envFrom configMapRef in
+// the pod template spec produces an env_from relationship.
+func TestVolumeDetector_CronJobEnvFrom(t *testing.T) {
+	cronJob := makeProcessedResource("batch/v1", "CronJob", "my-cronjob", "default",
+		nil, nil,
+		map[string]interface{}{
+			"jobTemplate": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"volumes": []interface{}{},
+							"containers": []interface{}{
+								map[string]interface{}{
+									"name":  "job",
+									"image": "job:latest",
+									"envFrom": []interface{}{
+										map[string]interface{}{
+											"configMapRef": map[string]interface{}{
+												"name": "cron-env-config",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+
+	cmKey := resourceKey("v1", "ConfigMap", "default", "cron-env-config")
+	cm := makeProcessedResource("v1", "ConfigMap", "cron-env-config", "default", nil, nil, nil)
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		cronJob.Original.ResourceKey(): cronJob,
+		cmKey:                          cm,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), cronJob, allResources)
+
+	found := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationEnvFrom && rel.To == cmKey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected env_from relationship from CronJob to ConfigMap, got: %v", rels)
+	}
+}
+
+// TestVolumeDetector_PodEnvFrom verifies that a Pod with envFrom secretRef produces
+// an env_from relationship.
+func TestVolumeDetector_PodEnvFrom(t *testing.T) {
+	pod := makeProcessedResource("v1", "Pod", "my-pod", "default",
+		nil, nil,
+		map[string]interface{}{
+			"volumes": []interface{}{},
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":  "app",
+					"image": "app:latest",
+					"envFrom": []interface{}{
+						map[string]interface{}{
+							"secretRef": map[string]interface{}{
+								"name": "pod-secrets",
+							},
+						},
+					},
+				},
+			},
+		})
+
+	secretKey := resourceKey("v1", "Secret", "default", "pod-secrets")
+	secret := makeProcessedResource("v1", "Secret", "pod-secrets", "default", nil, nil, nil)
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		pod.Original.ResourceKey(): pod,
+		secretKey:                  secret,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), pod, allResources)
+
+	found := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationEnvFrom && rel.To == secretKey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected env_from relationship from Pod to Secret, got: %v", rels)
+	}
+}
+
+// TestVolumeDetector_CronJobEnvValueFrom verifies that a CronJob with
+// env[].valueFrom.configMapKeyRef produces an env_value_from relationship.
+func TestVolumeDetector_CronJobEnvValueFrom(t *testing.T) {
+	cronJob := makeProcessedResource("batch/v1", "CronJob", "my-cronjob", "default",
+		nil, nil,
+		map[string]interface{}{
+			"jobTemplate": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"volumes": []interface{}{},
+							"containers": []interface{}{
+								map[string]interface{}{
+									"name":  "job",
+									"image": "job:latest",
+									"env": []interface{}{
+										map[string]interface{}{
+											"name": "DB_HOST",
+											"valueFrom": map[string]interface{}{
+												"configMapKeyRef": map[string]interface{}{
+													"name": "db-config",
+													"key":  "host",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+
+	cmKey := resourceKey("v1", "ConfigMap", "default", "db-config")
+	cm := makeProcessedResource("v1", "ConfigMap", "db-config", "default", nil, nil, nil)
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		cronJob.Original.ResourceKey(): cronJob,
+		cmKey:                          cm,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), cronJob, allResources)
+
+	found := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationEnvValueFrom && rel.To == cmKey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected env_value_from relationship from CronJob to ConfigMap, got: %v", rels)
+	}
+}
+
+// TestVolumeDetector_PodEnvValueFrom verifies that a Pod with
+// env[].valueFrom.secretKeyRef produces an env_value_from relationship.
+func TestVolumeDetector_PodEnvValueFrom(t *testing.T) {
+	pod := makeProcessedResource("v1", "Pod", "my-pod", "default",
+		nil, nil,
+		map[string]interface{}{
+			"volumes": []interface{}{},
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":  "app",
+					"image": "app:latest",
+					"env": []interface{}{
+						map[string]interface{}{
+							"name": "API_KEY",
+							"valueFrom": map[string]interface{}{
+								"secretKeyRef": map[string]interface{}{
+									"name": "api-secret",
+									"key":  "key",
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+
+	secretKey := resourceKey("v1", "Secret", "default", "api-secret")
+	secret := makeProcessedResource("v1", "Secret", "api-secret", "default", nil, nil, nil)
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		pod.Original.ResourceKey(): pod,
+		secretKey:                  secret,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), pod, allResources)
+
+	found := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationEnvValueFrom && rel.To == secretKey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected env_value_from relationship from Pod to Secret, got: %v", rels)
+	}
+}
+
+// TestVolumeDetector_EnvFromMalformedContainers verifies that malformed container
+// entries (non-map container, no envFrom field, non-slice envFrom, non-map envFrom
+// source) are handled gracefully without panicking and produce no relationships.
+func TestVolumeDetector_EnvFromMalformedContainers(t *testing.T) {
+	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"volumes": []interface{}{},
+					"containers": []interface{}{
+						"not-a-map-container",
+						map[string]interface{}{
+							"name":  "no-envfrom",
+							"image": "app:latest",
+							// no envFrom field
+						},
+						map[string]interface{}{
+							"name":    "bad-envfrom-type",
+							"image":   "app:latest",
+							"envFrom": "not-a-slice",
+						},
+						map[string]interface{}{
+							"name":  "bad-envfrom-entry",
+							"image": "app:latest",
+							"envFrom": []interface{}{
+								"not-a-map-entry",
+							},
+						},
+					},
+				},
+			},
+		})
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		deployment.Original.ResourceKey(): deployment,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), deployment, allResources)
+
+	for _, rel := range rels {
+		if rel.Type == types.RelationEnvFrom {
+			t.Errorf("expected no env_from relationships for malformed containers, got: %v", rel)
+		}
+	}
+}
+
+// TestVolumeDetector_EnvValueFromMalformedContainers verifies that malformed env[]
+// entries (non-map env entry, no valueFrom field, non-map valueFrom) are handled
+// gracefully without panicking and produce no env_value_from relationships.
+func TestVolumeDetector_EnvValueFromMalformedContainers(t *testing.T) {
+	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"volumes": []interface{}{},
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "app",
+							"image": "app:latest",
+							"env": []interface{}{
+								"not-a-map-env-entry",
+								map[string]interface{}{
+									"name": "NO_VALUE_FROM",
+									// no valueFrom key
+								},
+								map[string]interface{}{
+									"name":      "BAD_VALUE_FROM",
+									"valueFrom": "not-a-map",
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		deployment.Original.ResourceKey(): deployment,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), deployment, allResources)
+
+	for _, rel := range rels {
+		if rel.Type == types.RelationEnvValueFrom {
+			t.Errorf("expected no env_value_from relationships for malformed env entries, got: %v", rel)
+		}
+	}
+}
+
+// TestVolumeDetector_MalformedVolumeEntries verifies that non-map volume entries in the
+// volumes slice are skipped without panicking.
+func TestVolumeDetector_MalformedVolumeEntries(t *testing.T) {
+	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"volumes": []interface{}{
+						"not-a-map-volume",
+						map[string]interface{}{
+							"name":     "empty-vol",
+							"emptyDir": map[string]interface{}{},
+						},
+					},
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "app",
+							"image": "app:latest",
+						},
+					},
+				},
+			},
+		})
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		deployment.Original.ResourceKey(): deployment,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), deployment, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("expected 0 relationships for malformed volume entries, got %d", len(rels))
+	}
+}
+
+// ============================================================
+// Additional edge case coverage tests
+// ============================================================
+
+// TestVolumeDetector_JobKindNoVolumes verifies that a Job workload with no volumes
+// field returns early from Detect without panicking (covers the !found early return
+// in the volumes lookup for the else-branch kind path).
+func TestVolumeDetector_JobKindNoVolumes(t *testing.T) {
+	job := makeProcessedResource("batch/v1", "Job", "my-job", "default",
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					// no "volumes" key — triggers !found early return
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "worker",
+							"image": "worker:latest",
+						},
+					},
+				},
+			},
+		})
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		job.Original.ResourceKey(): job,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), job, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("expected 0 relationships for Job with no volumes, got %d", len(rels))
+	}
+}
+
+// TestVolumeDetector_DaemonSetNoVolumes verifies that a DaemonSet with no volumes
+// field returns early from Detect (covers !found path for DaemonSet/StatefulSet/Job kind).
+func TestVolumeDetector_DaemonSetNoVolumes(t *testing.T) {
+	ds := makeProcessedResource("apps/v1", "DaemonSet", "my-ds", "default",
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					// no "volumes" key
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "agent",
+							"image": "agent:latest",
+						},
+					},
+				},
+			},
+		})
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		ds.Original.ResourceKey(): ds,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), ds, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("expected 0 relationships for DaemonSet with no volumes, got %d", len(rels))
+	}
+}
+
+// TestVolumeDetector_DeploymentVolumesButNoContainers verifies that a Deployment with
+// a volumes field (found=true) but no containers key in spec.template.spec causes
+// detectEnvFromReferences and detectEnvValueFromReferences to return early via their
+// own !found guard (line ~243 in volume.go).
+func TestVolumeDetector_DeploymentVolumesButNoContainers(t *testing.T) {
+	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"volumes": []interface{}{
+						map[string]interface{}{
+							"name":     "data",
+							"emptyDir": map[string]interface{}{},
+						},
+					},
+					// no "containers" key — triggers !found in detectEnvFromReferences
+					// and detectEnvValueFromReferences
+				},
+			},
+		})
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		deployment.Original.ResourceKey(): deployment,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), deployment, allResources)
+
+	for _, rel := range rels {
+		if rel.Type == types.RelationEnvFrom || rel.Type == types.RelationEnvValueFrom {
+			t.Errorf("expected no env relationships when no containers key present, got: %v", rel)
+		}
+	}
+}
+
+// TestVolumeDetector_ProjectedVolumeNonSliceSources verifies that a projected volume
+// whose "sources" field is not a []interface{} (e.g., is a string) is handled
+// gracefully without panicking and produces no relationships. This covers the
+// `projectedMap["sources"].([]interface{})` type assertion failing branch in Detect.
+func TestVolumeDetector_ProjectedVolumeNonSliceSources(t *testing.T) {
+	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"volumes": []interface{}{
+						map[string]interface{}{
+							"name": "projected-vol",
+							"projected": map[string]interface{}{
+								// "sources" is a string, not a []interface{} —
+								// the type assertion `.([]interface{})` must fail
+								// gracefully (the `if sources, ok := ...; ok` branch
+								// is skipped).
+								"sources": "not-a-slice",
+							},
+						},
+					},
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "app",
+							"image": "app:latest",
+						},
+					},
+				},
+			},
+		})
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		deployment.Original.ResourceKey(): deployment,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), deployment, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("expected 0 relationships for projected volume with non-slice sources, got %d: %v", len(rels), rels)
+	}
+}
