@@ -211,11 +211,11 @@ func sanitizeName(name string) string {
 			continue
 		}
 		if capitalize && c >= 'a' && c <= 'z' {
-			final = append(final, byte(c-32))
+			final = append(final, c - 32)
 			capitalize = false
 		} else if i == 0 && c >= 'A' && c <= 'Z' {
 			// Lowercase first character
-			final = append(final, byte(c+32))
+			final = append(final, c + 32)
 		} else {
 			final = append(final, c)
 		}

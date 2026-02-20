@@ -1,0 +1,30 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - durationcheck
+    - copyloopvar
+    - nilerr
+    - unconvert
+    - wastedassign
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+      - shadow
+  staticcheck:
+    checks: ["all"]
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 5
