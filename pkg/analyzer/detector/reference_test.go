@@ -1495,3 +1495,84 @@ func TestReferenceDetector_RoleBindingNonServiceAccountSubjects(t *testing.T) {
 		t.Errorf("expected role_binding relationship to ServiceAccount %q to still be found, got: %v", saName, rels)
 	}
 }
+
+// TestReferenceDetector_IngressNoRules verifies that an Ingress with no spec.rules
+// field at all returns early from detectIngressToService without panicking. This
+// covers the `if !found { return relationships }` guard at line 73 of reference.go.
+func TestReferenceDetector_IngressNoRules(t *testing.T) {
+	const ns = "default"
+
+	// Ingress object has no spec.rules key at all.
+	ingress := makeProcessedResourceExtra(
+		"networking.k8s.io/v1", "Ingress", "no-rules-ingress", ns,
+		map[string]interface{}{
+			"spec": map[string]interface{}{
+				// no "rules" key — triggers !found early return in detectIngressToService
+				"tls": []interface{}{},
+			},
+		},
+	)
+
+	allResources := buildAllResources(ingress)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), ingress, allResources)
+
+	for _, rel := range rels {
+		if rel.Type == types.RelationNameReference {
+			t.Errorf("expected no name_reference for Ingress with no rules, but got: %v", rel)
+		}
+	}
+}
+
+// TestReferenceDetector_RoleBindingSubjectsNonMapEntry verifies that a non-map entry
+// in the subjects slice (e.g., a string literal) is skipped without panicking. This
+// covers the `subjectMap, ok := subject.(map[string]interface{}); if !ok { continue }`
+// guard at line 243-245 of reference.go.
+func TestReferenceDetector_RoleBindingSubjectsNonMapEntry(t *testing.T) {
+	const (
+		ns     = "default"
+		saName = "real-sa"
+	)
+
+	rb := makeProcessedResourceExtra(
+		"rbac.authorization.k8s.io/v1", "RoleBinding", "my-rb", ns,
+		map[string]interface{}{
+			"roleRef": map[string]interface{}{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     "Role",
+				"name":     "my-role",
+			},
+			"subjects": []interface{}{
+				// non-map entry — triggers the !ok continue branch
+				"not-a-map-subject",
+				// valid ServiceAccount that follows the bad entry
+				map[string]interface{}{
+					"kind":      "ServiceAccount",
+					"name":      saName,
+					"namespace": ns,
+				},
+			},
+		},
+	)
+
+	sa := makeProcessedResource("v1", "ServiceAccount", saName, ns, nil, nil, nil)
+	allResources := buildAllResources(rb, sa)
+
+	d := NewNameReferenceDetector()
+	rels := d.Detect(context.Background(), rb, allResources)
+
+	// The non-map entry should be skipped; the valid SA should still produce a relationship.
+	saKey := sa.Original.ResourceKey()
+	found := false
+	for _, rel := range rels {
+		if rel.Type == types.RelationRoleBinding && rel.To == saKey {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("expected role_binding relationship to ServiceAccount %q after skipping non-map subject, got: %v", saName, rels)
+	}
+}

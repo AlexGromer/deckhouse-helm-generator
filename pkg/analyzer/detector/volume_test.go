@@ -1180,3 +1180,47 @@ func TestVolumeDetector_DeploymentVolumesButNoContainers(t *testing.T) {
 		}
 	}
 }
+
+// TestVolumeDetector_ProjectedVolumeNonSliceSources verifies that a projected volume
+// whose "sources" field is not a []interface{} (e.g., is a string) is handled
+// gracefully without panicking and produces no relationships. This covers the
+// `projectedMap["sources"].([]interface{})` type assertion failing branch in Detect.
+func TestVolumeDetector_ProjectedVolumeNonSliceSources(t *testing.T) {
+	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
+		nil, nil,
+		map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"volumes": []interface{}{
+						map[string]interface{}{
+							"name": "projected-vol",
+							"projected": map[string]interface{}{
+								// "sources" is a string, not a []interface{} —
+								// the type assertion `.([]interface{})` must fail
+								// gracefully (the `if sources, ok := ...; ok` branch
+								// is skipped).
+								"sources": "not-a-slice",
+							},
+						},
+					},
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "app",
+							"image": "app:latest",
+						},
+					},
+				},
+			},
+		})
+
+	allResources := map[types.ResourceKey]*types.ProcessedResource{
+		deployment.Original.ResourceKey(): deployment,
+	}
+
+	d := NewVolumeMountDetector()
+	rels := d.Detect(context.Background(), deployment, allResources)
+
+	if len(rels) != 0 {
+		t.Errorf("expected 0 relationships for projected volume with non-slice sources, got %d: %v", len(rels), rels)
+	}
+}

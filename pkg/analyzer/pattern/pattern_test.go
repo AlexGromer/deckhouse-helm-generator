@@ -2258,76 +2258,80 @@ func TestRecommender_GenerateReport_StrategyWithAlternatives(t *testing.T) {
 	}
 }
 
-// TestRecommender_GenerateReport_ActionItemsEmpty exercises the len(reportItems) == 0
-// branch in generateActionItemsSection (recommender.go:348-356): when no recommendations
-// produce action items, a "No action items" status is shown.
-func TestRecommender_GenerateReport_ActionItemsEmpty(t *testing.T) {
-	a := NewAnalyzer()
-	// No detectors, no checkers → no recommendations with ImplementationSteps,
-	// no auto-fixable violations → no action items generated.
-	r := NewRecommender(a)
-	g := makeGraph()
+// TestRecommender_ActionItemsSection_Empty exercises the len(reportItems) == 0
+// branch in generateActionItemsSection (recommender.go:348-356): when all
+// recommendations have empty ImplementationSteps and no auto-fixable violations
+// exist, the "No action items" status item is produced.
+// NOTE: generateActionItemsSection is called directly (package-internal) with
+// a crafted AnalysisResult to reach this otherwise hard-to-reach branch.
+func TestRecommender_ActionItemsSection_Empty(t *testing.T) {
+	r := NewRecommender(NewAnalyzer())
 
-	report := r.GenerateReport(g)
-	if report == nil {
-		t.Fatal("GenerateReport returned nil")
+	// Craft an AnalysisResult with one recommendation that has no ImplementationSteps
+	// and no auto-fixable best practices violations — this produces 0 action items.
+	result := &AnalysisResult{
+		Recommendations: []Recommendation{
+			{
+				Priority:            1,
+				Title:               "Chart Strategy",
+				ImplementationSteps: []string{}, // empty — no steps → no action items
+			},
+		},
+		BestPractices: []BestPractice{
+			{Compliant: true, AutoFixable: false}, // compliant → skipped
+		},
 	}
 
-	// Action items section is index 4
-	if len(report.Sections) < 5 {
-		t.Fatal("report should have 5 sections")
-	}
-	actionSection := report.Sections[4]
+	section := r.generateActionItemsSection(result)
 
 	found := false
-	for _, item := range actionSection.Items {
+	for _, item := range section.Items {
 		if item.Title == "Status" && strings.Contains(item.Content, "No action items") {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("action items section should show 'No action items' when there are no action items")
+		t.Error("generateActionItemsSection should return 'No action items' status when no items are generated")
 	}
 }
 
-// TestRecommender_GenerateReport_MoreThan10ActionItems exercises the i >= 10 truncation
-// branch in generateActionItemsSection (recommender.go:319-321): when a single priority
-// group has more than 10 items, the list is truncated.
-func TestRecommender_GenerateReport_MoreThan10ActionItems(t *testing.T) {
-	a := NewAnalyzer()
-	// Add security checker — each Deployment without security context will produce
-	// SEC-001 (auto-fixable) and SEC-002 (auto-fixable). With 12 deployments that is
-	// 24 auto-fixable items all at priority 1 (SeverityError → priority 1 in severityToPriority).
-	a.AddChecker(NewSecurityChecker())
-	r := NewRecommender(a)
-	g := makeGraph()
+// TestRecommender_ActionItemsSection_MoreThan10 exercises the i >= 10 truncation
+// branch in generateActionItemsSection (recommender.go:319-321): when more than 10
+// items fall in the same priority group, the list is truncated with "... and N more".
+// NOTE: generateActionItemsSection is called directly (package-internal) to craft
+// a scenario with > 10 steps in a single priority group.
+func TestRecommender_ActionItemsSection_MoreThan10(t *testing.T) {
+	r := NewRecommender(NewAnalyzer())
 
-	// 12 deployments without containers → 12 × (SEC-001 + SEC-002) = 24 priority-1 auto-fixable items.
-	for i := 0; i < 12; i++ {
-		name := "deploy-" + strings.Repeat("a", i+1)
-		addResource(g, "apps", "v1", "Deployment", name, "default", name)
+	// Build 12 implementation steps in a single priority-1 recommendation.
+	steps := make([]string, 12)
+	for i := range steps {
+		steps[i] = "Step number " + strings.Repeat("x", i+1)
 	}
 
-	report := r.GenerateReport(g)
-	if report == nil {
-		t.Fatal("GenerateReport returned nil")
+	result := &AnalysisResult{
+		Recommendations: []Recommendation{
+			{
+				Priority:            1,
+				Title:               "Many Steps Recommendation",
+				Impact:              "High impact",
+				ImplementationSteps: steps,
+			},
+		},
+		BestPractices: []BestPractice{},
 	}
 
-	// Action items section is index 4
-	if len(report.Sections) < 5 {
-		t.Fatal("report should have 5 sections")
-	}
-	actionSection := report.Sections[4]
+	section := r.generateActionItemsSection(result)
 
-	// At least one item's content should contain the truncation marker "... and".
+	// The generated content should contain the truncation marker.
 	foundTruncation := false
-	for _, item := range actionSection.Items {
+	for _, item := range section.Items {
 		if strings.Contains(item.Content, "... and") && strings.Contains(item.Content, "more") {
 			foundTruncation = true
 		}
 	}
 	if !foundTruncation {
-		t.Error("action items section should truncate list when more than 10 items in a priority group")
+		t.Error("generateActionItemsSection should truncate items list when > 10 items in a priority group")
 	}
 }
 
