@@ -198,19 +198,19 @@ jobs:
         go-version: '1.24'
 
     - name: Download unit coverage
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: coverage-unit
         path: ./coverage/
 
     - name: Download integration coverage
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: coverage-integration
         path: ./coverage/
 
     - name: Download E2E coverage
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: coverage-e2e
         path: ./coverage/
