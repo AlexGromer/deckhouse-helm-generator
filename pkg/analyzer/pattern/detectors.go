@@ -1,6 +1,8 @@
 package pattern
 
 import (
+	"strings"
+
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
@@ -115,6 +117,78 @@ func (d *StatefulDetector) Detect(graph *types.ResourceGraph) []ArchitecturePatt
 
 	if hasDaemonSet {
 		patterns = append(patterns, PatternDaemonSet)
+	}
+
+	return patterns
+}
+
+// JobDetector detects batch/job processing pattern.
+type JobDetector struct{}
+
+func NewJobDetector() *JobDetector {
+	return &JobDetector{}
+}
+
+func (d *JobDetector) Name() string {
+	return "job"
+}
+
+func (d *JobDetector) Detect(graph *types.ResourceGraph) []ArchitecturePattern {
+	patterns := make([]ArchitecturePattern, 0)
+
+	for key := range graph.Resources {
+		kind := key.GVK.Kind
+		if kind == "CronJob" || kind == "Job" {
+			patterns = append(patterns, PatternJob)
+			return patterns
+		}
+	}
+
+	return patterns
+}
+
+// OperatorDetector detects Kubernetes operator pattern.
+type OperatorDetector struct{}
+
+func NewOperatorDetector() *OperatorDetector {
+	return &OperatorDetector{}
+}
+
+func (d *OperatorDetector) Name() string {
+	return "operator"
+}
+
+func (d *OperatorDetector) Detect(graph *types.ResourceGraph) []ArchitecturePattern {
+	patterns := make([]ArchitecturePattern, 0)
+
+	hasCRD := false
+	hasControllerDeployment := false
+
+	for key, resource := range graph.Resources {
+		if key.GVK.Kind == "CustomResourceDefinition" {
+			hasCRD = true
+		}
+
+		if key.GVK.Kind == "Deployment" {
+			name := key.Name
+			// Check labels on the resource
+			if resource.Original != nil && resource.Original.Object != nil {
+				labels := resource.Original.Object.GetLabels()
+				for k, v := range labels {
+					if strings.Contains(k, "control-plane") || strings.Contains(v, "control-plane") {
+						hasControllerDeployment = true
+					}
+				}
+			}
+			// Check name contains controller or operator
+			if strings.Contains(name, "controller") || strings.Contains(name, "operator") {
+				hasControllerDeployment = true
+			}
+		}
+	}
+
+	if hasCRD && hasControllerDeployment {
+		patterns = append(patterns, PatternOperator)
 	}
 
 	return patterns

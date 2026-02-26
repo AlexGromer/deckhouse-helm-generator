@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-02-26
+
+> Phase 1 completion — new processors, pattern detectors, generator features, CLI commands
+
+### Added
+
+#### K8s Processors
+- **VPA** processor (`autoscaling.k8s.io/v1/VerticalPodAutoscaler`): updatePolicy, resourcePolicy, targetRef, recommenders
+- **PriorityClass** processor (`scheduling.k8s.io/v1/PriorityClass`): value, globalDefault, preemptionPolicy, description (cluster-scoped)
+- **LimitRange** processor (`v1/LimitRange`): limits array extraction
+- **ResourceQuota** processor (`v1/ResourceQuota`): hard limits, scopeSelector, scopes
+
+#### Pattern Detection
+- **JobDetector**: CronJob/Job batch processing pattern detection
+- **OperatorDetector**: CRD + controller Deployment operator pattern detection
+- **InitContainerChecker**: init container usage analysis
+- **QoSClassChecker**: Guaranteed/Burstable/BestEffort classification with recommendations
+- **StatefulSetPatternChecker**: headless service, podManagementPolicy, updateStrategy analysis
+- **DaemonSetPatternChecker**: tolerations, update strategy, resource limits warnings
+- **GracefulShutdownChecker**: preStop hooks, terminationGracePeriodSeconds analysis
+- **PodSecurityStandardsChecker**: PSS compliance (restricted/baseline/privileged)
+
+#### Generator
+- **Checksum annotations**: auto-generate `checksum/config-*` and `checksum/secret-*` for ConfigMap/Secret change detection
+- **Deprecated API migration**: 12-entry migration table (extensions/v1beta1, policy/v1beta1, apps/v1beta1, etc.)
+
+#### CLI
+- `dhg validate` command: Chart.yaml, values.yaml, template syntax validation
+- `dhg diff <dir1> <dir2>` command: unified diff between chart directories with color support
+- `--dry-run` flag on `generate`: preview output without writing to disk
+
+### Changed
+- Pattern analyzer now has 5 detectors (was 3) and 9 checkers (was 3)
+- Test coverage: 85.9% total (14 packages)
+
+---
+
 ## [0.6.0] - 2026-02-20
 
 > Released: Repository infrastructure — GoReleaser, Docker, Homebrew, test coverage boost

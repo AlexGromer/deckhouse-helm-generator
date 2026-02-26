@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -42,15 +44,15 @@ func TestNewRootCmd(t *testing.T) {
 		subNames[sub.Use] = true
 	}
 
-	for _, expected := range []string{"generate", "analyze", "version"} {
+	for _, expected := range []string{"generate", "analyze", "validate", "diff <dir1> <dir2>", "version"} {
 		if !subNames[expected] {
 			t.Errorf("expected subcommand %q to be registered", expected)
 		}
 	}
 
 	got := len(cmd.Commands())
-	if got != 3 {
-		t.Errorf("expected 3 subcommands, got %d", got)
+	if got != 5 {
+		t.Errorf("expected 5 subcommands, got %d", got)
 	}
 }
 
@@ -242,7 +244,7 @@ func TestRootCmd_Help(t *testing.T) {
 		t.Errorf("expected help output to contain %q, got: %q", "dhg", out)
 	}
 
-	for _, sub := range []string{"generate", "analyze", "version"} {
+	for _, sub := range []string{"generate", "analyze", "validate", "diff", "version"} {
 		if !strings.Contains(out, sub) {
 			t.Errorf("expected help output to mention subcommand %q", sub)
 		}
@@ -255,5 +257,115 @@ func TestAnalyzeCmd_MissingFileFlag(t *testing.T) {
 	_, err := executeCmd(t, "analyze")
 	if err == nil {
 		t.Error("expected error when --file flag is missing from analyze command, got nil")
+	}
+}
+
+// ── TestNewRootCmd_HasAllCommands ─────────────────────────────────────────────
+
+func TestNewRootCmd_HasAllCommands(t *testing.T) {
+	cmd := newRootCmd()
+
+	expectedCmds := []string{"generate", "analyze", "validate", "diff", "version"}
+	for _, name := range expectedCmds {
+		found := false
+		for _, sub := range cmd.Commands() {
+			if sub.Name() == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected command %q not found in root command", name)
+		}
+	}
+}
+
+// ── TestValidateCmd ───────────────────────────────────────────────────────────
+
+func TestValidateCmd_MissingChart(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	err := runValidate(context.Background(), validateOptions{
+		paths:   []string{tmpDir},
+		verbose: false,
+	})
+
+	if err == nil {
+		t.Error("Expected error for empty directory")
+	}
+}
+
+func TestValidateCmd_ValidChart(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create minimal valid chart
+	chartYAML := "apiVersion: v2\nname: test-chart\nversion: 0.1.0\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "Chart.yaml"), []byte(chartYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "values.yaml"), []byte("key: value\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "templates"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "templates", "test.yaml"), []byte("{{ .Values.key }}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runValidate(context.Background(), validateOptions{
+		paths:   []string{tmpDir},
+		verbose: true,
+	})
+
+	if err != nil {
+		t.Errorf("Expected no error for valid chart, got: %v", err)
+	}
+}
+
+// ── TestDiffCmd ───────────────────────────────────────────────────────────────
+
+func TestDiffCmd_IdenticalDirs(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	content := "test: value\n"
+	if err := os.WriteFile(filepath.Join(dir1, "values.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir2, "values.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runDiff(context.Background(), diffOptions{
+		dir1:  dir1,
+		dir2:  dir2,
+		color: false,
+	})
+
+	if err != nil {
+		t.Errorf("Expected no error for identical dirs, got: %v", err)
+	}
+}
+
+func TestDiffCmd_NonexistentDir(t *testing.T) {
+	err := runDiff(context.Background(), diffOptions{
+		dir1:  "/nonexistent/path1",
+		dir2:  "/nonexistent/path2",
+		color: false,
+	})
+
+	if err == nil {
+		t.Error("Expected error for nonexistent directory")
+	}
+}
+
+// ── TestGenerateCmd_HasDryRunFlag ─────────────────────────────────────────────
+
+func TestGenerateCmd_HasDryRunFlag(t *testing.T) {
+	cmd := newGenerateCmd()
+	flag := cmd.Flags().Lookup("dry-run")
+	if flag == nil {
+		t.Error("Expected --dry-run flag on generate command")
 	}
 }

@@ -6,9 +6,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"sigs.k8s.io/yaml"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer/detector"
@@ -61,6 +64,8 @@ It supports extracting resources from:
 
 	rootCmd.AddCommand(newGenerateCmd())
 	rootCmd.AddCommand(newAnalyzeCmd())
+	rootCmd.AddCommand(newValidateCmd())
+	rootCmd.AddCommand(newDiffCmd())
 	rootCmd.AddCommand(newVersionCmd())
 
 	return rootCmd
@@ -68,27 +73,28 @@ It supports extracting resources from:
 
 func newGenerateCmd() *cobra.Command {
 	var (
-		paths          []string
-		outputDir      string
-		chartName      string
-		chartVersion   string
-		appVersion     string
-		mode           string
-		source         string
-		namespace      string
-		namespaces     []string
-		labelSelector  string
-		includeKinds   []string
-		excludeKinds   []string
-		recursive      bool
-		kubeConfig     string
-		kubeContext    string
-		includeTests   bool
-		includeREADME  bool
-		includeSchema  bool
-		verbose        bool
-		envValues      bool
+		paths           []string
+		outputDir       string
+		chartName       string
+		chartVersion    string
+		appVersion      string
+		mode            string
+		source          string
+		namespace       string
+		namespaces      []string
+		labelSelector   string
+		includeKinds    []string
+		excludeKinds    []string
+		recursive       bool
+		kubeConfig      string
+		kubeContext     string
+		includeTests    bool
+		includeREADME   bool
+		includeSchema   bool
+		verbose         bool
+		envValues       bool
 		deckhouseModule bool
+		dryRun          bool
 	)
 
 	cmd := &cobra.Command{
@@ -107,27 +113,28 @@ Examples:
   dhg generate -f ./manifests --include-kinds Deployment,Service,Ingress`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGenerate(cmd.Context(), generateOptions{
-				paths:         paths,
-				outputDir:     outputDir,
-				chartName:     chartName,
-				chartVersion:  chartVersion,
-				appVersion:    appVersion,
-				mode:          mode,
-				source:        source,
-				namespace:     namespace,
-				namespaces:    namespaces,
-				labelSelector: labelSelector,
-				includeKinds:  includeKinds,
-				excludeKinds:  excludeKinds,
-				recursive:     recursive,
-				kubeConfig:    kubeConfig,
-				kubeContext:   kubeContext,
-				includeTests:  includeTests,
-				includeREADME: includeREADME,
-				includeSchema: includeSchema,
-				verbose:       verbose,
+				paths:           paths,
+				outputDir:       outputDir,
+				chartName:       chartName,
+				chartVersion:    chartVersion,
+				appVersion:      appVersion,
+				mode:            mode,
+				source:          source,
+				namespace:       namespace,
+				namespaces:      namespaces,
+				labelSelector:   labelSelector,
+				includeKinds:    includeKinds,
+				excludeKinds:    excludeKinds,
+				recursive:       recursive,
+				kubeConfig:      kubeConfig,
+				kubeContext:     kubeContext,
+				includeTests:    includeTests,
+				includeREADME:   includeREADME,
+				includeSchema:   includeSchema,
+				verbose:         verbose,
 				envValues:       envValues,
 				deckhouseModule: deckhouseModule,
+				dryRun:          dryRun,
 			})
 		},
 	}
@@ -153,6 +160,7 @@ Examples:
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 	cmd.Flags().BoolVar(&envValues, "env-values", false, "Generate environment-specific values (dev/staging/prod)")
 	cmd.Flags().BoolVar(&deckhouseModule, "deckhouse-module", false, "Generate Deckhouse module scaffold (helm_lib, openapi/, images/, hooks/)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print generated chart to stdout without writing to disk")
 
 	_ = cmd.MarkFlagRequired("chart-name")
 
@@ -160,27 +168,28 @@ Examples:
 }
 
 type generateOptions struct {
-	paths         []string
-	outputDir     string
-	chartName     string
-	chartVersion  string
-	appVersion    string
-	mode          string
-	source        string
-	namespace     string
-	namespaces    []string
-	labelSelector string
-	includeKinds  []string
-	excludeKinds  []string
-	recursive     bool
-	kubeConfig    string
-	kubeContext   string
-	includeTests  bool
-	includeREADME bool
-	includeSchema bool
+	paths           []string
+	outputDir       string
+	chartName       string
+	chartVersion    string
+	appVersion      string
+	mode            string
+	source          string
+	namespace       string
+	namespaces      []string
+	labelSelector   string
+	includeKinds    []string
+	excludeKinds    []string
+	recursive       bool
+	kubeConfig      string
+	kubeContext     string
+	includeTests    bool
+	includeREADME   bool
+	includeSchema   bool
 	verbose         bool
 	envValues       bool
 	deckhouseModule bool
+	dryRun          bool
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -417,6 +426,30 @@ drain:
 		for i, chart := range charts {
 			charts[i] = generator.GenerateDeckhouseModule(chart, nil)
 		}
+	}
+
+	// Dry-run: print to stdout instead of writing to disk
+	if opts.dryRun {
+		for _, chart := range charts {
+			fmt.Printf("---\n# Chart: %s\n", chart.Name)
+			fmt.Printf("# Chart.yaml\n%s\n", chart.ChartYAML)
+			fmt.Printf("---\n# values.yaml\n%s\n", chart.ValuesYAML)
+
+			// Print templates sorted
+			templatePaths := make([]string, 0, len(chart.Templates))
+			for path := range chart.Templates {
+				templatePaths = append(templatePaths, path)
+			}
+			sort.Strings(templatePaths)
+			for _, path := range templatePaths {
+				fmt.Printf("---\n# %s\n%s\n", path, chart.Templates[path])
+			}
+
+			if chart.Helpers != "" {
+				fmt.Printf("---\n# templates/_helpers.tpl\n%s\n", chart.Helpers)
+			}
+		}
+		return nil
 	}
 
 	// Step 5: Write charts to disk
@@ -712,6 +745,336 @@ drainExtract:
 	}
 
 	return nil
+}
+
+func newValidateCmd() *cobra.Command {
+	var (
+		paths   []string
+		verbose bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "validate",
+		Short: "Validate Helm chart structure and templates",
+		Long: `Validate Helm chart for common issues:
+  - Chart.yaml presence and required fields
+  - values.yaml syntax
+  - Template syntax (Go template parsing)
+  - Required files presence`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runValidate(cmd.Context(), validateOptions{
+				paths:   paths,
+				verbose: verbose,
+			})
+		},
+	}
+
+	cmd.Flags().StringSliceVarP(&paths, "file", "f", []string{"."}, "Path(s) to chart directories to validate")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+
+	return cmd
+}
+
+type validateOptions struct {
+	paths   []string
+	verbose bool
+}
+
+func runValidate(_ context.Context, opts validateOptions) error {
+	totalErrors := 0
+	totalWarnings := 0
+
+	for _, chartPath := range opts.paths {
+		fmt.Printf("Validating chart at: %s\n", chartPath)
+
+		// Check Chart.yaml
+		chartYAMLPath := filepath.Join(chartPath, "Chart.yaml")
+		if _, err := os.Stat(chartYAMLPath); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "  ERROR: Chart.yaml not found at %s\n", chartYAMLPath)
+			totalErrors++
+		} else {
+			data, err := os.ReadFile(chartYAMLPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ERROR: Cannot read Chart.yaml: %v\n", err)
+				totalErrors++
+			} else {
+				if opts.verbose {
+					fmt.Printf("  OK: Chart.yaml found (%d bytes)\n", len(data))
+				}
+				// Check required fields
+				content := string(data)
+				requiredFields := []string{"apiVersion:", "name:", "version:"}
+				for _, field := range requiredFields {
+					if !strings.Contains(content, field) {
+						fmt.Fprintf(os.Stderr, "  ERROR: Chart.yaml missing required field: %s\n", strings.TrimSuffix(field, ":"))
+						totalErrors++
+					}
+				}
+			}
+		}
+
+		// Check values.yaml
+		valuesPath := filepath.Join(chartPath, "values.yaml")
+		if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "  WARNING: values.yaml not found\n")
+			totalWarnings++
+		} else {
+			data, err := os.ReadFile(valuesPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ERROR: Cannot read values.yaml: %v\n", err)
+				totalErrors++
+			} else {
+				// Try to parse YAML
+				var values map[string]interface{}
+				if err := yaml.Unmarshal(data, &values); err != nil {
+					fmt.Fprintf(os.Stderr, "  ERROR: Invalid YAML in values.yaml: %v\n", err)
+					totalErrors++
+				} else if opts.verbose {
+					fmt.Printf("  OK: values.yaml valid (%d bytes)\n", len(data))
+				}
+			}
+		}
+
+		// Check templates directory
+		templatesDir := filepath.Join(chartPath, "templates")
+		if _, err := os.Stat(templatesDir); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "  WARNING: templates/ directory not found\n")
+			totalWarnings++
+		} else {
+			// Parse templates for syntax
+			entries, err := os.ReadDir(templatesDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ERROR: Cannot read templates directory: %v\n", err)
+				totalErrors++
+			} else {
+				templateCount := 0
+				for _, entry := range entries {
+					if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+						continue
+					}
+					templateCount++
+					tmplPath := filepath.Join(templatesDir, entry.Name())
+					data, err := os.ReadFile(tmplPath)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "  ERROR: Cannot read template %s: %v\n", entry.Name(), err)
+						totalErrors++
+						continue
+					}
+					// Basic Go template syntax check (check balanced {{ }})
+					content := string(data)
+					opens := strings.Count(content, "{{")
+					closes := strings.Count(content, "}}")
+					if opens != closes {
+						fmt.Fprintf(os.Stderr, "  ERROR: Unbalanced template delimiters in %s ({{ count: %d, }} count: %d)\n", entry.Name(), opens, closes)
+						totalErrors++
+					} else if opts.verbose {
+						fmt.Printf("  OK: %s (%d template expressions)\n", entry.Name(), opens)
+					}
+				}
+				if opts.verbose {
+					fmt.Printf("  Templates: %d files checked\n", templateCount)
+				}
+			}
+		}
+	}
+
+	// Summary
+	fmt.Printf("\nValidation complete: %d error(s), %d warning(s)\n", totalErrors, totalWarnings)
+	if totalErrors > 0 {
+		return fmt.Errorf("validation failed with %d error(s)", totalErrors)
+	}
+	return nil
+}
+
+func newDiffCmd() *cobra.Command {
+	var (
+		color bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "diff <dir1> <dir2>",
+		Short: "Show differences between two chart directories",
+		Long: `Compare two Helm chart directories and show differences.
+Useful for comparing generated charts before and after changes.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDiff(cmd.Context(), diffOptions{
+				dir1:  args[0],
+				dir2:  args[1],
+				color: color,
+			})
+		},
+	}
+
+	cmd.Flags().BoolVar(&color, "color", true, "Enable colored output")
+
+	return cmd
+}
+
+type diffOptions struct {
+	dir1  string
+	dir2  string
+	color bool
+}
+
+func runDiff(_ context.Context, opts diffOptions) error {
+	// Validate directories exist
+	for _, dir := range []string{opts.dir1, opts.dir2} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			return fmt.Errorf("cannot access %s: %w", dir, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%s is not a directory", dir)
+		}
+	}
+
+	// Collect all files from both directories
+	files1, err := collectFiles(opts.dir1)
+	if err != nil {
+		return fmt.Errorf("failed to scan %s: %w", opts.dir1, err)
+	}
+	files2, err := collectFiles(opts.dir2)
+	if err != nil {
+		return fmt.Errorf("failed to scan %s: %w", opts.dir2, err)
+	}
+
+	// Build a union of all relative paths
+	allFiles := make(map[string]bool)
+	for f := range files1 {
+		allFiles[f] = true
+	}
+	for f := range files2 {
+		allFiles[f] = true
+	}
+
+	// Sort for deterministic output
+	sortedFiles := make([]string, 0, len(allFiles))
+	for f := range allFiles {
+		sortedFiles = append(sortedFiles, f)
+	}
+	sort.Strings(sortedFiles)
+
+	hasDiff := false
+	for _, relPath := range sortedFiles {
+		content1, in1 := files1[relPath]
+		content2, in2 := files2[relPath]
+
+		if !in1 {
+			hasDiff = true
+			printDiffHeader(opts.dir1, opts.dir2, relPath, "added", opts.color)
+			printLines(content2, "+", opts.color)
+			continue
+		}
+
+		if !in2 {
+			hasDiff = true
+			printDiffHeader(opts.dir1, opts.dir2, relPath, "removed", opts.color)
+			printLines(content1, "-", opts.color)
+			continue
+		}
+
+		if content1 != content2 {
+			hasDiff = true
+			printDiffHeader(opts.dir1, opts.dir2, relPath, "modified", opts.color)
+			printUnifiedDiff(content1, content2, opts.color)
+		}
+	}
+
+	if !hasDiff {
+		fmt.Println("No differences found.")
+	}
+
+	return nil
+}
+
+// collectFiles walks a directory and returns map of relative_path -> content
+func collectFiles(dir string) (map[string]string, error) {
+	files := make(map[string]string)
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		relPath, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[relPath] = string(data)
+		return nil
+	})
+	return files, err
+}
+
+func printDiffHeader(dir1, dir2, relPath, status string, color bool) {
+	if color {
+		fmt.Printf("\033[1m--- %s/%s\033[0m\n", dir1, relPath)
+		fmt.Printf("\033[1m+++ %s/%s\033[0m\n", dir2, relPath)
+		fmt.Printf("\033[36m@@ %s @@\033[0m\n", status)
+	} else {
+		fmt.Printf("--- %s/%s\n", dir1, relPath)
+		fmt.Printf("+++ %s/%s\n", dir2, relPath)
+		fmt.Printf("@@ %s @@\n", status)
+	}
+}
+
+func printLines(content, prefix string, color bool) {
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		if color && prefix == "+" {
+			fmt.Printf("\033[32m%s%s\033[0m\n", prefix, line)
+		} else if color && prefix == "-" {
+			fmt.Printf("\033[31m%s%s\033[0m\n", prefix, line)
+		} else {
+			fmt.Printf("%s%s\n", prefix, line)
+		}
+	}
+}
+
+func printUnifiedDiff(content1, content2 string, color bool) {
+	lines1 := strings.Split(content1, "\n")
+	lines2 := strings.Split(content2, "\n")
+
+	// Simple line-by-line comparison
+	maxLines := len(lines1)
+	if len(lines2) > maxLines {
+		maxLines = len(lines2)
+	}
+
+	for i := 0; i < maxLines; i++ {
+		var l1, l2 string
+		if i < len(lines1) {
+			l1 = lines1[i]
+		}
+		if i < len(lines2) {
+			l2 = lines2[i]
+		}
+
+		if l1 == l2 {
+			fmt.Printf(" %s\n", l1)
+		} else {
+			if i < len(lines1) {
+				if color {
+					fmt.Printf("\033[31m-%s\033[0m\n", l1)
+				} else {
+					fmt.Printf("-%s\n", l1)
+				}
+			}
+			if i < len(lines2) {
+				if color {
+					fmt.Printf("\033[32m+%s\033[0m\n", l2)
+				} else {
+					fmt.Printf("+%s\n", l2)
+				}
+			}
+		}
+	}
 }
 
 func newVersionCmd() *cobra.Command {

@@ -462,11 +462,19 @@ func DefaultAnalyzer() *Analyzer {
 	a.AddDetector(NewMicroservicesDetector())
 	a.AddDetector(NewStatefulDetector())
 	a.AddDetector(NewDeckhouseDetector())
+	a.AddDetector(NewJobDetector())
+	a.AddDetector(NewOperatorDetector())
 
 	// Add best practice checkers
 	a.AddChecker(NewResourceLimitsChecker())
 	a.AddChecker(NewSecurityChecker())
 	a.AddChecker(NewHighAvailabilityChecker())
+	a.AddChecker(NewInitContainerChecker())
+	a.AddChecker(NewQoSClassChecker())
+	a.AddChecker(NewStatefulSetPatternChecker())
+	a.AddChecker(NewDaemonSetPatternChecker())
+	a.AddChecker(NewGracefulShutdownChecker())
+	a.AddChecker(NewPodSecurityStandardsChecker())
 
 	return a
 }
