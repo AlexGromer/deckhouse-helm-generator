@@ -98,11 +98,11 @@ func TestAddChecker(t *testing.T) {
 
 func TestDefaultAnalyzer_HasDetectorsAndCheckers(t *testing.T) {
 	a := DefaultAnalyzer()
-	if len(a.detectors) != 3 {
-		t.Errorf("DefaultAnalyzer detectors = %d; want 3", len(a.detectors))
+	if len(a.detectors) != 5 {
+		t.Errorf("DefaultAnalyzer detectors = %d; want 5", len(a.detectors))
 	}
-	if len(a.checkers) != 3 {
-		t.Errorf("DefaultAnalyzer checkers = %d; want 3", len(a.checkers))
+	if len(a.checkers) != 9 {
+		t.Errorf("DefaultAnalyzer checkers = %d; want 9", len(a.checkers))
 	}
 }
 
@@ -2606,6 +2606,1111 @@ func TestSeverity_Constants(t *testing.T) {
 	for c, w := range tests {
 		if string(c) != w {
 			t.Errorf("%q != %q", c, w)
+		}
+	}
+}
+
+// ── JobDetector ───────────────────────────────────────────────────────────────
+
+func TestJobDetector_Name(t *testing.T) {
+	d := NewJobDetector()
+	if d.Name() != "job" {
+		t.Errorf("Name() = %q; want job", d.Name())
+	}
+}
+
+func TestJobDetector_WithJob(t *testing.T) {
+	d := NewJobDetector()
+	g := makeGraph()
+	addResource(g, "batch", "v1", "Job", "myjob", "default", "batch")
+
+	patterns := d.Detect(g)
+	found := false
+	for _, p := range patterns {
+		if p == PatternJob {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should detect job pattern when Job resource exists")
+	}
+}
+
+func TestJobDetector_WithCronJob(t *testing.T) {
+	d := NewJobDetector()
+	g := makeGraph()
+	addResource(g, "batch", "v1", "CronJob", "mycronjob", "default", "batch")
+
+	patterns := d.Detect(g)
+	found := false
+	for _, p := range patterns {
+		if p == PatternJob {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should detect job pattern when CronJob resource exists")
+	}
+}
+
+func TestJobDetector_NoJobResources(t *testing.T) {
+	d := NewJobDetector()
+	g := makeGraph()
+	addResource(g, "apps", "v1", "Deployment", "app", "default", "app")
+
+	patterns := d.Detect(g)
+	for _, p := range patterns {
+		if p == PatternJob {
+			t.Error("should not detect job pattern when no Job/CronJob resources exist")
+		}
+	}
+}
+
+func TestJobDetector_EmptyGraph(t *testing.T) {
+	d := NewJobDetector()
+	g := makeGraph()
+
+	patterns := d.Detect(g)
+	if len(patterns) != 0 {
+		t.Errorf("empty graph should yield no patterns; got %v", patterns)
+	}
+}
+
+// ── OperatorDetector ──────────────────────────────────────────────────────────
+
+func TestOperatorDetector_Name(t *testing.T) {
+	d := NewOperatorDetector()
+	if d.Name() != "operator" {
+		t.Errorf("Name() = %q; want operator", d.Name())
+	}
+}
+
+func TestOperatorDetector_WithCRDAndControllerName(t *testing.T) {
+	d := NewOperatorDetector()
+	g := makeGraph()
+	addResource(g, "apiextensions.k8s.io", "v1", "CustomResourceDefinition", "foos.example.com", "", "operator")
+	addResource(g, "apps", "v1", "Deployment", "foo-controller", "default", "operator")
+
+	patterns := d.Detect(g)
+	found := false
+	for _, p := range patterns {
+		if p == PatternOperator {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should detect operator pattern with CRD + controller Deployment")
+	}
+}
+
+func TestOperatorDetector_WithCRDAndOperatorName(t *testing.T) {
+	d := NewOperatorDetector()
+	g := makeGraph()
+	addResource(g, "apiextensions.k8s.io", "v1", "CustomResourceDefinition", "bars.example.com", "", "operator")
+	addResource(g, "apps", "v1", "Deployment", "my-operator", "default", "operator")
+
+	patterns := d.Detect(g)
+	found := false
+	for _, p := range patterns {
+		if p == PatternOperator {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should detect operator pattern with CRD + operator Deployment")
+	}
+}
+
+func TestOperatorDetector_WithCRDAndControlPlaneLabel(t *testing.T) {
+	d := NewOperatorDetector()
+	g := makeGraph()
+	addResource(g, "apiextensions.k8s.io", "v1", "CustomResourceDefinition", "things.example.com", "", "operator")
+
+	// Create a Deployment with a control-plane label
+	obj := &unstructured.Unstructured{}
+	obj.SetKind("Deployment")
+	obj.SetName("manager")
+	obj.SetNamespace("default")
+	obj.SetAPIVersion("apps/v1")
+	obj.SetLabels(map[string]string{"control-plane": "controller-manager"})
+	pr := &types.ProcessedResource{
+		Original: &types.ExtractedResource{
+			Object: obj,
+			GVK:    schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+		},
+		ServiceName: "operator",
+		Values:      make(map[string]interface{}),
+	}
+	g.AddResource(pr)
+
+	patterns := d.Detect(g)
+	found := false
+	for _, p := range patterns {
+		if p == PatternOperator {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should detect operator pattern with CRD + control-plane labeled Deployment")
+	}
+}
+
+func TestOperatorDetector_CRDOnlyNoController(t *testing.T) {
+	d := NewOperatorDetector()
+	g := makeGraph()
+	addResource(g, "apiextensions.k8s.io", "v1", "CustomResourceDefinition", "foos.example.com", "", "operator")
+	addResource(g, "apps", "v1", "Deployment", "myapp", "default", "app")
+
+	patterns := d.Detect(g)
+	for _, p := range patterns {
+		if p == PatternOperator {
+			t.Error("should not detect operator pattern with CRD but no controller Deployment")
+		}
+	}
+}
+
+func TestOperatorDetector_ControllerWithoutCRD(t *testing.T) {
+	d := NewOperatorDetector()
+	g := makeGraph()
+	addResource(g, "apps", "v1", "Deployment", "foo-controller", "default", "app")
+
+	patterns := d.Detect(g)
+	for _, p := range patterns {
+		if p == PatternOperator {
+			t.Error("should not detect operator pattern with controller but no CRD")
+		}
+	}
+}
+
+func TestOperatorDetector_EmptyGraph(t *testing.T) {
+	d := NewOperatorDetector()
+	g := makeGraph()
+
+	patterns := d.Detect(g)
+	if len(patterns) != 0 {
+		t.Errorf("empty graph should yield no patterns; got %v", patterns)
+	}
+}
+
+// ── InitContainerChecker ──────────────────────────────────────────────────────
+
+func TestInitContainerChecker_Name(t *testing.T) {
+	c := NewInitContainerChecker()
+	if c.Name() != "init-containers" {
+		t.Errorf("Name() = %q; want init-containers", c.Name())
+	}
+	if c.Category() != "Patterns" {
+		t.Errorf("Category() = %q; want Patterns", c.Category())
+	}
+}
+
+func TestInitContainerChecker_WithInitContainers(t *testing.T) {
+	c := NewInitContainerChecker()
+	g := makeGraph()
+
+	pr := addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{"name": "main"},
+	})
+	pr.Values["initContainers"] = []map[string]interface{}{
+		{"name": "init"},
+	}
+	addGroup(g, "app", pr)
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-PAT-001" && p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-PAT-001 (compliant) when init containers are present")
+	}
+}
+
+func TestInitContainerChecker_NoInitContainers(t *testing.T) {
+	c := NewInitContainerChecker()
+	g := makeGraph()
+
+	pr := addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{"name": "main"},
+	})
+	addGroup(g, "app", pr)
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PAT-001" {
+			t.Error("should not report BP-PAT-001 when no init containers present")
+		}
+	}
+}
+
+func TestInitContainerChecker_NonWorkloadSkipped(t *testing.T) {
+	c := NewInitContainerChecker()
+	g := makeGraph()
+
+	// Job should be skipped
+	obj := &unstructured.Unstructured{}
+	obj.SetKind("Job")
+	obj.SetName("myjob")
+	obj.SetNamespace("default")
+	obj.SetAPIVersion("batch/v1")
+	pr := &types.ProcessedResource{
+		Original: &types.ExtractedResource{
+			Object: obj,
+			GVK:    schema.GroupVersionKind{Group: "batch", Version: "v1", Kind: "Job"},
+		},
+		ServiceName: "batch",
+		Values: map[string]interface{}{
+			"initContainers": []map[string]interface{}{{"name": "init"}},
+		},
+	}
+	g.AddResource(pr)
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PAT-001" {
+			t.Error("Job is not a tracked workload kind; BP-PAT-001 should not be reported")
+		}
+	}
+}
+
+func TestInitContainerChecker_StatefulSetAndDaemonSet(t *testing.T) {
+	c := NewInitContainerChecker()
+	g := makeGraph()
+
+	ss := addWorkloadWithContainers(g, "StatefulSet", "db", "db", nil)
+	ss.Values["initContainers"] = []map[string]interface{}{{"name": "init"}}
+
+	ds := addWorkloadWithContainers(g, "DaemonSet", "agent", "agent", nil)
+	ds.Values["initContainers"] = []map[string]interface{}{{"name": "init"}}
+
+	practices := c.Check(g)
+	count := 0
+	for _, p := range practices {
+		if p.ID == "BP-PAT-001" {
+			count++
+		}
+	}
+	// One report covering two affected resources
+	if count == 0 {
+		t.Error("should report BP-PAT-001 for StatefulSet and DaemonSet with init containers")
+	}
+}
+
+// ── QoSClassChecker ───────────────────────────────────────────────────────────
+
+func TestQoSClassChecker_Name(t *testing.T) {
+	c := NewQoSClassChecker()
+	if c.Name() != "qos-class" {
+		t.Errorf("Name() = %q; want qos-class", c.Name())
+	}
+	if c.Category() != "Resource Management" {
+		t.Errorf("Category() = %q; want Resource Management", c.Category())
+	}
+}
+
+func TestQoSClassChecker_BestEffort_NoContainers(t *testing.T) {
+	c := NewQoSClassChecker()
+	g := makeGraph()
+	addResource(g, "apps", "v1", "Deployment", "app", "default", "app")
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-QOS-001" && !p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-QOS-001 for workload with no containers (BestEffort)")
+	}
+}
+
+func TestQoSClassChecker_BestEffort_EmptyContainerList(t *testing.T) {
+	c := NewQoSClassChecker()
+	g := makeGraph()
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{})
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-QOS-001" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-QOS-001 for workload with empty container list")
+	}
+}
+
+func TestQoSClassChecker_BestEffort_ContainersNoResources(t *testing.T) {
+	c := NewQoSClassChecker()
+	g := makeGraph()
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{"name": "main"},
+	})
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-QOS-001" && !p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-QOS-001 for containers with no resource requests/limits")
+	}
+}
+
+func TestQoSClassChecker_Guaranteed(t *testing.T) {
+	c := NewQoSClassChecker()
+	g := makeGraph()
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"resources": map[string]interface{}{
+				"limits":   map[string]interface{}{"cpu": "500m", "memory": "128Mi"},
+				"requests": map[string]interface{}{"cpu": "500m", "memory": "128Mi"},
+			},
+		},
+	})
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-QOS-002" && p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-QOS-002 for workload with equal limits and requests (Guaranteed)")
+	}
+}
+
+func TestQoSClassChecker_Burstable_NotReported(t *testing.T) {
+	c := NewQoSClassChecker()
+	g := makeGraph()
+	// Burstable: only requests set
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"resources": map[string]interface{}{
+				"requests": map[string]interface{}{"cpu": "100m", "memory": "64Mi"},
+			},
+		},
+	})
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-QOS-001" {
+			t.Error("burstable workload should not be reported as BestEffort")
+		}
+		if p.ID == "BP-QOS-002" {
+			t.Error("burstable workload should not be reported as Guaranteed")
+		}
+	}
+}
+
+func TestQoSClassChecker_ContainersWrongType(t *testing.T) {
+	c := NewQoSClassChecker()
+	g := makeGraph()
+
+	obj := &unstructured.Unstructured{}
+	obj.SetKind("Deployment")
+	obj.SetName("app")
+	obj.SetNamespace("default")
+	obj.SetAPIVersion("apps/v1")
+	pr := &types.ProcessedResource{
+		Original: &types.ExtractedResource{
+			Object: obj,
+			GVK:    schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+		},
+		ServiceName: "app",
+		Values:      map[string]interface{}{"containers": "wrong-type"},
+	}
+	g.AddResource(pr)
+
+	// Wrong type containers should be skipped without panicking
+	practices := c.Check(g)
+	_ = practices
+}
+
+func TestQoSClassChecker_GuaranteedMissingMemory(t *testing.T) {
+	c := NewQoSClassChecker()
+	g := makeGraph()
+	// limits and requests both set but missing memory in limits → not guaranteed
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"resources": map[string]interface{}{
+				"limits":   map[string]interface{}{"cpu": "500m"},
+				"requests": map[string]interface{}{"cpu": "500m", "memory": "128Mi"},
+			},
+		},
+	})
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-QOS-002" {
+			t.Error("should not report Guaranteed QoS when memory is missing from limits")
+		}
+	}
+}
+
+// ── StatefulSetPatternChecker ─────────────────────────────────────────────────
+
+func TestStatefulSetPatternChecker_Name(t *testing.T) {
+	c := NewStatefulSetPatternChecker()
+	if c.Name() != "statefulset-patterns" {
+		t.Errorf("Name() = %q; want statefulset-patterns", c.Name())
+	}
+	if c.Category() != "Patterns" {
+		t.Errorf("Category() = %q; want Patterns", c.Category())
+	}
+}
+
+func TestStatefulSetPatternChecker_MissingAll(t *testing.T) {
+	c := NewStatefulSetPatternChecker()
+	g := makeGraph()
+	addResource(g, "apps", "v1", "StatefulSet", "db", "default", "db")
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-SS-001" && !p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-SS-001 for StatefulSet missing serviceName/podManagementPolicy/updateStrategy")
+	}
+}
+
+func TestStatefulSetPatternChecker_FullyConfigured(t *testing.T) {
+	c := NewStatefulSetPatternChecker()
+	g := makeGraph()
+
+	pr := addResource(g, "apps", "v1", "StatefulSet", "db", "default", "db")
+	pr.Values["serviceName"] = "db-headless"
+	pr.Values["podManagementPolicy"] = "Parallel"
+	pr.Values["updateStrategy"] = map[string]interface{}{"type": "RollingUpdate"}
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-SS-001" {
+			t.Error("should not report BP-SS-001 for fully configured StatefulSet")
+		}
+	}
+}
+
+func TestStatefulSetPatternChecker_MissingServiceNameOnly(t *testing.T) {
+	c := NewStatefulSetPatternChecker()
+	g := makeGraph()
+
+	pr := addResource(g, "apps", "v1", "StatefulSet", "db", "default", "db")
+	// serviceName set to empty string — counts as missing
+	pr.Values["serviceName"] = ""
+	pr.Values["podManagementPolicy"] = "OrderedReady"
+	pr.Values["updateStrategy"] = map[string]interface{}{"type": "RollingUpdate"}
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-SS-001" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-SS-001 when serviceName is empty string")
+	}
+}
+
+func TestStatefulSetPatternChecker_NonStatefulSetSkipped(t *testing.T) {
+	c := NewStatefulSetPatternChecker()
+	g := makeGraph()
+	addResource(g, "apps", "v1", "Deployment", "app", "default", "app")
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-SS-001" {
+			t.Error("Deployment should not be checked by StatefulSetPatternChecker")
+		}
+	}
+}
+
+// ── DaemonSetPatternChecker ───────────────────────────────────────────────────
+
+func TestDaemonSetPatternChecker_Name(t *testing.T) {
+	c := NewDaemonSetPatternChecker()
+	if c.Name() != "daemonset-patterns" {
+		t.Errorf("Name() = %q; want daemonset-patterns", c.Name())
+	}
+	if c.Category() != "Patterns" {
+		t.Errorf("Category() = %q; want Patterns", c.Category())
+	}
+}
+
+func TestDaemonSetPatternChecker_MissingAll(t *testing.T) {
+	c := NewDaemonSetPatternChecker()
+	g := makeGraph()
+	addResource(g, "apps", "v1", "DaemonSet", "agent", "default", "agent")
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-DS-001" && !p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-DS-001 for DaemonSet missing tolerations/updateStrategy/limits")
+	}
+}
+
+func TestDaemonSetPatternChecker_FullyConfigured(t *testing.T) {
+	c := NewDaemonSetPatternChecker()
+	g := makeGraph()
+
+	pr := addWorkloadWithContainers(g, "DaemonSet", "agent", "agent", []map[string]interface{}{
+		{
+			"name": "agent",
+			"resources": map[string]interface{}{
+				"limits": map[string]interface{}{"cpu": "200m", "memory": "64Mi"},
+			},
+		},
+	})
+	pr.Values["tolerations"] = []interface{}{map[string]interface{}{"operator": "Exists"}}
+	pr.Values["updateStrategy"] = map[string]interface{}{"type": "RollingUpdate"}
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-DS-001" {
+			t.Error("should not report BP-DS-001 for fully configured DaemonSet")
+		}
+	}
+}
+
+func TestDaemonSetPatternChecker_ContainersNoLimits(t *testing.T) {
+	c := NewDaemonSetPatternChecker()
+	g := makeGraph()
+
+	pr := addWorkloadWithContainers(g, "DaemonSet", "agent", "agent", []map[string]interface{}{
+		{"name": "agent"},
+	})
+	pr.Values["tolerations"] = []interface{}{map[string]interface{}{"operator": "Exists"}}
+	pr.Values["updateStrategy"] = map[string]interface{}{"type": "RollingUpdate"}
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-DS-001" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-DS-001 when DaemonSet containers have no limits")
+	}
+}
+
+func TestDaemonSetPatternChecker_ContainersWrongType(t *testing.T) {
+	c := NewDaemonSetPatternChecker()
+	g := makeGraph()
+
+	obj := &unstructured.Unstructured{}
+	obj.SetKind("DaemonSet")
+	obj.SetName("agent")
+	obj.SetNamespace("default")
+	obj.SetAPIVersion("apps/v1")
+	pr := &types.ProcessedResource{
+		Original: &types.ExtractedResource{
+			Object: obj,
+			GVK:    schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "DaemonSet"},
+		},
+		ServiceName: "agent",
+		Values: map[string]interface{}{
+			"containers":     "wrong-type",
+			"tolerations":    []interface{}{},
+			"updateStrategy": map[string]interface{}{"type": "RollingUpdate"},
+		},
+	}
+	g.AddResource(pr)
+
+	// Wrong-type containers: type assertion fails silently — neither nil-branch nor
+	// typed-branch executes, so "resource limits not set" is NOT added to missingItems.
+	// tolerations and updateStrategy are both set, so no other items missing either.
+	// Result: no BP-DS-001 reported. Should not panic.
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-DS-001" {
+			t.Error("wrong-type containers with tolerations+updateStrategy set should not trigger BP-DS-001")
+		}
+	}
+}
+
+func TestDaemonSetPatternChecker_NonDaemonSetSkipped(t *testing.T) {
+	c := NewDaemonSetPatternChecker()
+	g := makeGraph()
+	addResource(g, "apps", "v1", "Deployment", "app", "default", "app")
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-DS-001" {
+			t.Error("Deployment should not be checked by DaemonSetPatternChecker")
+		}
+	}
+}
+
+// ── GracefulShutdownChecker ───────────────────────────────────────────────────
+
+func TestGracefulShutdownChecker_Name(t *testing.T) {
+	c := NewGracefulShutdownChecker()
+	if c.Name() != "graceful-shutdown" {
+		t.Errorf("Name() = %q; want graceful-shutdown", c.Name())
+	}
+	if c.Category() != "Reliability" {
+		t.Errorf("Category() = %q; want Reliability", c.Category())
+	}
+}
+
+func TestGracefulShutdownChecker_NeitherConfigured(t *testing.T) {
+	c := NewGracefulShutdownChecker()
+	g := makeGraph()
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{"name": "main"},
+	})
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-GS-001" && !p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-GS-001 when neither preStop nor terminationGracePeriodSeconds is configured")
+	}
+}
+
+func TestGracefulShutdownChecker_WithTerminationGracePeriod(t *testing.T) {
+	c := NewGracefulShutdownChecker()
+	g := makeGraph()
+
+	pr := addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{"name": "main"},
+	})
+	pr.Values["terminationGracePeriodSeconds"] = int64(30)
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-GS-001" {
+			t.Error("should not report BP-GS-001 when terminationGracePeriodSeconds is set")
+		}
+	}
+}
+
+func TestGracefulShutdownChecker_WithPreStopHook(t *testing.T) {
+	c := NewGracefulShutdownChecker()
+	g := makeGraph()
+
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"lifecycle": map[string]interface{}{
+				"preStop": map[string]interface{}{
+					"exec": map[string]interface{}{"command": []string{"/bin/sh", "-c", "sleep 5"}},
+				},
+			},
+		},
+	})
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-GS-001" {
+			t.Error("should not report BP-GS-001 when preStop hook is configured")
+		}
+	}
+}
+
+func TestGracefulShutdownChecker_NoContainers(t *testing.T) {
+	c := NewGracefulShutdownChecker()
+	g := makeGraph()
+	addResource(g, "apps", "v1", "Deployment", "app", "default", "app")
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-GS-001" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-GS-001 for workload with no containers key")
+	}
+}
+
+func TestGracefulShutdownChecker_ContainersWrongType(t *testing.T) {
+	c := NewGracefulShutdownChecker()
+	g := makeGraph()
+
+	obj := &unstructured.Unstructured{}
+	obj.SetKind("Deployment")
+	obj.SetName("app")
+	obj.SetNamespace("default")
+	obj.SetAPIVersion("apps/v1")
+	pr := &types.ProcessedResource{
+		Original: &types.ExtractedResource{
+			Object: obj,
+			GVK:    schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+		},
+		ServiceName: "app",
+		Values:      map[string]interface{}{"containers": "wrong-type"},
+	}
+	g.AddResource(pr)
+
+	// Should report missing graceful shutdown (containers parse fails, no preStop found)
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-GS-001" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-GS-001 when containers has wrong type and no terminationGracePeriodSeconds")
+	}
+}
+
+func TestGracefulShutdownChecker_NonWorkloadSkipped(t *testing.T) {
+	c := NewGracefulShutdownChecker()
+	g := makeGraph()
+	addResource(g, "batch", "v1", "Job", "myjob", "default", "batch")
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-GS-001" {
+			t.Error("Job should not be checked by GracefulShutdownChecker")
+		}
+	}
+}
+
+func TestGracefulShutdownChecker_LifecycleNoPreStop(t *testing.T) {
+	c := NewGracefulShutdownChecker()
+	g := makeGraph()
+
+	// Container with lifecycle but no preStop key
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"lifecycle": map[string]interface{}{
+				"postStart": map[string]interface{}{"exec": map[string]interface{}{"command": []string{"echo"}}},
+			},
+		},
+	})
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-GS-001" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-GS-001 when lifecycle has no preStop key")
+	}
+}
+
+// ── PodSecurityStandardsChecker ───────────────────────────────────────────────
+
+func TestPodSecurityStandardsChecker_Name(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	if c.Name() != "pod-security-standards" {
+		t.Errorf("Name() = %q; want pod-security-standards", c.Name())
+	}
+	if c.Category() != "Security" {
+		t.Errorf("Category() = %q; want Security", c.Category())
+	}
+}
+
+func TestPodSecurityStandardsChecker_PrivilegedContainer(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"securityContext": map[string]interface{}{
+				"privileged": true,
+			},
+		},
+	})
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" && !p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-PSS-001 for privileged container (privileged PSS level)")
+	}
+}
+
+func TestPodSecurityStandardsChecker_HostNetwork(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	pr := addWorkloadWithContainers(g, "Deployment", "app", "app", nil)
+	pr.Values["hostNetwork"] = true
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" && !p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-PSS-001 for hostNetwork:true (privileged PSS level)")
+	}
+}
+
+func TestPodSecurityStandardsChecker_HostPID(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	pr := addWorkloadWithContainers(g, "Deployment", "app", "app", nil)
+	pr.Values["hostPID"] = true
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-PSS-001 for hostPID:true")
+	}
+}
+
+func TestPodSecurityStandardsChecker_HostIPC(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	pr := addWorkloadWithContainers(g, "Deployment", "app", "app", nil)
+	pr.Values["hostIPC"] = true
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("should report BP-PSS-001 for hostIPC:true")
+	}
+}
+
+func TestPodSecurityStandardsChecker_RestrictedCompliant(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"securityContext": map[string]interface{}{
+				"runAsNonRoot": true,
+				"capabilities": map[string]interface{}{
+					"drop": []interface{}{"ALL"},
+				},
+				"seccompProfile": map[string]interface{}{"type": "RuntimeDefault"},
+			},
+		},
+	})
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			t.Error("should not report BP-PSS-001 for restricted-compliant workload")
+		}
+	}
+}
+
+func TestPodSecurityStandardsChecker_BaselineLevel_NoSecCtx(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	// Container with no securityContext — baseline level, not privileged
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{"name": "main"},
+	})
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			t.Error("baseline-level workload (no securityContext) should not be reported as privileged")
+		}
+	}
+}
+
+func TestPodSecurityStandardsChecker_NoContainersList(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	// Workload with no containers key — treated as baseline
+	addResource(g, "apps", "v1", "Deployment", "app", "default", "app")
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			t.Error("workload with no containers key should be treated as baseline, not privileged")
+		}
+	}
+}
+
+func TestPodSecurityStandardsChecker_ContainersWrongType(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	obj := &unstructured.Unstructured{}
+	obj.SetKind("Deployment")
+	obj.SetName("app")
+	obj.SetNamespace("default")
+	obj.SetAPIVersion("apps/v1")
+	pr := &types.ProcessedResource{
+		Original: &types.ExtractedResource{
+			Object: obj,
+			GVK:    schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+		},
+		ServiceName: "app",
+		Values:      map[string]interface{}{"containers": "wrong-type"},
+	}
+	g.AddResource(pr)
+
+	// Wrong type containers → classifyPSSLevel returns baseline → no BP-PSS-001
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			t.Error("wrong-type containers should not trigger BP-PSS-001")
+		}
+	}
+}
+
+func TestPodSecurityStandardsChecker_RunAsNonRootFalse(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"securityContext": map[string]interface{}{
+				"runAsNonRoot": false,
+				// drop ALL and seccompProfile present — but runAsNonRoot is false
+				"capabilities": map[string]interface{}{
+					"drop": []interface{}{"ALL"},
+				},
+				"seccompProfile": map[string]interface{}{"type": "RuntimeDefault"},
+			},
+		},
+	})
+
+	// runAsNonRoot:false → baseline level → not privileged → no BP-PSS-001
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			t.Error("runAsNonRoot:false makes it baseline, not privileged — should not report BP-PSS-001")
+		}
+	}
+}
+
+func TestPodSecurityStandardsChecker_DropCapabilitiesNotAll(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"securityContext": map[string]interface{}{
+				"runAsNonRoot": true,
+				"capabilities": map[string]interface{}{
+					"drop": []interface{}{"NET_ADMIN"}, // not ALL
+				},
+				"seccompProfile": map[string]interface{}{"type": "RuntimeDefault"},
+			},
+		},
+	})
+
+	// Does not drop ALL → baseline → no BP-PSS-001
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			t.Error("not dropping ALL capabilities makes it baseline, not privileged")
+		}
+	}
+}
+
+func TestPodSecurityStandardsChecker_NoSeccompProfile(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"securityContext": map[string]interface{}{
+				"runAsNonRoot": true,
+				"capabilities": map[string]interface{}{
+					"drop": []interface{}{"ALL"},
+				},
+				// seccompProfile missing → not restricted
+			},
+		},
+	})
+
+	// No seccompProfile → baseline → no BP-PSS-001
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			t.Error("missing seccompProfile makes it baseline, not privileged")
+		}
+	}
+}
+
+func TestPodSecurityStandardsChecker_NilCapabilities(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{
+			"name": "main",
+			"securityContext": map[string]interface{}{
+				"runAsNonRoot": true,
+				"capabilities": nil,
+				"seccompProfile": map[string]interface{}{"type": "RuntimeDefault"},
+			},
+		},
+	})
+
+	// nil capabilities → baseline → no BP-PSS-001
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			t.Error("nil capabilities makes it baseline, not privileged")
+		}
+	}
+}
+
+func TestPodSecurityStandardsChecker_NonWorkloadSkipped(t *testing.T) {
+	c := NewPodSecurityStandardsChecker()
+	g := makeGraph()
+	addResource(g, "batch", "v1", "Job", "myjob", "default", "batch")
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-PSS-001" {
+			t.Error("Job should not be checked by PodSecurityStandardsChecker")
 		}
 	}
 }

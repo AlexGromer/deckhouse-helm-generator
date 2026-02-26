@@ -25,6 +25,14 @@ func RegisterAll(r *processor.Registry) {
 
 	// Autoscaling
 	r.Register(NewHPAProcessor())
+	r.Register(NewVPAProcessor())
+
+	// Scheduling
+	r.Register(NewPriorityClassProcessor())
+
+	// Resource management
+	r.Register(NewLimitRangeProcessor())
+	r.Register(NewResourceQuotaProcessor())
 
 	// Disruption budget
 	r.Register(NewPDBProcessor())

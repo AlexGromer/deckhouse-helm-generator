@@ -2,7 +2,7 @@
 
 **Version**: 2.9.0
 **Created**: 2026-01-30
-**Updated**: 2026-02-16
+**Updated**: 2026-02-26
 **Status**: Active Development — Research Complete ✅
 **Research Passes**: 15 completed (15 planned)
 1. Core Features & Basics
@@ -81,22 +81,25 @@ helmfile -f helmfile.yaml apply                           # 4. Deploy
 
 ---
 
-## Current State (v0.1.1)
+## Current State (v0.6.0)
 
 ### Реализовано
 
 | Компонент | Статус | Покрытие |
 |-----------|--------|----------|
 | **File Extractor** | ✅ Done | YAML файлы, рекурсивные директории |
-| **K8s Processors** | ✅ Done | 9 типов (Deployment, Service, ConfigMap, Secret, Ingress, StatefulSet, DaemonSet, PVC, SA) |
+| **K8s Processors** | ✅ Done | 13 типов (+HPA, VPA, PriorityClass, LimitRange, ResourceQuota, PDB, NetworkPolicy, CronJob, Job, Role/Binding) |
 | **Relationship Detector** | ✅ Done | 13 типов связей (labels, names, volumes, env, annotations) |
 | **Universal Generator** | ✅ Done | Единый чарт со всеми сервисами |
-| **Pattern Analyzer** | ✅ Done | Определение архитектуры (microservices, monolith, stateful, deckhouse) |
-| **Best Practices Checker** | ✅ Done | Security, Resources, HA (8 проверок) |
+| **Pattern Analyzer** | ✅ Done | 5 детекторов (microservices, monolith, stateful, job, operator) + 9 checkers |
+| **Best Practices Checker** | ✅ Done | Security, Resources, HA, InitContainer, QoS, StatefulSet, DaemonSet, GracefulShutdown, PSS |
 | **Value Processor** | ✅ Done | JSON/XML/Base64 детекция, pretty-print, externalization |
 | **External Files** | ✅ Done | Автовынос больших данных (>1KB) в files/ |
 | **Recommendation Engine** | ✅ Done | Приоритизированные action items, text/JSON/markdown |
-| **CLI** | ✅ Done | `generate`, `analyze`, `version` |
+| **Checksum Annotations** | ✅ Done | Auto-reload ConfigMap/Secret via sha256sum |
+| **API Migration** | ✅ Done | Deprecated API detection + auto-migration (12 entries) |
+| **CLI** | ✅ Done | `generate`, `analyze`, `validate`, `diff`, `version`, `--dry-run` |
+| **Test Coverage** | ✅ Done | 85.9% total (target >= 80%) |
 
 ### Не реализовано
 
@@ -140,10 +143,10 @@ helmfile -f helmfile.yaml apply                           # 4. Deploy
 | 1.2.5 | Job | `batch/v1` | Извлечение completions, parallelism, backoffLimit, activeDeadlineSeconds |
 | 1.2.6 | Role / ClusterRole | `rbac.authorization.k8s.io/v1` | Извлечение rules (apiGroups, resources, verbs), aggregation |
 | 1.2.7 | RoleBinding / ClusterRoleBinding | `rbac.authorization.k8s.io/v1` | Извлечение roleRef, subjects (User, Group, SA) |
-| 1.2.8 | VerticalPodAutoscaler | `autoscaling.k8s.io/v1` | Извлечение updatePolicy, resourcePolicy, targetRef |
-| 1.2.9 | PriorityClass | `scheduling.k8s.io/v1` | Извлечение value, globalDefault, preemptionPolicy, description |
-| 1.2.10 | LimitRange | `v1` | Извлечение default/defaultRequest/min/max для containers. Namespace-level resource enforcement |
-| 1.2.11 | ResourceQuota | `v1` | Извлечение hard limits: CPU, memory, pods, PVCs, services. Namespace capacity planning |
+| 1.2.8 | VerticalPodAutoscaler | `autoscaling.k8s.io/v1` | ✅ Извлечение updatePolicy, resourcePolicy, targetRef |
+| 1.2.9 | PriorityClass | `scheduling.k8s.io/v1` | ✅ Извлечение value, globalDefault, preemptionPolicy, description |
+| 1.2.10 | LimitRange | `v1` | ✅ Извлечение default/defaultRequest/min/max для containers. Namespace-level resource enforcement |
+| 1.2.11 | ResourceQuota | `v1` | ✅ Извлечение hard limits: CPU, memory, pods, PVCs, services. Namespace capacity planning |
 
 ### 1.3 Generator Improvements (5 задач)
 
@@ -153,35 +156,35 @@ helmfile -f helmfile.yaml apply                           # 4. Deploy
 | 1.3.2 | Helm test templates | Auto-scaffold `helm-unittest` тесты в `templates/tests/`. Для каждого шаблона: snapshot test + value permutation (enabled=true/false). BDD-style assertions. |
 | 1.3.3 | Chart hooks generation | `pre-upgrade` hook для DB миграций (Job), `post-install` hook для smoke test (Job), `pre-delete` hook для cleanup. Аннотации `helm.sh/hook`, `helm.sh/hook-weight`, `helm.sh/hook-delete-policy`. |
 | 1.3.4 | Configurable template style | Flag `--template-style`: `standard` (Go template) vs `helm` (Helm-specific functions). Выбор между `{{ if }}` и `{{- with }}`. |
-| 1.3.5 | Deprecated API auto-migration | Детекция deprecated APIs (Pluto-like): `extensions/v1beta1` Ingress → `networking.k8s.io/v1`, `policy/v1beta1` PDB → `policy/v1`. Авто-миграция при генерации. |
+| 1.3.5 | Deprecated API auto-migration | ✅ Детекция deprecated APIs (Pluto-like): `extensions/v1beta1` Ingress → `networking.k8s.io/v1`, `policy/v1beta1` PDB → `policy/v1`. Авто-миграция при генерации. |
 | 1.3.6 | NOTES.txt генерация | Динамический `templates/NOTES.txt`: connection instructions (port-forward, LB IP, Ingress URL), conditional sections по enabled features, credentials retrieval commands |
 | 1.3.7 | Values.yaml design patterns | Nested структура (image.repository, service.type), inline-комментарии над каждым ключом, sensible defaults. Flag `--values-flat` для плоской структуры |
-| 1.3.8 | Checksum annotations | Автогенерация `checksum/config` и `checksum/secret` annotations в Deployment pod template для auto-reload при изменении ConfigMap/Secret |
+| 1.3.8 | Checksum annotations | ✅ Автогенерация `checksum/config` и `checksum/secret` annotations в Deployment pod template для auto-reload при изменении ConfigMap/Secret |
 | 1.3.9 | Advanced _helpers.tpl | Расширенные named templates: `myapp.labels`, `myapp.selectorLabels`, `myapp.serviceAccountName`, `myapp.image`. Переиспользование во всех шаблонах |
 
 ### 1.4 CLI & UX (4 задачи)
 
 | # | Задача | Команда | Описание |
 |---|--------|---------|----------|
-| 1.4.1 | Validate command | `dhg validate` | Встроенная валидация чарта без Helm CLI: YAML syntax, required fields, values schema, template rendering. Exit codes: 0=ok, 1=error, 2=warning. |
-| 1.4.2 | Diff command | `dhg diff` | Сравнение сгенерированного чарта с предыдущей версией или существующим чартом. Цветной diff output. Поддержка `--output json` для CI. |
-| 1.4.3 | Dry-run mode | `--dry-run` | Показать что будет сгенерировано без записи на диск. Список файлов + preview первых 20 строк каждого. |
+| 1.4.1 | Validate command | `dhg validate` | ✅ Встроенная валидация чарта без Helm CLI: YAML syntax, required fields, values schema, template rendering. Exit codes: 0=ok, 1=error, 2=warning. |
+| 1.4.2 | Diff command | `dhg diff` | ✅ Сравнение сгенерированного чарта с предыдущей версией или существующим чартом. Цветной diff output. |
+| 1.4.3 | Dry-run mode | `--dry-run` | ✅ Показать что будет сгенерировано без записи на диск. Список файлов + preview первых 20 строк каждого. |
 | 1.4.4 | Progress bar | — | Для больших директорий (>50 файлов): progress bar с eta. Библиотека: `schollz/progressbar`. |
 
 ### 1.5 Pattern Detection Fixes (4 задачи)
 
 | # | Задача | Описание |
 |---|--------|----------|
-| 1.5.1 | PatternJob детектор | Детекция CronJob/Job паттернов: batch processing, ETL, migrations. Триггеры: наличие CronJob/Job ресурсов, `restartPolicy: Never/OnFailure`. |
-| 1.5.2 | PatternOperator детектор | Детекция operator pattern: CRD + Deployment с controller-manager, RBAC для CRD. Триггеры: наличие CRD + Deployment + ClusterRole с нестандартными resources. |
+| 1.5.1 | PatternJob детектор | ✅ Детекция CronJob/Job паттернов: batch processing, ETL, migrations. Триггеры: наличие CronJob/Job ресурсов, `restartPolicy: Never/OnFailure`. |
+| 1.5.2 | PatternOperator детектор | ✅ Детекция operator pattern: CRD + Deployment с controller-manager, RBAC для CRD. Триггеры: наличие CRD + Deployment + ClusterRole с нестандартными resources. |
 | 1.5.3 | Sidecar-детекция | Анализ ролей контейнеров: main app vs sidecar (envoy, fluent-bit, vault-agent, istio-proxy). По имени контейнера, image name, port patterns. |
-| 1.5.4 | Init-контейнеры | Детекция init containers: wait-for-db, migrations, config-init. Шаблонизация с условным включением. |
+| 1.5.4 | Init-контейнеры | ✅ Детекция init containers: wait-for-db, migrations, config-init. Шаблонизация с условным включением. |
 | 1.5.5 | Topology Spread Constraints | Детекция `topologySpreadConstraints` в Pod spec. Шаблонизация maxSkew, topologyKey, whenUnsatisfiable. Best practice: auto-suggest для multi-replica Deployments |
-| 1.5.6 | QoS Class анализ | Определение QoS класса (Guaranteed/Burstable/BestEffort) из resources. Warning если BestEffort в production. Рекомендации по доведению до Guaranteed |
-| 1.5.7 | StatefulSet advanced patterns | Детекция ordinal-based config (pod-0 primary), headless Service auto-create, volumeClaimTemplate strategies, podManagementPolicy (Ordered/Parallel) |
-| 1.5.8 | DaemonSet patterns | Auto-add tolerations (control-plane, not-ready), update strategy detection (RollingUpdate/OnDelete), resource limits warning (HIGH severity для DaemonSets) |
-| 1.5.9 | Graceful shutdown | Генерация preStop hooks для web-серверов (`sleep 15`), terminationGracePeriodSeconds по типу workload (web: 30s, batch: 300s, db: 60s) |
-| 1.5.10 | Pod Security Standards | Анализ PSS compliance (restricted/baseline/privileged). Flag `--pss-level=restricted`. Генерация securityContext: runAsNonRoot, capabilities.drop ALL, readOnlyRootFilesystem, seccompProfile |
+| 1.5.6 | QoS Class анализ | ✅ Определение QoS класса (Guaranteed/Burstable/BestEffort) из resources. Warning если BestEffort в production. Рекомендации по доведению до Guaranteed |
+| 1.5.7 | StatefulSet advanced patterns | ✅ Детекция ordinal-based config (pod-0 primary), headless Service auto-create, volumeClaimTemplate strategies, podManagementPolicy (Ordered/Parallel) |
+| 1.5.8 | DaemonSet patterns | ✅ Auto-add tolerations (control-plane, not-ready), update strategy detection (RollingUpdate/OnDelete), resource limits warning (HIGH severity для DaemonSets) |
+| 1.5.9 | Graceful shutdown | ✅ Генерация preStop hooks для web-серверов (`sleep 15`), terminationGracePeriodSeconds по типу workload (web: 30s, batch: 300s, db: 60s) |
+| 1.5.10 | Pod Security Standards | ✅ Анализ PSS compliance (restricted/baseline/privileged). Flag `--pss-level=restricted`. Генерация securityContext: runAsNonRoot, capabilities.drop ALL, readOnlyRootFilesystem, seccompProfile |
 
 ---
 
@@ -1361,9 +1364,9 @@ helmfile -f helmfile.yaml apply                           # 4. Deploy
 |---------|------|-----------|
 | v0.1.0 | 2026-01-22 | Initial: file extractor, K8s processors, universal generator |
 | v0.1.1 | 2026-01-30 | Pattern analyzer, value processor, external files, best practices |
-| v0.2.0 | TBD | Core stabilization: tests, additional resources, CLI improvements |
-| v0.3.0 | TBD | Complete output modes: separate, library, umbrella generators |
-| v0.4.0 | TBD | Deckhouse integration: CRD processors, module structure |
-| v0.5.0 | TBD | Source expansion: cluster & GitOps extractors |
-| v0.6.0 | TBD | Advanced analysis: auto-fix, CRD, migration, mesh, observability |
+| v0.2.0 | 2026-02-17 | Core stabilization: tests, additional resources, CLI improvements |
+| v0.3.0 | 2026-02-18 | Complete output modes: separate, library, umbrella generators |
+| v0.4.0 | 2026-02-19 | Deckhouse integration: CRD processors, module structure, monitoring, Gateway API, KEDA, cert-manager |
+| v0.5.0 | 2026-02-19 | BREAKING: SanitizeServiceName, critical security fixes, graph optimizations |
+| v0.6.0 | 2026-02-20 | Distribution: GoReleaser, Docker, Homebrew, coverage 78%, OSS infrastructure |
 | v1.0.0 | TBD | Production release: performance, distribution, docs, supply chain |
