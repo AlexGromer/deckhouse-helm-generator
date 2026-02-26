@@ -98,6 +98,10 @@ func newGenerateCmd() *cobra.Command {
 		airgapRegistry     string
 		namespaceResources bool
 		multiTenant        bool
+		featureFlags       bool
+		cloudProvider      string
+		cloudInternal      bool
+		detectIngress      bool
 	)
 
 	cmd := &cobra.Command{
@@ -141,6 +145,10 @@ Examples:
 				airgapRegistry:     airgapRegistry,
 				namespaceResources: namespaceResources,
 				multiTenant:        multiTenant,
+				featureFlags:       featureFlags,
+				cloudProvider:      cloudProvider,
+				cloudInternal:      cloudInternal,
+				detectIngress:      detectIngress,
 			})
 		},
 	}
@@ -170,6 +178,10 @@ Examples:
 	cmd.Flags().StringVar(&airgapRegistry, "airgap-registry", "", "Generate air-gapped artifacts (images.txt, values-airgap.yaml, mirror-images.sh) targeting this registry")
 	cmd.Flags().BoolVar(&namespaceResources, "namespace-resources", false, "Generate namespace governance resources (ResourceQuota, LimitRange, NetworkPolicy)")
 	cmd.Flags().BoolVar(&multiTenant, "multi-tenant", false, "Generate multi-tenant chart overlay with per-tenant isolation")
+	cmd.Flags().BoolVar(&featureFlags, "feature-flags", false, "Inject feature flags (monitoring, ingress, autoscaling, security, storage, rbac)")
+	cmd.Flags().StringVar(&cloudProvider, "cloud-provider", "", "Cloud provider for Service annotations (aws, gcp, azure)")
+	cmd.Flags().BoolVar(&cloudInternal, "cloud-internal", false, "Use internal load balancer for cloud annotations")
+	cmd.Flags().BoolVar(&detectIngress, "detect-ingress", false, "Auto-detect ingress controller and generate controller-specific annotations")
 
 	_ = cmd.MarkFlagRequired("chart-name")
 
@@ -202,6 +214,10 @@ type generateOptions struct {
 	airgapRegistry     string
 	namespaceResources bool
 	multiTenant        bool
+	featureFlags       bool
+	cloudProvider      string
+	cloudInternal      bool
+	detectIngress      bool
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -503,6 +519,55 @@ drain:
 		}
 		for i, chart := range charts {
 			charts[i] = generator.GenerateMultiTenantOverlay(chart, 2) // default 2 tenants
+		}
+	}
+
+	// Apply feature flags if requested
+	if opts.featureFlags {
+		if opts.verbose {
+			fmt.Printf("\n[4f/5] Injecting feature flags...\n")
+		}
+		config := generator.DefaultFeatureFlagConfig()
+		for i, chart := range charts {
+			charts[i] = generator.InjectFeatureFlags(chart, config)
+		}
+	}
+
+	// Apply cloud annotations if requested
+	if opts.cloudProvider != "" {
+		if opts.verbose {
+			fmt.Printf("\n[4g/5] Injecting cloud annotations for %s...\n", opts.cloudProvider)
+		}
+		cloudConfig := generator.CloudAnnotationConfig{
+			Provider: generator.CloudProvider(opts.cloudProvider),
+			Internal: opts.cloudInternal,
+		}
+		if !opts.cloudInternal {
+			cloudConfig.Scheme = "internet-facing"
+		} else {
+			cloudConfig.Scheme = "internal"
+		}
+		for i, chart := range charts {
+			charts[i] = generator.InjectCloudAnnotations(chart, cloudConfig)
+		}
+	}
+
+	// Auto-detect ingress controller and inject annotations if requested
+	if opts.detectIngress {
+		if opts.verbose {
+			fmt.Printf("\n[4h/5] Detecting ingress controller...\n")
+		}
+		controller := generator.DetectIngressController(processedResources)
+		if opts.verbose {
+			fmt.Printf("  Detected controller: %s\n", controller)
+		}
+		if controller != generator.ControllerUnknown {
+			features := []generator.IngressFeature{
+				generator.IngressSSLRedirect,
+			}
+			for i, chart := range charts {
+				charts[i] = generator.InjectIngressAnnotations(chart, controller, features)
+			}
 		}
 	}
 
