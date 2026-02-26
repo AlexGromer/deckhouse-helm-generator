@@ -3,7 +3,11 @@ package generator
 import (
 	"testing"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
+
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
 // baseVals returns a simple base values map for testing.
@@ -362,4 +366,500 @@ func mapKeys(m map[string][]byte) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// ============================================================
+// Workload-Aware Environment Profiles (TDD — not yet implemented)
+// ============================================================
+
+// ============================================================
+// Section A: DetectWorkloadType
+// ============================================================
+
+// TestWorkload_DetectWeb_HasIngress — group with Deployment + Service + Ingress → WorkloadWeb
+func TestWorkload_DetectWeb_HasIngress(t *testing.T) {
+	group := makeGroupForEnv("webapp",
+		makeResourceForEnv("Deployment", "webapp"),
+		makeResourceForEnv("Service", "webapp"),
+		makeResourceForEnv("Ingress", "webapp"),
+	)
+
+	got := DetectWorkloadType(group)
+	if got != WorkloadWeb {
+		t.Errorf("DetectWorkloadType with Ingress: got %q, want %q", got, WorkloadWeb)
+	}
+}
+
+// TestWorkload_DetectWeb_Port8080 — group with Deployment exposing port 8080 → WorkloadWeb
+func TestWorkload_DetectWeb_Port8080(t *testing.T) {
+	group := makeGroupForEnv("webapp",
+		makeResourceWithPorts("Deployment", "webapp", []int{8080}),
+	)
+
+	got := DetectWorkloadType(group)
+	if got != WorkloadWeb {
+		t.Errorf("DetectWorkloadType with port 8080: got %q, want %q", got, WorkloadWeb)
+	}
+}
+
+// TestWorkload_DetectWorker_NoService — Deployment without any Service → WorkloadWorker
+func TestWorkload_DetectWorker_NoService(t *testing.T) {
+	group := makeGroupForEnv("worker",
+		makeResourceForEnv("Deployment", "worker"),
+	)
+
+	got := DetectWorkloadType(group)
+	if got != WorkloadWorker {
+		t.Errorf("DetectWorkloadType Deployment-only: got %q, want %q", got, WorkloadWorker)
+	}
+}
+
+// TestWorkload_DetectWorker_AMQPEnvVar — Deployment with AMQP_URL env var → WorkloadWorker
+func TestWorkload_DetectWorker_AMQPEnvVar(t *testing.T) {
+	group := makeGroupForEnv("queue-consumer",
+		makeResourceWithEnvVars("Deployment", "queue-consumer", map[string]string{
+			"AMQP_URL": "amqp://rabbitmq:5672",
+		}),
+	)
+
+	got := DetectWorkloadType(group)
+	if got != WorkloadWorker {
+		t.Errorf("DetectWorkloadType with AMQP_URL env var: got %q, want %q", got, WorkloadWorker)
+	}
+}
+
+// TestWorkload_DetectDatabase_StatefulSetPVC — StatefulSet + PVC → WorkloadDatabase
+func TestWorkload_DetectDatabase_StatefulSetPVC(t *testing.T) {
+	group := makeGroupForEnv("postgres",
+		makeResourceForEnv("StatefulSet", "postgres"),
+		makeResourceForEnv("PersistentVolumeClaim", "postgres-data"),
+	)
+
+	got := DetectWorkloadType(group)
+	if got != WorkloadDatabase {
+		t.Errorf("DetectWorkloadType StatefulSet+PVC: got %q, want %q", got, WorkloadDatabase)
+	}
+}
+
+// TestWorkload_DetectDatabase_PostgresImage — Deployment with image postgres:15 → WorkloadDatabase
+func TestWorkload_DetectDatabase_PostgresImage(t *testing.T) {
+	group := makeGroupForEnv("db",
+		makeResourceWithImage("Deployment", "db", "postgres:15"),
+	)
+
+	got := DetectWorkloadType(group)
+	if got != WorkloadDatabase {
+		t.Errorf("DetectWorkloadType with postgres image: got %q, want %q", got, WorkloadDatabase)
+	}
+}
+
+// TestWorkload_DetectBatch_CronJob — group containing only a CronJob → WorkloadBatch
+func TestWorkload_DetectBatch_CronJob(t *testing.T) {
+	group := makeGroupForEnv("nightly-report",
+		makeResourceForEnv("CronJob", "nightly-report"),
+	)
+
+	got := DetectWorkloadType(group)
+	if got != WorkloadBatch {
+		t.Errorf("DetectWorkloadType CronJob-only: got %q, want %q", got, WorkloadBatch)
+	}
+}
+
+// TestWorkload_DetectCache_RedisImage — Deployment with image redis:7 (no PVC) → WorkloadCache
+func TestWorkload_DetectCache_RedisImage(t *testing.T) {
+	group := makeGroupForEnv("cache",
+		makeResourceWithImage("Deployment", "cache", "redis:7"),
+	)
+
+	got := DetectWorkloadType(group)
+	if got != WorkloadCache {
+		t.Errorf("DetectWorkloadType with redis image (no PVC): got %q, want %q", got, WorkloadCache)
+	}
+}
+
+// ============================================================
+// Section B: GenerateEnvValuesForWorkload — profile correctness
+// ============================================================
+
+// TestWorkload_WebDevProfile — Web dev profile: replicas=1, no HPA enabled
+func TestWorkload_WebDevProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadWeb)
+
+	devData, ok := result["values-dev.yaml"]
+	if !ok {
+		t.Fatal("values-dev.yaml missing from web workload result")
+	}
+	parsed := parseEnvYAML(t, devData)
+
+	if toInt(parsed["replicaCount"]) != 1 {
+		t.Errorf("web dev replicas: got %v, want 1", parsed["replicaCount"])
+	}
+
+	// No HPA in dev — either absent or enabled=false
+	if hpa, hasHPA := parsed["autoscaling"]; hasHPA {
+		if hpaMap, ok := hpa.(map[string]interface{}); ok {
+			if hpaMap["enabled"] == true {
+				t.Error("web dev profile must not have HPA enabled")
+			}
+		}
+	}
+}
+
+// TestWorkload_WebProdProfile — Web prod: replicas=3, HPA min=3/max=10, PDB minAvailable=2
+func TestWorkload_WebProdProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadWeb)
+
+	prodData, ok := result["values-prod.yaml"]
+	if !ok {
+		t.Fatal("values-prod.yaml missing from web workload result")
+	}
+	parsed := parseEnvYAML(t, prodData)
+
+	// Replicas
+	if toInt(parsed["replicaCount"]) != 3 {
+		t.Errorf("web prod replicas: got %v, want 3", parsed["replicaCount"])
+	}
+
+	// HPA
+	hpa, hasHPA := parsed["autoscaling"]
+	if !hasHPA {
+		t.Fatal("web prod missing autoscaling section")
+	}
+	hpaMap, ok := hpa.(map[string]interface{})
+	if !ok {
+		t.Fatal("autoscaling is not a map")
+	}
+	if hpaMap["enabled"] != true {
+		t.Error("web prod HPA must be enabled")
+	}
+	if toInt(hpaMap["minReplicas"]) != 3 {
+		t.Errorf("web prod HPA minReplicas: got %v, want 3", hpaMap["minReplicas"])
+	}
+	if toInt(hpaMap["maxReplicas"]) != 10 {
+		t.Errorf("web prod HPA maxReplicas: got %v, want 10", hpaMap["maxReplicas"])
+	}
+
+	// PDB
+	pdb, hasPDB := parsed["podDisruptionBudget"]
+	if !hasPDB {
+		t.Fatal("web prod missing podDisruptionBudget section")
+	}
+	pdbMap, ok := pdb.(map[string]interface{})
+	if !ok {
+		t.Fatal("podDisruptionBudget is not a map")
+	}
+	if pdbMap["enabled"] != true {
+		t.Error("web prod PDB must be enabled")
+	}
+	if toInt(pdbMap["minAvailable"]) != 2 {
+		t.Errorf("web prod PDB minAvailable: got %v, want 2", pdbMap["minAvailable"])
+	}
+}
+
+// TestWorkload_DatabaseProdProfile — Database prod: anti-affinity, strict resources, PDB minAvailable=2
+func TestWorkload_DatabaseProdProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadDatabase)
+
+	prodData, ok := result["values-prod.yaml"]
+	if !ok {
+		t.Fatal("values-prod.yaml missing from database workload result")
+	}
+	parsed := parseEnvYAML(t, prodData)
+
+	// Anti-affinity must be present
+	affinity, hasAffinity := parsed["affinity"]
+	if !hasAffinity {
+		t.Fatal("database prod profile missing affinity section")
+	}
+	affinityMap, ok := affinity.(map[string]interface{})
+	if !ok {
+		t.Fatal("affinity is not a map")
+	}
+	if _, hasPAA := affinityMap["podAntiAffinity"]; !hasPAA {
+		t.Error("database prod affinity must contain podAntiAffinity")
+	}
+
+	// Strict resources (limits must be present)
+	resources, hasResources := parsed["resources"]
+	if !hasResources {
+		t.Fatal("database prod profile missing resources section")
+	}
+	resMap, ok := resources.(map[string]interface{})
+	if !ok {
+		t.Fatal("resources is not a map")
+	}
+	if _, hasLimits := resMap["limits"]; !hasLimits {
+		t.Error("database prod resources must have limits")
+	}
+	if _, hasRequests := resMap["requests"]; !hasRequests {
+		t.Error("database prod resources must have requests")
+	}
+
+	// PDB minAvailable=2
+	pdb, hasPDB := parsed["podDisruptionBudget"]
+	if !hasPDB {
+		t.Fatal("database prod profile missing podDisruptionBudget")
+	}
+	pdbMap, ok := pdb.(map[string]interface{})
+	if !ok {
+		t.Fatal("podDisruptionBudget is not a map")
+	}
+	if pdbMap["enabled"] != true {
+		t.Error("database prod PDB must be enabled")
+	}
+	if toInt(pdbMap["minAvailable"]) != 2 {
+		t.Errorf("database prod PDB minAvailable: got %v, want 2", pdbMap["minAvailable"])
+	}
+}
+
+// TestWorkload_BatchProdProfile — Batch prod: backoffLimit=3, no PDB, no HPA
+func TestWorkload_BatchProdProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadBatch)
+
+	prodData, ok := result["values-prod.yaml"]
+	if !ok {
+		t.Fatal("values-prod.yaml missing from batch workload result")
+	}
+	parsed := parseEnvYAML(t, prodData)
+
+	// backoffLimit must be 3
+	if toInt(parsed["backoffLimit"]) != 3 {
+		t.Errorf("batch prod backoffLimit: got %v, want 3", parsed["backoffLimit"])
+	}
+
+	// No HPA — batch workloads are not scaled horizontally
+	if hpa, hasHPA := parsed["autoscaling"]; hasHPA {
+		if hpaMap, ok := hpa.(map[string]interface{}); ok {
+			if hpaMap["enabled"] == true {
+				t.Error("batch prod profile must not have HPA enabled")
+			}
+		}
+	}
+
+	// No PDB — batch jobs run to completion, disruption budget does not apply
+	if pdb, hasPDB := parsed["podDisruptionBudget"]; hasPDB {
+		if pdbMap, ok := pdb.(map[string]interface{}); ok {
+			if pdbMap["enabled"] == true {
+				t.Error("batch prod profile must not have PDB enabled")
+			}
+		}
+	}
+}
+
+// ============================================================
+// Section C: MergeEnvProfiles
+// ============================================================
+
+// TestWorkload_MergeEnvProfiles_DeepMerge — nested maps are merged, not replaced
+func TestWorkload_MergeEnvProfiles_DeepMerge(t *testing.T) {
+	base := map[string]interface{}{
+		"resources": map[string]interface{}{
+			"requests": map[string]interface{}{
+				"cpu":    "100m",
+				"memory": "128Mi",
+			},
+		},
+	}
+	overrides := map[string]interface{}{
+		"resources": map[string]interface{}{
+			"limits": map[string]interface{}{
+				"cpu":    "500m",
+				"memory": "512Mi",
+			},
+		},
+	}
+
+	merged := MergeEnvProfiles(base, overrides)
+
+	resources, ok := merged["resources"]
+	if !ok {
+		t.Fatal("merged result missing 'resources' key")
+	}
+	resMap, ok := resources.(map[string]interface{})
+	if !ok {
+		t.Fatal("merged 'resources' is not a map")
+	}
+
+	// Both requests (from base) and limits (from overrides) must be present
+	if _, hasRequests := resMap["requests"]; !hasRequests {
+		t.Error("deep merge: 'resources.requests' from base was lost")
+	}
+	if _, hasLimits := resMap["limits"]; !hasLimits {
+		t.Error("deep merge: 'resources.limits' from overrides was not merged in")
+	}
+}
+
+// TestWorkload_MergeEnvProfiles_OverrideScalars — scalar values from override win;
+// map values are merged (not replaced by the override's map).
+func TestWorkload_MergeEnvProfiles_OverrideScalars(t *testing.T) {
+	base := map[string]interface{}{
+		"replicaCount": 1,
+		"logLevel":     "info",
+		"nested": map[string]interface{}{
+			"keyA": "from-base",
+			"keyB": "base-only",
+		},
+	}
+	overrides := map[string]interface{}{
+		"replicaCount": 3,
+		"nested": map[string]interface{}{
+			"keyA": "from-override",
+		},
+	}
+
+	merged := MergeEnvProfiles(base, overrides)
+
+	// Scalar override: replicaCount from override wins
+	if toInt(merged["replicaCount"]) != 3 {
+		t.Errorf("scalar override: replicaCount got %v, want 3", merged["replicaCount"])
+	}
+
+	// Scalar not overridden: logLevel from base is preserved
+	if merged["logLevel"] != "info" {
+		t.Errorf("unoverridden scalar: logLevel got %v, want info", merged["logLevel"])
+	}
+
+	// Deep map merge: nested.keyA overridden, nested.keyB from base preserved
+	nested, ok := merged["nested"]
+	if !ok {
+		t.Fatal("merged result missing 'nested' key")
+	}
+	nestedMap, ok := nested.(map[string]interface{})
+	if !ok {
+		t.Fatal("merged 'nested' is not a map")
+	}
+	if nestedMap["keyA"] != "from-override" {
+		t.Errorf("nested scalar override: keyA got %v, want from-override", nestedMap["keyA"])
+	}
+	if nestedMap["keyB"] != "base-only" {
+		t.Errorf("nested base preservation: keyB got %v, want base-only", nestedMap["keyB"])
+	}
+}
+
+// ============================================================
+// Workload Test Helpers
+// ============================================================
+
+// makeResourceForEnv creates a minimal ProcessedResource with a given Kind and Name.
+// Uses gvkForKind from grouping_test.go for proper GVK resolution.
+func makeResourceForEnv(kind, name string) *types.ProcessedResource {
+	obj := &unstructured.Unstructured{}
+	obj.SetKind(kind)
+	obj.SetName(name)
+	gvk := gvkForKind(kind)
+	obj.SetAPIVersion(gvk.GroupVersion().String())
+	return &types.ProcessedResource{
+		Original: &types.ExtractedResource{
+			Object: obj,
+			GVK:    gvk,
+		},
+	}
+}
+
+// makeResourceWithEnvVars creates a ProcessedResource whose spec embeds env vars in
+// the first container, to exercise worker detection via AMQP_*/KAFKA_* vars.
+func makeResourceWithEnvVars(kind, name string, envVars map[string]string) *types.ProcessedResource {
+	obj := &unstructured.Unstructured{}
+	obj.SetKind(kind)
+	obj.SetName(name)
+	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: kind}
+	obj.SetAPIVersion(gvk.GroupVersion().String())
+
+	envList := make([]interface{}, 0, len(envVars))
+	for k, v := range envVars {
+		envList = append(envList, map[string]interface{}{"name": k, "value": v})
+	}
+	obj.Object["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"name": "main",
+						"env":  envList,
+					},
+				},
+			},
+		},
+	}
+	return &types.ProcessedResource{
+		Original: &types.ExtractedResource{
+			Object: obj,
+			GVK:    gvk,
+		},
+	}
+}
+
+// makeResourceWithImage creates a ProcessedResource whose first container uses the
+// supplied image string, to exercise database/cache detection by image name.
+func makeResourceWithImage(kind, name, image string) *types.ProcessedResource {
+	obj := &unstructured.Unstructured{}
+	obj.SetKind(kind)
+	obj.SetName(name)
+	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: kind}
+	obj.SetAPIVersion(gvk.GroupVersion().String())
+
+	obj.Object["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"name":  "main",
+						"image": image,
+					},
+				},
+			},
+		},
+	}
+	return &types.ProcessedResource{
+		Original: &types.ExtractedResource{
+			Object: obj,
+			GVK:    gvk,
+		},
+	}
+}
+
+// makeResourceWithPorts creates a ProcessedResource whose first container exposes the
+// given containerPorts, to exercise web detection via port numbers.
+func makeResourceWithPorts(kind, name string, ports []int) *types.ProcessedResource {
+	obj := &unstructured.Unstructured{}
+	obj.SetKind(kind)
+	obj.SetName(name)
+	gvk := gvkForKind(kind)
+	obj.SetAPIVersion(gvk.GroupVersion().String())
+
+	portList := make([]interface{}, 0, len(ports))
+	for _, p := range ports {
+		portList = append(portList, map[string]interface{}{
+			"containerPort": int64(p),
+		})
+	}
+	obj.Object["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"name":  "main",
+						"ports": portList,
+					},
+				},
+			},
+		},
+	}
+	return &types.ProcessedResource{
+		Original: &types.ExtractedResource{
+			Object: obj,
+			GVK:    gvk,
+		},
+	}
+}
+
+// makeGroupForEnv creates a ServiceGroup from variadic ProcessedResources.
+// Named distinctly from makeGroup (namespace_test.go) which has a different signature.
+func makeGroupForEnv(name string, resources ...*types.ProcessedResource) *ServiceGroup {
+	return &ServiceGroup{
+		Name:      name,
+		Resources: resources,
+		Namespace: "default",
+		Strategy:  GroupByLabel,
+	}
 }
