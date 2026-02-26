@@ -93,8 +93,11 @@ func newGenerateCmd() *cobra.Command {
 		includeSchema   bool
 		verbose         bool
 		envValues       bool
-		deckhouseModule bool
-		dryRun          bool
+		deckhouseModule    bool
+		dryRun             bool
+		airgapRegistry     string
+		namespaceResources bool
+		multiTenant        bool
 	)
 
 	cmd := &cobra.Command{
@@ -133,8 +136,11 @@ Examples:
 				includeSchema:   includeSchema,
 				verbose:         verbose,
 				envValues:       envValues,
-				deckhouseModule: deckhouseModule,
-				dryRun:          dryRun,
+				deckhouseModule:    deckhouseModule,
+				dryRun:             dryRun,
+				airgapRegistry:     airgapRegistry,
+				namespaceResources: namespaceResources,
+				multiTenant:        multiTenant,
 			})
 		},
 	}
@@ -161,6 +167,9 @@ Examples:
 	cmd.Flags().BoolVar(&envValues, "env-values", false, "Generate environment-specific values (dev/staging/prod)")
 	cmd.Flags().BoolVar(&deckhouseModule, "deckhouse-module", false, "Generate Deckhouse module scaffold (helm_lib, openapi/, images/, hooks/)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print generated chart to stdout without writing to disk")
+	cmd.Flags().StringVar(&airgapRegistry, "airgap-registry", "", "Generate air-gapped artifacts (images.txt, values-airgap.yaml, mirror-images.sh) targeting this registry")
+	cmd.Flags().BoolVar(&namespaceResources, "namespace-resources", false, "Generate namespace governance resources (ResourceQuota, LimitRange, NetworkPolicy)")
+	cmd.Flags().BoolVar(&multiTenant, "multi-tenant", false, "Generate multi-tenant chart overlay with per-tenant isolation")
 
 	_ = cmd.MarkFlagRequired("chart-name")
 
@@ -188,8 +197,11 @@ type generateOptions struct {
 	includeSchema   bool
 	verbose         bool
 	envValues       bool
-	deckhouseModule bool
-	dryRun          bool
+	deckhouseModule    bool
+	dryRun             bool
+	airgapRegistry     string
+	namespaceResources bool
+	multiTenant        bool
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -425,6 +437,72 @@ drain:
 		}
 		for i, chart := range charts {
 			charts[i] = generator.GenerateDeckhouseModule(chart, nil)
+		}
+	}
+
+	// Apply air-gapped artifacts if requested
+	if opts.airgapRegistry != "" {
+		if opts.verbose {
+			fmt.Printf("\n[4c/5] Generating air-gapped artifacts for registry: %s\n", opts.airgapRegistry)
+		}
+		for _, chart := range charts {
+			refs := generator.ExtractImageReferences(chart)
+
+			// Add images.txt
+			imageList := generator.GenerateImageList(refs)
+			chart.ExternalFiles = append(chart.ExternalFiles, types.ExternalFileInfo{
+				Path: "images.txt", Content: imageList,
+			})
+
+			// Add mirror-images.sh
+			mirrorScript := generator.GenerateMirrorScript(refs, opts.airgapRegistry)
+			chart.ExternalFiles = append(chart.ExternalFiles, types.ExternalFileInfo{
+				Path: "mirror-images.sh", Content: mirrorScript,
+			})
+
+			// Add values-airgap.yaml
+			airgapValues := generator.GenerateAirgapValues(refs, opts.airgapRegistry)
+			airgapYAML, _ := yaml.Marshal(airgapValues)
+			chart.ExternalFiles = append(chart.ExternalFiles, types.ExternalFileInfo{
+				Path: "values-airgap.yaml", Content: string(airgapYAML),
+			})
+		}
+	}
+
+	// Apply namespace resources if requested
+	if opts.namespaceResources {
+		if opts.verbose {
+			fmt.Printf("\n[4d/5] Generating namespace governance resources...\n")
+		}
+		groupingResult, _ := generator.GroupResources(graph)
+		nsOpts := generator.NamespaceOpts{
+			ResourceQuota: true,
+			LimitRange:    true,
+			NetworkPolicy: true,
+		}
+		nsTemplates := generator.GenerateNamespaceResources(groupingResult.Groups, nsOpts)
+		for _, chart := range charts {
+			for path, content := range nsTemplates {
+				chart.Templates[path] = content
+			}
+		}
+
+		// Also generate auto-NetworkPolicies from service analysis
+		autoNP := generator.GenerateAutoNetworkPolicies(graph, groupingResult.Groups)
+		for _, chart := range charts {
+			for path, content := range autoNP {
+				chart.Templates[path] = content
+			}
+		}
+	}
+
+	// Apply multi-tenant overlay if requested
+	if opts.multiTenant {
+		if opts.verbose {
+			fmt.Printf("\n[4e/5] Applying multi-tenant overlay...\n")
+		}
+		for i, chart := range charts {
+			charts[i] = generator.GenerateMultiTenantOverlay(chart, 2) // default 2 tenants
 		}
 	}
 

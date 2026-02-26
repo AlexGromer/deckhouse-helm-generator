@@ -81,16 +81,24 @@ helmfile -f helmfile.yaml apply                           # 4. Deploy
 
 ---
 
-## Current State (v0.6.0)
+## Current State (v0.7.0-dev)
 
 ### Реализовано
 
 | Компонент | Статус | Покрытие |
 |-----------|--------|----------|
 | **File Extractor** | ✅ Done | YAML файлы, рекурсивные директории |
-| **K8s Processors** | ✅ Done | 13 типов (+HPA, VPA, PriorityClass, LimitRange, ResourceQuota, PDB, NetworkPolicy, CronJob, Job, Role/Binding) |
+| **K8s Processors** | ✅ Done | 30+ типов (Deployment, Service, ConfigMap, Ingress, StatefulSet, DaemonSet, PVC, SA, HPA, VPA, PDB, NetworkPolicy, CronJob, Job, Role/ClusterRole/Binding, PriorityClass, LimitRange, ResourceQuota + Deckhouse CRDs + monitoring + Gateway API + KEDA + cert-manager + Argo Rollouts) |
 | **Relationship Detector** | ✅ Done | 13 типов связей (labels, names, volumes, env, annotations) |
 | **Universal Generator** | ✅ Done | Единый чарт со всеми сервисами |
+| **Separate Generator** | ✅ Done | Per-service charts с flat values |
+| **Library Generator** | ✅ Done | Shared library chart + thin wrappers (18 named templates + 7 DRY sub-templates) |
+| **Umbrella Generator** | ✅ Done | Parent chart с subcharts в charts/ |
+| **Cross-Chart Dependencies** | ✅ Done | Auto-detect deps between service groups, circular dependency validation |
+| **Global Values Extraction** | ✅ Done | Common values across groups → global section |
+| **OpenAPI Schema Generation** | ✅ Done | values.yaml → OpenAPI v3 schema |
+| **Environment Values** | ✅ Done | values-dev/staging/prod.yaml generation |
+| **Deckhouse Module Scaffold** | ✅ Done | openapi/, images/, hooks/, helm_lib dependency |
 | **Pattern Analyzer** | ✅ Done | 5 детекторов (microservices, monolith, stateful, job, operator) + 9 checkers |
 | **Best Practices Checker** | ✅ Done | Security, Resources, HA, InitContainer, QoS, StatefulSet, DaemonSet, GracefulShutdown, PSS |
 | **Value Processor** | ✅ Done | JSON/XML/Base64 детекция, pretty-print, externalization |
@@ -98,20 +106,18 @@ helmfile -f helmfile.yaml apply                           # 4. Deploy
 | **Recommendation Engine** | ✅ Done | Приоритизированные action items, text/JSON/markdown |
 | **Checksum Annotations** | ✅ Done | Auto-reload ConfigMap/Secret via sha256sum |
 | **API Migration** | ✅ Done | Deprecated API detection + auto-migration (12 entries) |
-| **CLI** | ✅ Done | `generate`, `analyze`, `validate`, `diff`, `version`, `--dry-run` |
-| **Test Coverage** | ✅ Done | 85.9% total (target >= 80%) |
+| **CLI** | ✅ Done | `generate`, `analyze`, `validate`, `diff`, `version`, `--dry-run`, `--mode`, `--env-values`, `--deckhouse-module` |
+| **Test Coverage** | ✅ Done | 85.9% total, 91.3% generator (target >= 80%) |
 
 ### Не реализовано
 
 | Компонент | Статус | Блокирует |
 |-----------|--------|-----------|
-| Cluster Extractor | ❌ Stub | Live cluster support |
-| GitOps Extractor | ❌ Stub | Git repo support |
-| Separate Generator | ❌ Stub | Per-service charts |
-| Library Generator | ❌ Stub | Shared library charts |
-| Deckhouse CRD Processors | ❌ Empty | Deckhouse-specific resources |
-| Monitoring Processors | ❌ Empty | Prometheus/Grafana resources |
-| Test Coverage | ⚠️ ~5% | Production readiness |
+| Cluster Extractor | ❌ Stub | Live cluster support (Phase 4) |
+| GitOps Extractor | ❌ Stub | Git repo support (Phase 4) |
+| Architecture-Specific Generation | ❌ Not started | Air-gapped, multi-tenant, feature flags, cloud annotations (Phase 2.4) |
+| Namespace Management | ❌ Not started | ResourceQuota/LimitRange/NetworkPolicy auto-generation (Phase 2.5) |
+| Security & Compliance | ❌ Not started | PSS migration, RBAC gen, External Secrets (Phase 2.5) |
 
 ---
 
@@ -193,56 +199,56 @@ helmfile -f helmfile.yaml apply                           # 4. Deploy
 **Цель**: Все стратегии генерации + архитектурные паттерны
 **Задач**: 20 | **Оценка сложности**: High
 
-### 2.1 Separate Generator (5 задач)
+### 2.1 Separate Generator (5 задач) ✅ DONE
 
 | # | Задача | Описание |
 |---|--------|----------|
-| 2.1.1 | Service grouping | Алгоритм группировки ресурсов в отдельные чарты: по label `app.kubernetes.io/name`, по namespace, по relationship graph (connected components). |
-| 2.1.2 | Per-service chart generation | Генерация отдельного `Chart.yaml`, `values.yaml`, `templates/` для каждой группы. Имя чарта = имя сервиса. |
-| 2.1.3 | Inter-chart dependencies | Генерация `Chart.yaml` dependencies: `condition`, `repository` (file://), `version`. Автодетекция зависимостей из relationship graph. |
-| 2.1.4 | Shared values | Parent `values.yaml` с общими настройками (global.image.registry, global.env). Child charts наследуют через `.Values.global.*`. |
-| 2.1.5 | Independent versioning | Каждый subchart с независимым `version` в `Chart.yaml`. Скрипт для bump версий отдельных чартов. |
+| 2.1.1 | ✅ Service grouping | Алгоритм группировки: label → relationship → namespace → individual. `grouping.go` |
+| 2.1.2 | ✅ Per-service chart generation | `separate.go`: flat values, rewritten templates |
+| 2.1.3 | ✅ Inter-chart dependencies | `dependencies.go`: DetectCrossChartDeps, circular dependency validation |
+| 2.1.4 | ✅ Shared values | `globalvalues.go`: ExtractGlobalValues across groups |
+| 2.1.5 | ✅ Independent versioning | Each subchart has independent Chart.yaml version |
 
-### 2.2 Library Generator (4 задачи)
-
-| # | Задача | Описание |
-|---|--------|----------|
-| 2.2.1 | Base library chart | `type: library` в `Chart.yaml`. Общие шаблоны: `_helpers.tpl` (fullname, labels, selectorLabels, serviceAccountName), `_deployment.tpl`, `_service.tpl`, `_ingress.tpl`. |
-| 2.2.2 | Wrapper charts | Тонкие wrapper чарты для каждого сервиса. Только `Chart.yaml` (dependency на library) + `values.yaml`. Templates через `{{ include "library.deployment" . }}`. |
-| 2.2.3 | DRY-шаблоны | Не дублировать boilerplate: named templates для общих блоков (resources, securityContext, probes, env). |
-| 2.2.4 | Deckhouse lib-helm интеграция | Опция `--library-style deckhouse`: совместимость с Deckhouse `lib-helm`. Хелперы: `helm_lib_module_labels`, `helm_lib_priority_class`. |
-
-### 2.3 Umbrella Generator (3 задачи)
+### 2.2 Library Generator (4 задачи) ✅ DONE
 
 | # | Задача | Описание |
 |---|--------|----------|
-| 2.3.1 | Parent chart structure | Root `Chart.yaml` с `dependencies[]`. Единый `helm install`. `charts/` директория с subcharts. |
-| 2.3.2 | Cascading values | Parent `values.yaml` с секциями для каждого subchart. Override mechanism: `subchart.key: value`. |
-| 2.3.3 | Conditional subcharts | `condition: subchart.enabled` в dependencies. Позволяет включать/отключать сервисы через values. |
+| 2.2.1 | ✅ Base library chart | `library.go`: type: library, 18 named templates |
+| 2.2.2 | ✅ Wrapper charts | Thin wrappers per service with library dependency |
+| 2.2.3 | ✅ DRY-шаблоны | `library_helpers.go`: 7 shared sub-templates (resources, probes, env, volumes, annotations, labels, securityContext) |
+| 2.2.4 | Deckhouse lib-helm интеграция | `modulescaffold.go`: --deckhouse-module flag |
 
-### 2.4 Architecture-Specific Generation (5 задач)
-
-| # | Задача | Описание |
-|---|--------|----------|
-| 2.4.1 | Multi-tenant charts | Генерация с изоляцией по tenant: namespace per tenant, ResourceQuota per tenant, NetworkPolicy between tenants. Values: `tenants: [{name, resources, networkPolicy}]`. |
-| 2.4.2 | Feature-flag driven | Условная генерация компонентов: `{{ if .Values.features.monitoring }}` для ServiceMonitor, `{{ if .Values.features.ingress }}` для Ingress. Матрица флагов в values. |
-| 2.4.3 | Environment-specific values | Генерация `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml`. Dev: 1 replica, debug logging, no PDB. Prod: 3+ replicas, PDB, resource limits, node affinity. |
-| 2.4.4 | Monorepo support | Флаг `--monorepo`: генерация нескольких чартов из одного дерева. Структура: `charts/{service-a,service-b,shared-lib}/`. |
-| 2.4.5 | Spot/Preemptible instance support | Генерация tolerations для spot nodes (AWS/GCP/Azure), graceful shutdown (`preStop` hook), PDB auto-generation. Values: `spot.enabled`, `spot.provider`. |
-| 2.4.6 | Air-gapped environment support | Извлечение всех image references → `images.txt`. Генерация `values-airgap.yaml` с `global.imageRegistry`. Скрипт `mirror-images.sh` (skopeo/crane) для bulk copy |
-| 2.4.7 | Kustomize-hybrid output | `--post-renderer-mode` — генерация `base/` + Kustomize overlays для post-rendering. Совместимость с Flux CD `postBuild` |
-| 2.4.8 | Chart dependency management | Автодетекция common dependencies (postgresql, redis, mongodb) → `Chart.yaml` dependencies с condition/tags. Version constraints, alias для multiple instances |
-| 2.4.9 | Cloud-specific Service annotations | Генерация LB annotations по cloud provider: AWS NLB/ALB, GCP ILB, Azure ILB. Flag `--cloud=aws\|gcp\|azure`. Session affinity шаблонизация |
-| 2.4.10 | Ingress controller detection | Детекция controller type (nginx/traefik/haproxy) → генерация controller-specific annotations: canary, rate-limit, CORS, auth-url, rewrite-target |
-
-### 2.5 Namespace Management (3 задачи)
+### 2.3 Umbrella Generator (3 задачи) ✅ DONE
 
 | # | Задача | Описание |
 |---|--------|----------|
-| 2.5.1 | ResourceQuota template | Генерация `ResourceQuota` при multi-tenant: CPU/memory requests+limits, PVC count, pod count. |
-| 2.5.2 | LimitRange template | Генерация `LimitRange` с default/min/max для containers. Предотвращение unbounded resource usage. |
-| 2.5.3 | NetworkPolicy per namespace | Default deny-all + allow-list: same namespace, specific namespaces, specific CIDRs. Egress rules. |
-| 2.5.4 | Auto-NetworkPolicy из Service анализа | Анализ Service→Pod relationships → генерация ingress rules. Детекция DB_HOST env vars → egress к database. Default: deny-all + allow DNS (UDP 53) |
+| 2.3.1 | ✅ Parent chart structure | `umbrella.go`: parent Chart.yaml with dependencies[], charts/ directory |
+| 2.3.2 | ✅ Cascading values | Parent values.yaml with per-subchart sections |
+| 2.3.3 | ✅ Conditional subcharts | `condition: subchart.enabled` in dependencies |
+
+### 2.4 Architecture-Specific Generation (10 задач)
+
+| # | Задача | Статус | Описание |
+|---|--------|--------|----------|
+| 2.4.1 | Multi-tenant charts | ❌ P1 | Генерация с изоляцией по tenant: namespace per tenant, ResourceQuota per tenant, NetworkPolicy between tenants. Values: `tenants: [{name, resources, networkPolicy}]`. |
+| 2.4.2 | Feature-flag driven | ❌ P2 | Условная генерация компонентов: `{{ if .Values.features.monitoring }}` для ServiceMonitor, `{{ if .Values.features.ingress }}` для Ingress. Матрица флагов в values. |
+| 2.4.3 | Environment-specific values | ✅ Done | `envvalues.go`: values-dev/staging/prod.yaml generation |
+| 2.4.4 | Monorepo support | ❌ P3 | Флаг `--monorepo`: генерация нескольких чартов из одного дерева. Структура: `charts/{service-a,service-b,shared-lib}/`. |
+| 2.4.5 | Spot/Preemptible instance support | ❌ P3 | Генерация tolerations для spot nodes (AWS/GCP/Azure), graceful shutdown (`preStop` hook), PDB auto-generation. Values: `spot.enabled`, `spot.provider`. |
+| 2.4.6 | Air-gapped environment support | ❌ P1 | Извлечение всех image references → `images.txt`. Генерация `values-airgap.yaml` с `global.imageRegistry`. Скрипт `mirror-images.sh` (skopeo/crane) для bulk copy |
+| 2.4.7 | Kustomize-hybrid output | ❌ P3 | `--post-renderer-mode` — генерация `base/` + Kustomize overlays для post-rendering. Совместимость с Flux CD `postBuild` |
+| 2.4.8 | Chart dependency management | ✅ Done | `dependencies.go`: DetectCrossChartDeps + `autodeps.go` (TODO: auto-detect postgresql/redis/mongodb) |
+| 2.4.9 | Cloud-specific Service annotations | ❌ P2 | Генерация LB annotations по cloud provider: AWS NLB/ALB, GCP ILB, Azure ILB. Flag `--cloud=aws\|gcp\|azure`. Session affinity шаблонизация |
+| 2.4.10 | Ingress controller detection | ❌ P2 | Детекция controller type (nginx/traefik/haproxy) → генерация controller-specific annotations: canary, rate-limit, CORS, auth-url, rewrite-target |
+
+### 2.5 Namespace Management (4 задачи)
+
+| # | Задача | Статус | Описание |
+|---|--------|--------|----------|
+| 2.5.1 | ResourceQuota template | ❌ P1 | Генерация `ResourceQuota` при multi-tenant: CPU/memory requests+limits, PVC count, pod count. |
+| 2.5.2 | LimitRange template | ❌ P1 | Генерация `LimitRange` с default/min/max для containers. Предотвращение unbounded resource usage. |
+| 2.5.3 | NetworkPolicy per namespace | ❌ P1 | Default deny-all + allow-list: same namespace, specific namespaces, specific CIDRs. Egress rules. |
+| 2.5.4 | Auto-NetworkPolicy из Service анализа | ❌ P1 | Анализ Service→Pod relationships → генерация ingress rules. Детекция DB_HOST env vars → egress к database. Default: deny-all + allow DNS (UDP 53) |
 
 ---
 
