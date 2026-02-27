@@ -102,6 +102,11 @@ func newGenerateCmd() *cobra.Command {
 		cloudProvider      string
 		cloudInternal      bool
 		detectIngress      bool
+		monorepo           bool
+		spot               bool
+		spotGracePeriod    int
+		kustomize          bool
+		autoDeps           bool
 	)
 
 	cmd := &cobra.Command{
@@ -149,6 +154,11 @@ Examples:
 				cloudProvider:      cloudProvider,
 				cloudInternal:      cloudInternal,
 				detectIngress:      detectIngress,
+				monorepo:           monorepo,
+				spot:               spot,
+				spotGracePeriod:    spotGracePeriod,
+				kustomize:          kustomize,
+				autoDeps:           autoDeps,
 			})
 		},
 	}
@@ -182,6 +192,11 @@ Examples:
 	cmd.Flags().StringVar(&cloudProvider, "cloud-provider", "", "Cloud provider for Service annotations (aws, gcp, azure)")
 	cmd.Flags().BoolVar(&cloudInternal, "cloud-internal", false, "Use internal load balancer for cloud annotations")
 	cmd.Flags().BoolVar(&detectIngress, "detect-ingress", false, "Auto-detect ingress controller and generate controller-specific annotations")
+	cmd.Flags().BoolVar(&monorepo, "monorepo", false, "Generate monorepo layout with Makefile, .helmignore, and ct.yaml")
+	cmd.Flags().BoolVar(&spot, "spot", false, "Inject spot/preemptible instance tolerations and PDB")
+	cmd.Flags().IntVar(&spotGracePeriod, "spot-grace-period", 15, "Grace period in seconds for spot instance preStop hook")
+	cmd.Flags().BoolVar(&kustomize, "kustomize", false, "Generate Kustomize layout with base and dev/staging/prod overlays")
+	cmd.Flags().BoolVar(&autoDeps, "auto-deps", false, "Auto-detect infrastructure dependencies (PostgreSQL, Redis, etc.)")
 
 	_ = cmd.MarkFlagRequired("chart-name")
 
@@ -218,6 +233,11 @@ type generateOptions struct {
 	cloudProvider      string
 	cloudInternal      bool
 	detectIngress      bool
+	monorepo           bool
+	spot               bool
+	spotGracePeriod    int
+	kustomize          bool
+	autoDeps           bool
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -571,6 +591,40 @@ drain:
 		}
 	}
 
+	// Apply spot instance configuration if requested
+	if opts.spot {
+		if opts.verbose {
+			fmt.Printf("\n[4i/5] Injecting spot/preemptible instance configuration...\n")
+		}
+		spotConfig := generator.SpotConfig{
+			Provider:    generator.SpotAWS,
+			GracePeriod: opts.spotGracePeriod,
+			Enabled:     true,
+		}
+		if opts.cloudProvider == "gcp" {
+			spotConfig.Provider = generator.SpotGCP
+		} else if opts.cloudProvider == "azure" {
+			spotConfig.Provider = generator.SpotAzure
+		}
+		for i, chart := range charts {
+			charts[i] = generator.InjectSpotConfig(chart, spotConfig)
+		}
+	}
+
+	// Auto-detect dependencies if requested
+	if opts.autoDeps {
+		if opts.verbose {
+			fmt.Printf("\n[4j/5] Auto-detecting infrastructure dependencies...\n")
+		}
+		detected := generator.DetectCommonDependencies(processedResources)
+		if opts.verbose {
+			fmt.Printf("  Detected %d dependencies\n", len(detected))
+		}
+		for i, chart := range charts {
+			charts[i] = generator.InjectDependencies(chart, detected)
+		}
+	}
+
 	// Dry-run: print to stdout instead of writing to disk
 	if opts.dryRun {
 		for _, chart := range charts {
@@ -631,6 +685,78 @@ drain:
 				if opts.verbose {
 					fmt.Printf("  Written: %s/%s\n", chart.Name, filename)
 				}
+			}
+		}
+	}
+
+	// Generate monorepo layout if requested
+	if opts.monorepo {
+		if opts.verbose {
+			fmt.Printf("\n[5c/5] Generating monorepo layout...\n")
+		}
+		layout, err := generator.GenerateMonorepoLayout(charts, opts.chartName)
+		if err != nil {
+			return fmt.Errorf("monorepo layout generation failed: %w", err)
+		}
+		// Write Makefile
+		makefilePath := filepath.Join(opts.outputDir, "Makefile")
+		if err := os.WriteFile(makefilePath, []byte(layout.Makefile), 0644); err != nil {
+			return fmt.Errorf("failed to write Makefile: %w", err)
+		}
+		// Write .helmignore
+		helmignorePath := filepath.Join(opts.outputDir, ".helmignore")
+		if err := os.WriteFile(helmignorePath, []byte(layout.HelmIgnore), 0644); err != nil {
+			return fmt.Errorf("failed to write .helmignore: %w", err)
+		}
+		// Write ct.yaml
+		ctConfigPath := filepath.Join(opts.outputDir, "ct.yaml")
+		if err := os.WriteFile(ctConfigPath, []byte(layout.CTConfig), 0644); err != nil {
+			return fmt.Errorf("failed to write ct.yaml: %w", err)
+		}
+		if opts.verbose {
+			fmt.Printf("  Written: Makefile, .helmignore, ct.yaml\n")
+		}
+	}
+
+	// Generate Kustomize layout if requested
+	if opts.kustomize {
+		if opts.verbose {
+			fmt.Printf("\n[5d/5] Generating Kustomize layout...\n")
+		}
+		for _, chart := range charts {
+			kustomizeOutput, err := generator.GenerateKustomizeLayout(chart)
+			if err != nil {
+				if opts.verbose {
+					fmt.Fprintf(os.Stderr, "  Warning: Kustomize generation skipped for %s: %v\n", chart.Name, err)
+				}
+				continue
+			}
+			kustomizeDir := filepath.Join(opts.outputDir, chart.Name, "kustomize")
+			// Write base
+			baseDir := filepath.Join(kustomizeDir, "base")
+			if err := os.MkdirAll(baseDir, 0755); err != nil {
+				return fmt.Errorf("failed to create base dir: %w", err)
+			}
+			if err := os.WriteFile(filepath.Join(baseDir, "kustomization.yaml"), []byte(kustomizeOutput.Base.Kustomization), 0644); err != nil {
+				return fmt.Errorf("failed to write base kustomization: %w", err)
+			}
+			// Write overlays
+			for envName, overlay := range kustomizeOutput.Overlays {
+				overlayDir := filepath.Join(kustomizeDir, "overlays", envName)
+				if err := os.MkdirAll(overlayDir, 0755); err != nil {
+					return fmt.Errorf("failed to create overlay dir: %w", err)
+				}
+				if err := os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(overlay.Kustomization), 0644); err != nil {
+					return fmt.Errorf("failed to write overlay kustomization: %w", err)
+				}
+				for _, patch := range overlay.Patches {
+					if err := os.WriteFile(filepath.Join(overlayDir, patch.Target), []byte(patch.Patch), 0644); err != nil {
+						return fmt.Errorf("failed to write patch %s: %w", patch.Target, err)
+					}
+				}
+			}
+			if opts.verbose {
+				fmt.Printf("  Written: kustomize layout for %s\n", chart.Name)
 			}
 		}
 	}
