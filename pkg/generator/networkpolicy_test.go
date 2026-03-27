@@ -262,6 +262,78 @@ func TestAutoNP_EmptyGraph(t *testing.T) {
 }
 
 // ============================================================
+// HC-5: Port validation in extractServicePorts
+// ============================================================
+
+// makeServiceWithRawPort creates a Service with a single port stored as an arbitrary interface{} value.
+func makeServiceWithRawPort(name, namespace string, rawPort interface{}) *types.ProcessedResource {
+	r := makeProcessedResource("Service", name, namespace, nil)
+	r.Original.Object.Object["spec"] = map[string]interface{}{
+		"ports": []interface{}{
+			map[string]interface{}{
+				"port":     rawPort,
+				"protocol": "TCP",
+			},
+		},
+	}
+	return r
+}
+
+func TestExtractServicePorts_RejectsZeroPort(t *testing.T) {
+	svc := makeServiceWithRawPort("svc", "default", int64(0))
+	group := makeGroup("svc", "default", []*types.ProcessedResource{svc})
+	ports := extractServicePorts(group)
+	if len(ports) != 0 {
+		t.Errorf("port 0 should be rejected, got %v", ports)
+	}
+}
+
+func TestExtractServicePorts_RejectsNegativePort(t *testing.T) {
+	svc := makeServiceWithRawPort("svc", "default", int64(-1))
+	group := makeGroup("svc", "default", []*types.ProcessedResource{svc})
+	ports := extractServicePorts(group)
+	if len(ports) != 0 {
+		t.Errorf("negative port should be rejected, got %v", ports)
+	}
+}
+
+func TestExtractServicePorts_RejectsAbove65535(t *testing.T) {
+	svc := makeServiceWithRawPort("svc", "default", int64(65536))
+	group := makeGroup("svc", "default", []*types.ProcessedResource{svc})
+	ports := extractServicePorts(group)
+	if len(ports) != 0 {
+		t.Errorf("port 65536 should be rejected, got %v", ports)
+	}
+}
+
+func TestExtractServicePorts_RejectsFractionalFloat(t *testing.T) {
+	svc := makeServiceWithRawPort("svc", "default", float64(80.5))
+	group := makeGroup("svc", "default", []*types.ProcessedResource{svc})
+	ports := extractServicePorts(group)
+	if len(ports) != 0 {
+		t.Errorf("fractional float port 80.5 should be rejected, got %v", ports)
+	}
+}
+
+func TestExtractServicePorts_AcceptsIntegerFloat(t *testing.T) {
+	svc := makeServiceWithRawPort("svc", "default", float64(443.0))
+	group := makeGroup("svc", "default", []*types.ProcessedResource{svc})
+	ports := extractServicePorts(group)
+	if len(ports) != 1 || ports[0].Port != 443 {
+		t.Errorf("float64(443.0) should be accepted as port 443, got %v", ports)
+	}
+}
+
+func TestExtractServicePorts_AcceptsBoundary65535(t *testing.T) {
+	svc := makeServiceWithRawPort("svc", "default", int64(65535))
+	group := makeGroup("svc", "default", []*types.ProcessedResource{svc})
+	ports := extractServicePorts(group)
+	if len(ports) != 1 || ports[0].Port != 65535 {
+		t.Errorf("port 65535 should be accepted, got %v", ports)
+	}
+}
+
+// ============================================================
 // Subtask 6: Auto-NetworkPolicy — cross-namespace
 // ============================================================
 

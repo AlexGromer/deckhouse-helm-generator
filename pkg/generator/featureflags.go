@@ -131,6 +131,15 @@ func InjectFeatureFlags(chart *types.GeneratedChart, config *FeatureFlagConfig) 
 			continue
 		}
 
+		// Skip wrapping if the template already carries a Helm guard (e.g.
+		// produced by --namespace-resources).  We still record the category so
+		// the corresponding values key is generated.
+		if hasExistingGuard(content) {
+			result.Templates[path] = content
+			usedCategories[category] = true
+			continue
+		}
+
 		result.Templates[path] = wrapTemplateWithFeatureFlag(content, category)
 		usedCategories[category] = true
 	}
@@ -188,6 +197,14 @@ func mergeFeatureValues(existingYAML string, config *FeatureFlagConfig, usedCate
 		return existingYAML
 	}
 	return string(out)
+}
+
+// hasExistingGuard returns true when the template content already starts with a
+// Helm feature-flag conditional (e.g. `{{- if .Values.namespace...}}`).  This
+// prevents double-wrapping resources that were pre-guarded by earlier pipeline
+// stages such as --namespace-resources.
+func hasExistingGuard(content string) bool {
+	return strings.HasPrefix(strings.TrimSpace(content), "{{- if .Values.")
 }
 
 // extractKind returns the value of the top-level `kind:` field found in yamlContent,

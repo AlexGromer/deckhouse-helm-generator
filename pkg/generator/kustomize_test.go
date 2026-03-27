@@ -119,6 +119,9 @@ func TestKustomize_DevOverlay_ReplicasPatch(t *testing.T) {
 	for _, p := range dev.Patches {
 		if strings.Contains(p.Patch, "replicas: 1") {
 			found = true
+			if !strings.Contains(p.Patch, "name: myapp") {
+				t.Error("dev overlay: replica patch must use chart name 'myapp', not hardcoded 'app'")
+			}
 			break
 		}
 	}
@@ -213,6 +216,9 @@ func TestKustomize_ProdOverlay_HasResourcesPatch(t *testing.T) {
 	for _, p := range prod.Patches {
 		if strings.Contains(p.Patch, "limits") {
 			found = true
+			if !strings.Contains(p.Patch, "name: myapp") {
+				t.Error("prod overlay: resource-limits patch must use chart name 'myapp', not hardcoded 'app'")
+			}
 			break
 		}
 	}
@@ -438,15 +444,59 @@ func TestGenerateOverlayKustomization_ReferencesBase(t *testing.T) {
 }
 
 func TestGenerateReplicaPatch_DevReplicas(t *testing.T) {
-	patch := generateReplicaPatch("dev", 1)
+	patch := generateReplicaPatch("myapp", 1)
 	if !strings.Contains(patch, "replicas: 1") {
 		t.Errorf("dev replica patch must contain 'replicas: 1', got:\n%s", patch)
+	}
+	if !strings.Contains(patch, "name: myapp") {
+		t.Errorf("replica patch must use chart name in metadata.name, got:\n%s", patch)
 	}
 }
 
 func TestGenerateReplicaPatch_ProdReplicas(t *testing.T) {
-	patch := generateReplicaPatch("prod", 3)
+	patch := generateReplicaPatch("myapp", 3)
 	if !strings.Contains(patch, "replicas: 3") {
 		t.Errorf("prod replica patch must contain 'replicas: 3', got:\n%s", patch)
+	}
+	if !strings.Contains(patch, "name: myapp") {
+		t.Errorf("replica patch must use chart name in metadata.name, got:\n%s", patch)
+	}
+}
+
+// ============================================================
+// Subtask: Overlay uses modern patches: syntax, not deprecated patchesStrategicMerge
+// ============================================================
+
+func TestKustomize_OverlayUsesPatchesNotStrategicMerge(t *testing.T) {
+	chart := makeChart("myapp", map[string]string{
+		"templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: myapp\n",
+	})
+
+	out, err := GenerateKustomizeLayout(chart)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for env, overlay := range out.Overlays {
+		kust := overlay.Kustomization
+
+		if strings.Contains(kust, "patchesStrategicMerge") {
+			t.Errorf("overlay %q: kustomization.yaml must NOT contain deprecated 'patchesStrategicMerge', got:\n%s",
+				env, kust)
+		}
+
+		if !strings.Contains(kust, "patches:") {
+			t.Errorf("overlay %q: kustomization.yaml must contain modern 'patches:' key, got:\n%s",
+				env, kust)
+		}
+
+		// Verify entries use "- path: <file>" format.
+		for _, p := range overlay.Patches {
+			expected := "- path: " + p.Target
+			if !strings.Contains(kust, expected) {
+				t.Errorf("overlay %q: expected %q in kustomization.yaml, got:\n%s",
+					env, expected, kust)
+			}
+		}
 	}
 }

@@ -94,12 +94,15 @@ func extractServicePorts(group *ServiceGroup) []portInfo {
 			case int64:
 				portNum = int(v)
 			case float64:
+				if v != float64(int(v)) {
+					continue
+				}
 				portNum = int(v)
 			case int:
 				portNum = v
 			}
 
-			if portNum > 0 && !seen[portNum] {
+			if portNum > 0 && portNum <= 65535 && !seen[portNum] {
 				seen[portNum] = true
 				protocol := "TCP"
 				if p, ok := portMap["protocol"].(string); ok {

@@ -445,3 +445,70 @@ func TestFeatureFlags_GenerateFeatureValues_DefaultTrue(t *testing.T) {
 		t.Errorf("expected %d entries in feature values, got %d", len(expectedCategories), len(vals))
 	}
 }
+
+// ============================================================
+// Test 13: Already-guarded NetworkPolicy is NOT double-wrapped
+// ============================================================
+
+func TestFeatureFlags_SkipAlreadyGuardedNetworkPolicy(t *testing.T) {
+	// Simulates a NetworkPolicy produced by --namespace-resources which already
+	// has a Helm guard.
+	guardedContent := "{{- if .Values.namespace.networkPolicy.enabled }}\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: myapp-deny-all\nspec:\n  podSelector:\n    matchLabels:\n      app: myapp\n{{- end }}"
+
+	chart := makeChart("myapp", map[string]string{
+		"templates/netpol.yaml": guardedContent,
+	})
+
+	config := DefaultFeatureFlagConfig()
+	result := InjectFeatureFlags(chart, config)
+
+	content, ok := result.Templates["templates/netpol.yaml"]
+	if !ok {
+		t.Fatal("templates/netpol.yaml missing from result")
+	}
+
+	// Must NOT be double-wrapped with a features.security guard.
+	if strings.Contains(content, "{{- if .Values.features.security }}") {
+		t.Errorf("already-guarded NetworkPolicy must NOT be double-wrapped, got:\n%s", content)
+	}
+
+	// Original guard must be preserved as-is.
+	if !strings.Contains(content, "{{- if .Values.namespace.networkPolicy.enabled }}") {
+		t.Error("original guard must be preserved")
+	}
+
+	// Category should still be tracked so values are generated.
+	if !strings.Contains(result.ValuesYAML, "security:") {
+		t.Error("security category must still appear in ValuesYAML even when wrapping is skipped")
+	}
+}
+
+// ============================================================
+// Test 14: Unguarded NetworkPolicy is still wrapped normally
+// ============================================================
+
+func TestFeatureFlags_UnguardedNetworkPolicy_StillWrapped(t *testing.T) {
+	plainContent := "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: myapp\nspec:\n  podSelector:\n    matchLabels:\n      app: myapp"
+
+	chart := makeChart("myapp", map[string]string{
+		"templates/netpol.yaml": plainContent,
+	})
+
+	config := DefaultFeatureFlagConfig()
+	result := InjectFeatureFlags(chart, config)
+
+	content, ok := result.Templates["templates/netpol.yaml"]
+	if !ok {
+		t.Fatal("templates/netpol.yaml missing from result")
+	}
+
+	if !strings.Contains(content, "{{- if .Values.features.security }}") {
+		t.Error("plain NetworkPolicy must be wrapped with '{{- if .Values.features.security }}'")
+	}
+	if !strings.Contains(content, "{{- end }}") {
+		t.Error("wrapped template must end with '{{- end }}'")
+	}
+	if !strings.Contains(content, "kind: NetworkPolicy") {
+		t.Error("original NetworkPolicy YAML must be preserved inside the guards")
+	}
+}

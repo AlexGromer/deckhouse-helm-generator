@@ -29,7 +29,7 @@ var knownDependencies = []knownDependency{
 		EnvPrefixes: []string{"POSTGRES_", "PG_"},
 		EnvExact:    []string{"PGHOST"},
 		EnvContains: []string{"postgres"},
-		Images:      []string{"postgres"},
+		Images:      []string{"postgres", "postgresql"},
 		Ports:       []int64{5432},
 	},
 	{
@@ -185,10 +185,20 @@ func InjectDependencies(chart *types.GeneratedChart, deps []helm.Dependency) *ty
 	newExternalFiles := make([]types.ExternalFileInfo, len(chart.ExternalFiles))
 	copy(newExternalFiles, chart.ExternalFiles)
 
+	// Merge dependencies into ChartYAML, avoiding duplication.
+	mergedChartYAML := chart.ChartYAML
+	if len(deps) > 0 && !strings.Contains(mergedChartYAML, "dependencies:") {
+		// Ensure trailing newline before appending.
+		if mergedChartYAML != "" && !strings.HasSuffix(mergedChartYAML, "\n") {
+			mergedChartYAML += "\n"
+		}
+		mergedChartYAML += depYAML.String()
+	}
+
 	return &types.GeneratedChart{
 		Name:          chart.Name,
 		Path:          chart.Path,
-		ChartYAML:     chart.ChartYAML + depYAML.String(),
+		ChartYAML:     mergedChartYAML,
 		ValuesYAML:    chart.ValuesYAML + valuesBlock.String(),
 		Templates:     newTemplates,
 		Helpers:       chart.Helpers,

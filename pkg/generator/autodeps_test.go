@@ -8,6 +8,7 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/yaml"
 )
 
 // ============================================================
@@ -462,6 +463,62 @@ func TestAutoDeps_NilResources_EmptyList(t *testing.T) {
 	}
 }
 
+// ============================================================
+// Section 8b: DetectCommonDependencies — postgresql image variants
+// ============================================================
+
+// TestAutoDeps_PostgresFromBitnamiPostgresqlImage verifies that a Deployment
+// running the "bitnami/postgresql:15" image is detected as requiring the
+// postgresql dependency (the image name "postgresql" must match alongside "postgres").
+func TestAutoDeps_PostgresFromBitnamiPostgresqlImage(t *testing.T) {
+	resources := []*types.ProcessedResource{
+		makeDeploymentWithImage("db", "bitnami/postgresql:15"),
+	}
+
+	deps := DetectCommonDependencies(resources)
+
+	if len(deps) == 0 {
+		t.Fatal("expected at least 1 dependency detected from bitnami/postgresql:15 image")
+	}
+
+	found := false
+	for _, d := range deps {
+		if d.Name == "postgresql" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'postgresql' dependency from bitnami/postgresql:15 image, got: %+v", deps)
+	}
+}
+
+// TestAutoDeps_PostgresFromPlainPostgresqlImage verifies that a Deployment
+// running the plain "postgresql:14" image is detected as requiring the
+// postgresql dependency.
+func TestAutoDeps_PostgresFromPlainPostgresqlImage(t *testing.T) {
+	resources := []*types.ProcessedResource{
+		makeDeploymentWithImage("db", "postgresql:14"),
+	}
+
+	deps := DetectCommonDependencies(resources)
+
+	if len(deps) == 0 {
+		t.Fatal("expected at least 1 dependency detected from postgresql:14 image")
+	}
+
+	found := false
+	for _, d := range deps {
+		if d.Name == "postgresql" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'postgresql' dependency from postgresql:14 image, got: %+v", deps)
+	}
+}
+
 // CR-2: InjectDependencies must deep-copy Templates map
 
 func TestInjectDeps_TemplatesMapIsDeepCopy(t *testing.T) {
@@ -492,5 +549,90 @@ func TestInjectDeps_TemplatesMapIsDeepCopy(t *testing.T) {
 	result.ExternalFiles = append(result.ExternalFiles, types.ExternalFileInfo{Path: "files/new.json", Content: "new"})
 	if len(original.ExternalFiles) != 1 {
 		t.Errorf("InjectDependencies shares ExternalFiles slice — append to result affected original: len=%d", len(original.ExternalFiles))
+	}
+}
+
+// ============================================================
+// Section 9: HC-6 — InjectDependencies duplicate/broken YAML
+// ============================================================
+
+// TestInjectDeps_PreExistingDependencies_NoDuplicate verifies that when
+// ChartYAML already contains a "dependencies:" key, InjectDependencies does
+// NOT append a second dependencies block (no duplication).
+func TestInjectDeps_PreExistingDependencies_NoDuplicate(t *testing.T) {
+	chart := &types.GeneratedChart{
+		Name: "existing-deps",
+		ChartYAML: "apiVersion: v2\nname: existing-deps\nversion: 0.1.0\n" +
+			"dependencies:\n" +
+			"  - name: redis\n" +
+			"    version: 18.x.x\n" +
+			"    repository: https://charts.bitnami.com/bitnami\n",
+		ValuesYAML: "replicaCount: 1\n",
+		Templates:  map[string]string{},
+	}
+
+	deps := []helm.Dependency{
+		{Name: "postgresql", Version: "12.x.x", Repository: "https://charts.bitnami.com/bitnami", Condition: "postgresql.enabled"},
+	}
+
+	result := InjectDependencies(chart, deps)
+
+	count := strings.Count(result.ChartYAML, "dependencies:")
+	if count != 1 {
+		t.Errorf("expected exactly 1 'dependencies:' key in ChartYAML, got %d.\nChartYAML:\n%s", count, result.ChartYAML)
+	}
+}
+
+// TestInjectDeps_DoubleCall_NoDuplicate verifies that calling
+// InjectDependencies twice with the same deps does not produce duplicate
+// dependencies blocks.
+func TestInjectDeps_DoubleCall_NoDuplicate(t *testing.T) {
+	chart := makeChart("doubletest", map[string]string{
+		"templates/deployment.yaml": "kind: Deployment",
+	})
+
+	deps := []helm.Dependency{
+		{Name: "redis", Version: "18.x.x", Repository: "https://charts.bitnami.com/bitnami", Condition: "redis.enabled"},
+	}
+
+	first := InjectDependencies(chart, deps)
+	second := InjectDependencies(first, deps)
+
+	count := strings.Count(second.ChartYAML, "dependencies:")
+	if count != 1 {
+		t.Errorf("expected exactly 1 'dependencies:' key after double injection, got %d.\nChartYAML:\n%s", count, second.ChartYAML)
+	}
+}
+
+// TestInjectDeps_ValidYAMLOutput verifies that the ChartYAML produced by
+// InjectDependencies is valid YAML that can be unmarshalled without error.
+func TestInjectDeps_ValidYAMLOutput(t *testing.T) {
+	chart := makeChart("yamltest", map[string]string{
+		"templates/deployment.yaml": "kind: Deployment",
+	})
+
+	deps := []helm.Dependency{
+		{Name: "postgresql", Version: "12.x.x", Repository: "https://charts.bitnami.com/bitnami", Condition: "postgresql.enabled"},
+		{Name: "redis", Version: "18.x.x", Repository: "https://charts.bitnami.com/bitnami", Condition: "redis.enabled"},
+	}
+
+	result := InjectDependencies(chart, deps)
+
+	var parsed map[string]interface{}
+	if err := yaml.Unmarshal([]byte(result.ChartYAML), &parsed); err != nil {
+		t.Errorf("InjectDependencies produced invalid YAML: %v\nChartYAML:\n%s", err, result.ChartYAML)
+	}
+
+	// Verify the dependencies key exists and has the right count.
+	rawDeps, ok := parsed["dependencies"]
+	if !ok {
+		t.Fatal("parsed YAML is missing 'dependencies' key")
+	}
+	depsList, ok := rawDeps.([]interface{})
+	if !ok {
+		t.Fatalf("expected dependencies to be a list, got %T", rawDeps)
+	}
+	if len(depsList) != 2 {
+		t.Errorf("expected 2 dependencies in parsed YAML, got %d", len(depsList))
 	}
 }

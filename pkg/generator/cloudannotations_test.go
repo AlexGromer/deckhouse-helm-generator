@@ -429,6 +429,122 @@ func TestInjectAnnotations_Idempotent_NoDoubleBlock(t *testing.T) {
 	}
 }
 
+// ============================================================
+// Section 8b: InjectCloudAnnotations — false-positive kind matching
+// ============================================================
+
+// TestCloudAnnotations_ServiceAccountNotMatched verifies that a template with
+// kind: ServiceAccount is NOT treated as a Service (the old substring match
+// "kind: Service" would incorrectly match "kind: ServiceAccount").
+func TestCloudAnnotations_ServiceAccountNotMatched(t *testing.T) {
+	saTemplate := "apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: myapp-sa"
+	chart := makeChart("myapp", map[string]string{
+		"templates/serviceaccount.yaml": saTemplate,
+	})
+
+	config := CloudAnnotationConfig{
+		Provider: CloudAWS,
+		Internal: false,
+		Scheme:   "internet-facing",
+	}
+
+	result := InjectCloudAnnotations(chart, config)
+
+	if result == nil {
+		t.Fatal("InjectCloudAnnotations returned nil for valid chart")
+	}
+
+	content, ok := result.Templates["templates/serviceaccount.yaml"]
+	if !ok {
+		t.Fatal("templates/serviceaccount.yaml missing after injection")
+	}
+
+	if strings.Contains(content, "aws-load-balancer") {
+		t.Error("ServiceAccount template must NOT receive cloud Service annotations")
+	}
+	if strings.Contains(content, "  annotations:") {
+		t.Error("ServiceAccount template must NOT have an injected annotations block")
+	}
+}
+
+// TestCloudAnnotations_ServiceMonitorNotMatched verifies that a template with
+// kind: ServiceMonitor is NOT treated as a Service.
+func TestCloudAnnotations_ServiceMonitorNotMatched(t *testing.T) {
+	smTemplate := "apiVersion: monitoring.coreos.com/v1\nkind: ServiceMonitor\nmetadata:\n  name: myapp-monitor"
+	chart := makeChart("myapp", map[string]string{
+		"templates/servicemonitor.yaml": smTemplate,
+	})
+
+	config := CloudAnnotationConfig{
+		Provider: CloudGCP,
+		Internal: true,
+	}
+
+	result := InjectCloudAnnotations(chart, config)
+
+	if result == nil {
+		t.Fatal("InjectCloudAnnotations returned nil for valid chart")
+	}
+
+	content, ok := result.Templates["templates/servicemonitor.yaml"]
+	if !ok {
+		t.Fatal("templates/servicemonitor.yaml missing after injection")
+	}
+
+	if strings.Contains(content, "cloud.google.com") {
+		t.Error("ServiceMonitor template must NOT receive cloud Service annotations")
+	}
+	if strings.Contains(content, "  annotations:") {
+		t.Error("ServiceMonitor template must NOT have an injected annotations block")
+	}
+}
+
+// ============================================================
+// Section 9: Helm-expression template names (HC-2 regression)
+// ============================================================
+
+func TestInjectAnnotations_HelmExpressionName(t *testing.T) {
+	tmpl := "apiVersion: v1\nkind: Service\nmetadata:\n  name: {{ include \"app.fullname\" . }}\nspec:\n  type: LoadBalancer\n  ports:\n    - port: 80"
+
+	annotations := map[string]string{
+		"service.beta.kubernetes.io/aws-load-balancer-type": "nlb",
+	}
+
+	result := injectAnnotationsIntoTemplate(tmpl, annotations)
+
+	if !strings.Contains(result, "annotations:") {
+		t.Fatalf("expected annotations block to be injected for Helm-expression name, got:\n%s", result)
+	}
+	if !strings.Contains(result, "aws-load-balancer-type: nlb") {
+		t.Errorf("expected 'aws-load-balancer-type: nlb' in result, got:\n%s", result)
+	}
+	// Verify the Helm expression name is preserved.
+	if !strings.Contains(result, `{{ include "app.fullname" . }}`) {
+		t.Errorf("Helm expression name was corrupted, got:\n%s", result)
+	}
+}
+
+func TestInjectAnnotations_PipedDefaultName(t *testing.T) {
+	tmpl := "apiVersion: v1\nkind: Service\nmetadata:\n  name: {{ .Values.name | default \"myapp\" }}\nspec:\n  type: LoadBalancer\n  ports:\n    - port: 443"
+
+	annotations := map[string]string{
+		"cloud.google.com/neg": `{"ingress": true}`,
+	}
+
+	result := injectAnnotationsIntoTemplate(tmpl, annotations)
+
+	if !strings.Contains(result, "annotations:") {
+		t.Fatalf("expected annotations block to be injected for piped-default name, got:\n%s", result)
+	}
+	if !strings.Contains(result, "cloud.google.com/neg:") {
+		t.Errorf("expected 'cloud.google.com/neg' annotation in result, got:\n%s", result)
+	}
+	// Verify the piped-default Helm expression is preserved.
+	if !strings.Contains(result, `{{ .Values.name | default "myapp" }}`) {
+		t.Errorf("piped-default Helm expression was corrupted, got:\n%s", result)
+	}
+}
+
 func TestCloudAnnotations_NilChart_ReturnsNil(t *testing.T) {
 	config := CloudAnnotationConfig{
 		Provider: CloudAWS,
