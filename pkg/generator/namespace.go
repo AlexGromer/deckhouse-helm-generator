@@ -41,7 +41,7 @@ func GenerateNamespaceResources(groups []*ServiceGroup, opts NamespaceOpts) map[
 
 // GenerateResourceQuotaTemplate generates a ResourceQuota template from aggregated resources.
 func GenerateResourceQuotaTemplate(group *ServiceGroup) string {
-	cpuReq, memReq, cpuLim, memLim := aggregateResources(group)
+	cpuReq, memReq, cpuLim, memLim := extractFirstResourceValues(group)
 
 	if cpuReq == "" {
 		cpuReq = "1"
@@ -78,7 +78,7 @@ func GenerateResourceQuotaTemplate(group *ServiceGroup) string {
 
 // GenerateLimitRangeTemplate generates a LimitRange template with defaults from workload analysis.
 func GenerateLimitRangeTemplate(group *ServiceGroup) string {
-	cpuReq, memReq, cpuLim, memLim := aggregateResources(group)
+	cpuReq, memReq, cpuLim, memLim := extractFirstResourceValues(group)
 
 	if cpuReq == "" {
 		cpuReq = "100m"
@@ -155,8 +155,11 @@ func GenerateNetworkPolicyTemplate(group *ServiceGroup) string {
 	return sb.String()
 }
 
-// aggregateResources extracts CPU/memory requests/limits from all workloads in a group.
-func aggregateResources(group *ServiceGroup) (cpuReq, memReq, cpuLim, memLim string) {
+// TODO(HC-4): Implement proper aggregation using k8s.io/apimachinery/pkg/api/resource.Quantity
+
+// extractFirstResourceValues returns the first non-empty resource values found in the group's workloads.
+// For accurate quota calculation with multiple workloads, implement proper aggregation.
+func extractFirstResourceValues(group *ServiceGroup) (cpuReq, memReq, cpuLim, memLim string) {
 	for _, r := range group.Resources {
 		resources, ok := r.Values["resources"].(map[string]interface{})
 		if !ok {

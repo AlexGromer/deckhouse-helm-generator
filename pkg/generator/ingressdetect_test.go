@@ -472,6 +472,34 @@ func TestDoubleInjection_CloudThenIngress_SingleAnnotationsBlock(t *testing.T) {
 	}
 }
 
+// TestInjectIngressAnnotations_IngressClassNotMatched verifies that a template
+// with kind: IngressClass is NOT treated as an Ingress (the old substring
+// match "kind: Ingress" would incorrectly match "kind: IngressClass").
+func TestInjectIngressAnnotations_IngressClassNotMatched(t *testing.T) {
+	icTemplate := "apiVersion: networking.k8s.io/v1\nkind: IngressClass\nmetadata:\n  name: nginx\nspec:\n  controller: k8s.io/ingress-nginx"
+	chart := makeChart("myapp", map[string]string{
+		"templates/ingressclass.yaml": icTemplate,
+	})
+
+	result := InjectIngressAnnotations(chart, ControllerNginx, []IngressFeature{IngressCanary, IngressSSLRedirect})
+
+	if result == nil {
+		t.Fatal("InjectIngressAnnotations returned nil for valid chart")
+	}
+
+	content, ok := result.Templates["templates/ingressclass.yaml"]
+	if !ok {
+		t.Fatal("templates/ingressclass.yaml missing after injection")
+	}
+
+	if strings.Contains(content, "nginx.ingress.kubernetes.io") {
+		t.Error("IngressClass template must NOT receive ingress controller annotations")
+	}
+	if strings.Contains(content, "  annotations:") {
+		t.Error("IngressClass template must NOT have an injected annotations block")
+	}
+}
+
 func TestInjectIngressAnnotations_NoIngressTemplate_PreservesChart(t *testing.T) {
 	original := makeChart("myapp", map[string]string{
 		"templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: myapp\n",

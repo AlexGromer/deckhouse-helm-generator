@@ -30,11 +30,11 @@ type KustomizeDir struct {
 	// Resources maps resource filenames to their YAML content.
 	Resources map[string]string
 
-	// Patches lists strategic-merge patches applied by this directory.
+	// Patches lists patches applied by this directory.
 	Patches []KustomizePatch
 }
 
-// KustomizePatch describes a single strategic-merge patch file.
+// KustomizePatch describes a single patch file.
 type KustomizePatch struct {
 	// Target is the patch filename (e.g. "replica-patch.yaml").
 	Target string
@@ -87,10 +87,11 @@ func GenerateKustomizeLayout(chart *types.GeneratedChart) (*KustomizeOutput, err
 		Resources:     resources,
 	}
 
-	// Build overlays.
+	// Build overlays. Use the chart name as the Deployment name so patches
+	// target the correct resource instead of a hardcoded placeholder.
 	overlays := make(map[string]*KustomizeDir, len(defaultOverlays))
 	for _, spec := range defaultOverlays {
-		overlays[spec.name] = buildOverlay(spec)
+		overlays[spec.name] = buildOverlay(spec, chart.Name)
 	}
 
 	return &KustomizeOutput{
@@ -100,12 +101,14 @@ func GenerateKustomizeLayout(chart *types.GeneratedChart) (*KustomizeOutput, err
 }
 
 // buildOverlay constructs a KustomizeDir for the given overlay spec.
-func buildOverlay(spec overlaySpec) *KustomizeDir {
+// chartName is used as the Deployment metadata.name in generated patches so
+// that Kustomize can locate the correct resource to patch.
+func buildOverlay(spec overlaySpec, chartName string) *KustomizeDir {
 	var patches []KustomizePatch
 	var patchNames []string
 
 	// Every overlay gets a replica patch.
-	replicaPatch := generateReplicaPatch(spec.name, spec.replicas)
+	replicaPatch := generateReplicaPatch(chartName, spec.replicas)
 	patches = append(patches, KustomizePatch{
 		Target: "replica-patch.yaml",
 		Patch:  replicaPatch,
@@ -114,7 +117,7 @@ func buildOverlay(spec overlaySpec) *KustomizeDir {
 
 	// Prod gets an additional resource-limits patch.
 	if spec.addResourceLimits {
-		limitsPatch := generateResourceLimitsPatch()
+		limitsPatch := generateResourceLimitsPatch(chartName)
 		patches = append(patches, KustomizePatch{
 			Target: "resource-limits-patch.yaml",
 			Patch:  limitsPatch,
@@ -146,7 +149,7 @@ func generateBaseKustomization(resourceNames []string) string {
 
 // generateOverlayKustomization renders a kustomization.yaml for an overlay
 // environment that references ../../base and applies the listed patches via
-// patchesStrategicMerge.
+// the modern patches: syntax (replaces deprecated patchesStrategicMerge).
 func generateOverlayKustomization(env string, patches []string) string {
 	var b strings.Builder
 	b.WriteString("apiVersion: kustomize.config.k8s.io/v1beta1\n")
@@ -154,9 +157,9 @@ func generateOverlayKustomization(env string, patches []string) string {
 	b.WriteString("resources:\n")
 	b.WriteString("  - ../../base\n")
 	if len(patches) > 0 {
-		b.WriteString("patchesStrategicMerge:\n")
+		b.WriteString("patches:\n")
 		for _, p := range patches {
-			b.WriteString("  - ")
+			b.WriteString("  - path: ")
 			b.WriteString(p)
 			b.WriteByte('\n')
 		}
@@ -165,31 +168,33 @@ func generateOverlayKustomization(env string, patches []string) string {
 }
 
 // generateReplicaPatch renders a strategic-merge patch that sets the replica
-// count for a Deployment.
-func generateReplicaPatch(env string, replicas int) string {
+// count for a Deployment. The deploymentName must match the target Deployment's
+// metadata.name so Kustomize can locate the resource to patch.
+func generateReplicaPatch(deploymentName string, replicas int) string {
 	var b strings.Builder
 	b.WriteString("apiVersion: apps/v1\n")
 	b.WriteString("kind: Deployment\n")
 	b.WriteString("metadata:\n")
-	b.WriteString("  name: app\n")
+	fmt.Fprintf(&b, "  name: %s\n", deploymentName)
 	b.WriteString("spec:\n")
-	b.WriteString(fmt.Sprintf("  replicas: %d\n", replicas))
+	fmt.Fprintf(&b, "  replicas: %d\n", replicas)
 	return b.String()
 }
 
 // generateResourceLimitsPatch renders a strategic-merge patch that sets
-// container resource limits suitable for production workloads.
-func generateResourceLimitsPatch() string {
+// container resource limits suitable for production workloads. The
+// deploymentName must match the target Deployment's metadata.name.
+func generateResourceLimitsPatch(deploymentName string) string {
 	var b strings.Builder
 	b.WriteString("apiVersion: apps/v1\n")
 	b.WriteString("kind: Deployment\n")
 	b.WriteString("metadata:\n")
-	b.WriteString("  name: app\n")
+	fmt.Fprintf(&b, "  name: %s\n", deploymentName)
 	b.WriteString("spec:\n")
 	b.WriteString("  template:\n")
 	b.WriteString("    spec:\n")
 	b.WriteString("      containers:\n")
-	b.WriteString("        - name: app\n")
+	fmt.Fprintf(&b, "        - name: %s\n", deploymentName)
 	b.WriteString("          resources:\n")
 	b.WriteString("            limits:\n")
 	b.WriteString("              cpu: \"1\"\n")

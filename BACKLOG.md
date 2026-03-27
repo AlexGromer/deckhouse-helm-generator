@@ -2,19 +2,41 @@
 
 ## Active (max 10)
 
-- [ ] HS-1: Shell injection in airgap.go GenerateMirrorScript (P1) @security
-- [ ] HS-2: Makefile target injection in monorepo.go sanitizeChartName (P1) @security
-- [ ] HS-3: YAML injection in kustomize.go resource names (P1) @security
-- [ ] HS-4: CI workflow injection in monorepo.go (P1) @security
-- [ ] CR-1: namespace-resources mutates Templates directly (P1) @correctness
-- [ ] CR-2: InjectDependencies shares Templates map reference (P1) @correctness
-- [ ] CR-3: Spot provider silently defaults to AWS (P1) @correctness
-- [ ] HC-1: Double-injection cloud+ingress on same Ingress (P1) @correctness
-- [ ] HC-3: Nil pointer dereference in extractContainers (P1) @correctness
-- [ ] HC-7: injectTolerationsIntoTemplate appends to doc root (P1) @correctness
+- [ ] HC-2: metadataNameRegex fails on Helm-expression template names (P2) @correctness
+- [ ] HC-4: aggregateResources takes first value, doesn't aggregate (P2) @correctness
+- [ ] HC-5: Port validation missing — negative and >65535 accepted (P2) @correctness
+- [ ] HC-6: InjectDependencies produces broken Chart.yaml via string concat (P2) @correctness
+- [ ] HC-8: Kustomize patches hardcode name: app — won't match real Deployments (P2) @correctness
+- [ ] HC-9: --feature-flags double-wraps NetworkPolicies from --namespace-resources (P2) @correctness
+- [ ] HC-10: Duplicate quoting inconsistency now resolved but extractKind not used for Service/Ingress matching (P2) @correctness
+- [ ] HC-11: GenerateEnvValues(nil) — workload-aware path never wired into CLI (P2) @correctness
+- [ ] M-1: patchesStrategicMerge deprecated in Kustomize v5 (P2) @quality
+- [ ] M-12: postgresql image doesn't match postgres pattern in autodeps (P2) @correctness
 
 ## Queue
 <!-- auto-promote top 10 to Active when slots free -->
+
+### Issue #29 — Remaining Medium findings (M-2..M-22)
+- [ ] M-2: GenerateSpotPDB exported but never called from pipeline (P2) @quality
+- [ ] M-3: Tenant count hardcoded to 2, no --tenant-count flag (P2) @quality
+- [ ] M-4: --cloud-provider accepts arbitrary string — no validation at flag parse (P2) @quality
+- [ ] M-5: networkpolicy.go hardcoded namespace literal instead of Release.Namespace (P2) @correctness
+- [ ] M-6: buildCrossNamespaceIndex non-deterministic order (P2) @quality
+- [ ] M-7: Template key collision between namespace.go and networkpolicy.go NP generators (P2) @correctness
+- [ ] M-8: Traefik multi-feature: last annotation wins on same key (P2) @correctness
+- [ ] M-9: kind: Service substring match hits ServiceAccount/ServiceMonitor (P2) @correctness
+- [ ] M-10: mergeFeatureValues swallows YAML parse error (P2) @quality
+- [ ] M-11: envvalues.go priority comment says 6 levels, logic has 7 branches (P3) @quality
+- [ ] M-13: extractPorts only handles int64, misses int (P3) @correctness
+- [ ] M-14: appName unsanitized in PDB YAML (P3) @security
+- [ ] M-15: Nil chart input causes panic in GenerateKustomizeLayout (P3) @correctness
+- [ ] M-16: monorepo Charts slice stored by reference, not copied (P3) @quality
+- [ ] M-17: spot_test.go test name/comment misleading about default GracePeriod (P3) @quality
+- [ ] M-18: GroupResources called twice in main.go, error discarded (P3) @quality
+- [ ] M-19: multitenant NP allows DNS UDP only, not TCP (P3) @correctness
+- [ ] M-20: GenerateAirgapValues ignores refs parameter (P3) @quality
+- [ ] M-21: --monorepo + --kustomize no conflict guard (P3) @quality
+- [ ] M-22: 4 independent workload container-scanning implementations — DRY violation (P3) @quality
 
 ### Phase 1 — Incomplete
 - [ ] 1.3.2: Helm test templates auto-scaffold (P2) @generator
@@ -69,6 +91,7 @@ _No deferred tasks._
 ## Completed Archive
 <!-- keep last 50, older delete -->
 
+- [x] v0.7.1 P1 fixes — 10 findings (4 security + 6 correctness) (P1) — 2026-03-27 ✓ 2026-03-27
 - [x] Phase 2 Code Review + Release v0.7.0 (P1) — 2026-03-27 ✓ 2026-03-27
 - [x] Merge PR #24 (Phase 2 Tier 3) (P1) — 2026-02-27 ✓ 2026-02-27
 - [x] Phase 2 Architecture Generation (Tiers 1+2 PR #23) (P1) ✓ 2026-02-27

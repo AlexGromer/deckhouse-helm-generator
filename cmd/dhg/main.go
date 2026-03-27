@@ -710,8 +710,38 @@ drain:
 		if opts.verbose {
 			fmt.Printf("\n[5b/5] Generating environment-specific values...\n")
 		}
-		envFiles := generator.GenerateEnvValues(nil)
+
+		// Build a name→group index for workload-aware profile selection.
+		var groupsByName map[string]*generator.ServiceGroup
+		if groupingResult, err := generator.GroupResources(graph); err == nil && len(groupingResult.Groups) > 0 {
+			groupsByName = make(map[string]*generator.ServiceGroup, len(groupingResult.Groups))
+			for _, g := range groupingResult.Groups {
+				groupsByName[g.Name] = g
+			}
+		}
+
 		for _, chart := range charts {
+			var envFiles map[string][]byte
+
+			if group, ok := groupsByName[chart.Name]; ok {
+				// Workload-aware path: detect workload type and parse base values.
+				workloadType := generator.DetectWorkloadType(group)
+				var baseValues map[string]interface{}
+				if chart.ValuesYAML != "" {
+					_ = yaml.Unmarshal([]byte(chart.ValuesYAML), &baseValues)
+				}
+				envFiles = generator.GenerateEnvValuesForWorkload(baseValues, workloadType)
+				if opts.verbose {
+					fmt.Printf("  Chart %s: workload=%s (workload-aware profiles)\n", chart.Name, workloadType)
+				}
+			} else {
+				// Fallback: no matching group — use static profiles.
+				envFiles = generator.GenerateEnvValues(nil)
+				if opts.verbose {
+					fmt.Printf("  Chart %s: using default profiles (no group match)\n", chart.Name)
+				}
+			}
+
 			chartDir := filepath.Join(opts.outputDir, chart.Name)
 			for filename, content := range envFiles {
 				envPath := filepath.Join(chartDir, filename)

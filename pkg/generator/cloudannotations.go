@@ -27,7 +27,7 @@ type CloudAnnotationConfig struct {
 
 // metadataNameRegex matches the metadata block through the name field, capturing
 // the entire "metadata:\n  name: <value>" section for replacement.
-var metadataNameRegex = regexp.MustCompile(`(metadata:\s*\n\s+name:\s*\S+)`)
+var metadataNameRegex = regexp.MustCompile(`(metadata:\s*\n\s+name:\s*[^\n]+)`)
 
 // GenerateCloudAnnotations returns provider-specific Kubernetes Service annotations.
 // Returns an empty (non-nil) map for unknown or empty providers.
@@ -78,14 +78,14 @@ func InjectCloudAnnotations(chart *types.GeneratedChart, config CloudAnnotationC
 	}
 
 	for name, content := range templates {
-		if strings.Contains(content, "kind: Service") {
+		if extractKind(content) == "Service" {
 			svcAnnotations := GenerateCloudAnnotations(config)
 			if len(svcAnnotations) > 0 {
 				templates[name] = injectAnnotationsIntoTemplate(content, svcAnnotations)
 			}
 		}
 
-		if strings.Contains(content, "kind: Ingress") && config.Provider == CloudAWS {
+		if extractKind(content) == "Ingress" && config.Provider == CloudAWS {
 			scheme := config.Scheme
 			if scheme == "" {
 				scheme = "internet-facing"
@@ -155,7 +155,7 @@ func injectAnnotationsIntoTemplate(template string, annotations map[string]strin
 	//     <existing keys>
 	// Match existing annotations block (handles both expanded and compact `annotations: {}` forms).
 	existingAnnotationsRe := regexp.MustCompile(
-		`(metadata:\s*\n\s+name:\s*\S+\n)(  annotations:\s*(?:\{\})?\s*\n(    \S+:.*\n)*)`,
+		`(metadata:\s*\n\s+name:\s*[^\n]+\n)(  annotations:\s*(?:\{\})?\s*\n(    \S+:.*\n)*)`,
 	)
 
 	if loc := existingAnnotationsRe.FindStringIndex(template); loc != nil {

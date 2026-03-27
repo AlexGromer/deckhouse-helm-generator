@@ -227,7 +227,7 @@ func InjectIngressAnnotations(chart *types.GeneratedChart, controller IngressCon
 	// Copy templates map — do not mutate the original chart.
 	newTemplates := make(map[string]string, len(chart.Templates))
 	for path, content := range chart.Templates {
-		if strings.Contains(content, "kind: Ingress") {
+		if extractKind(content) == "Ingress" {
 			content = injectAnnotationsIntoTemplate(content, annotations)
 		}
 		newTemplates[path] = content
