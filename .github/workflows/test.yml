@@ -23,7 +23,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go ${{ matrix.go-version }}
       uses: actions/setup-go@v5
@@ -47,7 +47,7 @@ jobs:
 
     - name: Upload coverage artifact
       if: matrix.go-version == '1.24'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: coverage-unit
         path: coverage.txt
@@ -61,7 +61,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -83,7 +83,7 @@ jobs:
           ./tests/integration/...
 
     - name: Upload coverage artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: coverage-integration
         path: coverage-integration.txt
@@ -97,7 +97,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -122,7 +122,7 @@ jobs:
           ./tests/e2e/...
 
     - name: Upload coverage artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: coverage-e2e
         path: coverage-e2e.txt
@@ -135,7 +135,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -145,11 +145,12 @@ jobs:
         go-version: stable
 
     - name: golangci-lint
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v9
       with:
         version: latest
-        args: --timeout=5m --issues-exit-code=0
+        args: --timeout=5m
         only-new-issues: true
+      continue-on-error: true
 
   # ── Job 5: Security Scan ───────────────────────────────────────
   security-scan:
@@ -158,7 +159,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -193,7 +194,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -201,19 +202,19 @@ jobs:
         go-version: '1.24'
 
     - name: Download unit coverage
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: coverage-unit
         path: ./coverage/
 
     - name: Download integration coverage
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: coverage-integration
         path: ./coverage/
 
     - name: Download E2E coverage
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: coverage-e2e
         path: ./coverage/
@@ -255,7 +256,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -269,7 +270,7 @@ jobs:
         ./bin/dhg --version
 
     - name: Upload binary artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: dhg-binary
         path: bin/dhg
