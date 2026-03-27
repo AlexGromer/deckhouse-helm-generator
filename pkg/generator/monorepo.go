@@ -41,9 +41,10 @@ func GenerateMonorepoLayout(charts []*types.GeneratedChart, projectName string) 
 }
 
 // sanitizeChartName normalises a chart name for use in Makefile targets:
-// lowercase, spaces replaced with hyphens.
+// lowercase, only [a-z0-9-] retained, leading/trailing hyphens trimmed.
 func sanitizeChartName(name string) string {
-	return strings.ReplaceAll(strings.ToLower(name), " ", "-")
+	sanitized := safeChartName.ReplaceAllString(strings.ToLower(name), "")
+	return strings.Trim(sanitized, "-")
 }
 
 // generateMonorepoMakefile produces a Makefile that orchestrates lint, test,

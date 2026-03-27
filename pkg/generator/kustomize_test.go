@@ -348,6 +348,63 @@ func TestKustomize_EmptyChart_ReturnsError(t *testing.T) {
 }
 
 // ============================================================
+// Subtask 13: YAML injection — newline in resource name rejected
+// ============================================================
+
+// ============================================================
+// Subtask 13-14: YAML injection — unsafe chars rejected
+// ============================================================
+
+func TestKustomize_RejectsUnsafeResourceNames(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{"newline in name", "templates/deploy\nment.yaml"},
+		{"colon in name", "templates/deploy:ment.yaml"},
+		{"hash in name", "templates/deploy#ment.yaml"},
+		{"path traversal", "templates/../../etc/passwd"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chart := makeChart("myapp", map[string]string{
+				tt.key: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: myapp\n",
+			})
+
+			out, err := GenerateKustomizeLayout(chart)
+			if err == nil {
+				t.Fatalf("expected error for template key %q, got nil", tt.key)
+			}
+			if out != nil {
+				t.Errorf("expected nil output on error, got %+v", out)
+			}
+		})
+	}
+}
+
+// ============================================================
+// Subtask 15: Valid resource name with subdirectory accepted
+// ============================================================
+
+func TestKustomize_AcceptsValidResourceName(t *testing.T) {
+	chart := makeChart("myapp", map[string]string{
+		"templates/sub-dir/deploy_v2.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: myapp\n",
+	})
+
+	out, err := GenerateKustomizeLayout(chart)
+	if err != nil {
+		t.Fatalf("unexpected error for valid resource name: %v", err)
+	}
+	if out == nil {
+		t.Fatal("expected non-nil output")
+	}
+	if _, ok := out.Base.Resources["sub-dir/deploy_v2.yaml"]; !ok {
+		t.Error("expected resource 'sub-dir/deploy_v2.yaml' in base")
+	}
+}
+
+// ============================================================
 // Unit tests for unexported helpers
 // ============================================================
 

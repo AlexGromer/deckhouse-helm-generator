@@ -279,6 +279,16 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		return fmt.Errorf("invalid source: %s (must be file, cluster, or gitops)", opts.source)
 	}
 
+	// Validate cloud provider
+	if opts.cloudProvider != "" {
+		switch opts.cloudProvider {
+		case "aws", "gcp", "azure":
+			// valid
+		default:
+			return fmt.Errorf("unknown cloud provider: %q (must be aws, gcp, or azure)", opts.cloudProvider)
+		}
+	}
+
 	// Step 1: Extract resources
 	if opts.verbose {
 		fmt.Printf("\n[1/5] Extracting resources from source...\n")
@@ -491,7 +501,10 @@ drain:
 			})
 
 			// Add mirror-images.sh
-			mirrorScript := generator.GenerateMirrorScript(refs, opts.airgapRegistry)
+			mirrorScript, err := generator.GenerateMirrorScript(refs, opts.airgapRegistry)
+			if err != nil {
+				return fmt.Errorf("generating mirror script: %w", err)
+			}
 			chart.ExternalFiles = append(chart.ExternalFiles, types.ExternalFileInfo{
 				Path: "mirror-images.sh", Content: mirrorScript,
 			})
@@ -517,17 +530,38 @@ drain:
 			NetworkPolicy: true,
 		}
 		nsTemplates := generator.GenerateNamespaceResources(groupingResult.Groups, nsOpts)
-		for _, chart := range charts {
-			for path, content := range nsTemplates {
-				chart.Templates[path] = content
-			}
-		}
 
-		// Also generate auto-NetworkPolicies from service analysis
+		// Also generate auto-NetworkPolicies from service analysis.
+		// NOTE: If --multi-tenant is also active, GenerateMultiTenantOverlay (applied later)
+		// adds tenant-networkpolicies.yaml. Auto-NP uses per-group paths
+		// (<group>-networkpolicy.yaml), so there is no key collision, but both
+		// sets of policies will coexist in the final chart. This is intentional:
+		// auto-NP handles service-level ingress/egress while tenant-NP handles
+		// cross-tenant isolation.
 		autoNP := generator.GenerateAutoNetworkPolicies(graph, groupingResult.Groups)
-		for _, chart := range charts {
+
+		// Copy-on-write: build a new Templates map instead of mutating in place.
+		for i, chart := range charts {
+			templates := make(map[string]string, len(chart.Templates)+len(nsTemplates)+len(autoNP))
+			for k, v := range chart.Templates {
+				templates[k] = v
+			}
+			for path, content := range nsTemplates {
+				templates[path] = content
+			}
 			for path, content := range autoNP {
-				chart.Templates[path] = content
+				templates[path] = content
+			}
+			charts[i] = &types.GeneratedChart{
+				Name:          chart.Name,
+				Path:          chart.Path,
+				ChartYAML:     chart.ChartYAML,
+				ValuesYAML:    chart.ValuesYAML,
+				Templates:     templates,
+				Helpers:       chart.Helpers,
+				Notes:         chart.Notes,
+				ValuesSchema:  chart.ValuesSchema,
+				ExternalFiles: chart.ExternalFiles,
 			}
 		}
 	}
@@ -597,13 +631,15 @@ drain:
 			fmt.Printf("\n[4i/5] Injecting spot/preemptible instance configuration...\n")
 		}
 		spotConfig := generator.SpotConfig{
-			Provider:    generator.SpotAWS,
 			GracePeriod: opts.spotGracePeriod,
 			Enabled:     true,
 		}
-		if opts.cloudProvider == "gcp" {
+		switch opts.cloudProvider {
+		case "aws", "":
+			spotConfig.Provider = generator.SpotAWS
+		case "gcp":
 			spotConfig.Provider = generator.SpotGCP
-		} else if opts.cloudProvider == "azure" {
+		case "azure":
 			spotConfig.Provider = generator.SpotAzure
 		}
 		for i, chart := range charts {

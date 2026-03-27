@@ -423,6 +423,55 @@ func TestInjectIngressAnnotations_NilChart_ReturnsNil(t *testing.T) {
 	}
 }
 
+// ============================================================
+// Section 9: Double injection — cloud + ingress on same template
+// ============================================================
+
+func TestDoubleInjection_CloudThenIngress_SingleAnnotationsBlock(t *testing.T) {
+	// Create an Ingress template, apply InjectCloudAnnotations (AWS) and then
+	// InjectIngressAnnotations (nginx). The result must contain a single
+	// annotations block with keys from both injections.
+	chart := makeChart("myapp", map[string]string{
+		"templates/ingress.yaml": "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: myapp\nspec:\n  rules:\n    - host: example.com",
+	})
+
+	// First pass: cloud annotations (AWS ALB on Ingress).
+	cloudConfig := CloudAnnotationConfig{
+		Provider: CloudAWS,
+		Internal: false,
+		Scheme:   "internet-facing",
+	}
+	chart = InjectCloudAnnotations(chart, cloudConfig)
+
+	// Second pass: ingress controller annotations (nginx canary).
+	chart = InjectIngressAnnotations(chart, ControllerNginx, []IngressFeature{IngressCanary})
+
+	if chart == nil {
+		t.Fatal("chart is nil after double injection")
+	}
+
+	content, ok := chart.Templates["templates/ingress.yaml"]
+	if !ok {
+		t.Fatal("templates/ingress.yaml missing after double injection")
+	}
+
+	// Must have exactly one annotations block.
+	count := strings.Count(content, "  annotations:")
+	if count != 1 {
+		t.Errorf("expected exactly 1 'annotations:' block, got %d.\nFull output:\n%s", count, content)
+	}
+
+	// AWS ALB annotations must be present.
+	if !strings.Contains(content, "alb.ingress.kubernetes.io/scheme") {
+		t.Error("expected AWS ALB scheme annotation after double injection")
+	}
+
+	// Nginx canary annotations must be present.
+	if !strings.Contains(content, "nginx.ingress.kubernetes.io/canary") {
+		t.Error("expected nginx canary annotation after double injection")
+	}
+}
+
 func TestInjectIngressAnnotations_NoIngressTemplate_PreservesChart(t *testing.T) {
 	original := makeChart("myapp", map[string]string{
 		"templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: myapp\n",
@@ -443,3 +492,4 @@ func TestInjectIngressAnnotations_NoIngressTemplate_PreservesChart(t *testing.T)
 		t.Error("original Deployment template content was corrupted")
 	}
 }
+

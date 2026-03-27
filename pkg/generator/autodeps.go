@@ -177,16 +177,24 @@ func InjectDependencies(chart *types.GeneratedChart, deps []helm.Dependency) *ty
 		valuesBlock.WriteString(fmt.Sprintf("\n%s:\n  enabled: false\n", d.Name))
 	}
 
+	// Deep-copy Templates and ExternalFiles to preserve immutability contract.
+	newTemplates := make(map[string]string, len(chart.Templates))
+	for k, v := range chart.Templates {
+		newTemplates[k] = v
+	}
+	newExternalFiles := make([]types.ExternalFileInfo, len(chart.ExternalFiles))
+	copy(newExternalFiles, chart.ExternalFiles)
+
 	return &types.GeneratedChart{
 		Name:          chart.Name,
 		Path:          chart.Path,
 		ChartYAML:     chart.ChartYAML + depYAML.String(),
 		ValuesYAML:    chart.ValuesYAML + valuesBlock.String(),
-		Templates:     chart.Templates,
+		Templates:     newTemplates,
 		Helpers:       chart.Helpers,
 		Notes:         chart.Notes,
 		ValuesSchema:  chart.ValuesSchema,
-		ExternalFiles: chart.ExternalFiles,
+		ExternalFiles: newExternalFiles,
 	}
 }
 

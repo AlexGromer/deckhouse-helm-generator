@@ -1,9 +1,6 @@
 package generator
 
 import (
-	"fmt"
-	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -231,7 +228,7 @@ func InjectIngressAnnotations(chart *types.GeneratedChart, controller IngressCon
 	newTemplates := make(map[string]string, len(chart.Templates))
 	for path, content := range chart.Templates {
 		if strings.Contains(content, "kind: Ingress") {
-			content = injectIngressAnnotationsBlock(content, annotations)
+			content = injectAnnotationsIntoTemplate(content, annotations)
 		}
 		newTemplates[path] = content
 	}
@@ -249,31 +246,3 @@ func InjectIngressAnnotations(chart *types.GeneratedChart, controller IngressCon
 	}
 }
 
-// injectIngressAnnotationsBlock inserts an annotations block immediately after
-// the first "metadata:\n  name: <name>" block found in the template string.
-// Keys are sorted for deterministic output.
-// This is the ingress-specific helper; the shared injectAnnotationsIntoTemplate
-// function is defined in cloudannotations.go and is reused where available.
-func injectIngressAnnotationsBlock(tmpl string, annotations map[string]string) string {
-	if len(annotations) == 0 {
-		return tmpl
-	}
-
-	metadataRe := regexp.MustCompile(`(metadata:\s*\n\s+name:\s*\S+)`)
-
-	// Sort keys for deterministic output.
-	keys := make([]string, 0, len(annotations))
-	for k := range annotations {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var lines []string
-	lines = append(lines, "  annotations:")
-	for _, k := range keys {
-		lines = append(lines, fmt.Sprintf("    %s: %q", k, annotations[k]))
-	}
-	annotationsBlock := strings.Join(lines, "\n")
-
-	return metadataRe.ReplaceAllString(tmpl, "$1\n"+annotationsBlock)
-}

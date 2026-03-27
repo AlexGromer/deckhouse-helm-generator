@@ -1,7 +1,7 @@
 # Performance Benchmark Baseline
 
-**Date**: 2026-02-18
-**Version**: v0.2.0-dev
+**Date**: 2026-02-18 (baseline, still valid as of v0.7.0 — no pipeline architecture changes)
+**Version**: v0.2.0-dev (core pipeline unchanged through v0.7.0)
 **Hardware**: Intel Core i5-6300U @ 2.40GHz, 4 threads
 **OS**: Linux 6.18.9+kali-amd64
 **Go**: 1.21+

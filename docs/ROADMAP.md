@@ -81,7 +81,7 @@ helmfile -f helmfile.yaml apply                           # 4. Deploy
 
 ---
 
-## Current State (v0.7.0-dev)
+## Current State (v0.7.0 — released 2026-03-27)
 
 ### Реализовано
 
@@ -106,8 +106,11 @@ helmfile -f helmfile.yaml apply                           # 4. Deploy
 | **Recommendation Engine** | ✅ Done | Приоритизированные action items, text/JSON/markdown |
 | **Checksum Annotations** | ✅ Done | Auto-reload ConfigMap/Secret via sha256sum |
 | **API Migration** | ✅ Done | Deprecated API detection + auto-migration (12 entries) |
-| **CLI** | ✅ Done | `generate`, `analyze`, `validate`, `diff`, `version`, `--dry-run`, `--mode`, `--env-values`, `--deckhouse-module` |
-| **Test Coverage** | ✅ Done | 85.9% total, 91.3% generator (target >= 80%) |
+| **CLI** | ✅ Done | `generate`, `analyze`, `validate`, `diff`, `version`, `--dry-run`, `--mode`, `--env-values`, `--deckhouse-module` + 12 Phase 2 flags |
+| **Test Coverage** | ✅ Done | 86%+ total, 14 packages green (target >= 80%) |
+| **Phase 2 Tier 1** | ✅ Done (v0.7.0) | Air-gapped support, namespace governance, auto-NetworkPolicy, multi-tenant overlay |
+| **Phase 2 Tier 2** | ✅ Done (v0.7.0) | Feature flags (6 categories), cloud annotations (AWS/GCP/Azure), ingress detection (4 controllers), workload-aware env profiles |
+| **Phase 2 Tier 3** | ✅ Done (v0.7.0) | Monorepo layout, spot/preemptible support, Kustomize overlays, auto dependency detection (7 infra services) |
 
 ### Не реализовано
 
@@ -115,9 +118,8 @@ helmfile -f helmfile.yaml apply                           # 4. Deploy
 |-----------|--------|-----------|
 | Cluster Extractor | ❌ Stub | Live cluster support (Phase 4) |
 | GitOps Extractor | ❌ Stub | Git repo support (Phase 4) |
-| Architecture-Specific Generation | ❌ Not started | Air-gapped, multi-tenant, feature flags, cloud annotations (Phase 2.4) |
-| Namespace Management | ❌ Not started | ResourceQuota/LimitRange/NetworkPolicy auto-generation (Phase 2.5) |
-| Security & Compliance | ❌ Not started | PSS migration, RBAC gen, External Secrets (Phase 2.5) |
+| Security & Compliance | ❌ Not started | PSS migration, RBAC gen, External Secrets (Pass 8) |
+| v0.7.1 fixes | ❌ Not started | 71 code review findings ([#29](https://github.com/AlexGromer/deckhouse-helm-generator/issues/29)) — 10 P1 items |
 
 ---
 

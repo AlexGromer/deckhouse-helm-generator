@@ -127,7 +127,13 @@ func GenerateAirgapValues(_ []ImageRef, registry string) map[string]interface{} 
 }
 
 // GenerateMirrorScript generates mirror-images.sh with skopeo copy commands.
-func GenerateMirrorScript(refs []ImageRef, targetRegistry string) string {
+// Returns an error if targetRegistry contains unsafe shell characters.
+// Image references with unsafe characters are silently skipped.
+func GenerateMirrorScript(refs []ImageRef, targetRegistry string) (string, error) {
+	if err := validateShellSafe(targetRegistry, "targetRegistry"); err != nil {
+		return "", err
+	}
+
 	var sb strings.Builder
 
 	sb.WriteString("#!/usr/bin/env bash\n")
@@ -138,7 +144,7 @@ func GenerateMirrorScript(refs []ImageRef, targetRegistry string) string {
 
 	if len(refs) == 0 {
 		sb.WriteString("echo 'No images to mirror.'\n")
-		return sb.String()
+		return sb.String(), nil
 	}
 
 	// Deduplicate
@@ -159,6 +165,11 @@ func GenerateMirrorScript(refs []ImageRef, targetRegistry string) string {
 	sb.WriteString(fmt.Sprintf("TARGET_REGISTRY=\"%s\"\n\n", targetRegistry))
 
 	for _, ref := range uniqueRefs {
+		// Skip image references with unsafe shell characters
+		if err := validateShellSafe(ref.FullRef, "image reference"); err != nil {
+			continue
+		}
+
 		source := fmt.Sprintf("docker://%s", ref.FullRef)
 		// Build target: replace original registry with target
 		targetImage := ref.FullRef
@@ -181,5 +192,5 @@ func GenerateMirrorScript(refs []ImageRef, targetRegistry string) string {
 	}
 
 	sb.WriteString("\necho 'Image mirroring complete.'\n")
-	return sb.String()
+	return sb.String(), nil
 }

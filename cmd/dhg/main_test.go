@@ -362,6 +362,133 @@ func TestDiffCmd_NonexistentDir(t *testing.T) {
 
 // ── TestGenerateCmd_HasDryRunFlag ─────────────────────────────────────────────
 
+// ── TestGenerateCmd_CloudProviderValidation ───────────────────────────────────
+
+func TestGenerateCmd_UnknownCloudProviderReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	_, err := executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--cloud-provider", "unknown",
+		"--dry-run",
+	)
+	if err == nil {
+		t.Fatal("expected error for unknown cloud provider, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown cloud provider") {
+		t.Errorf("expected error to mention 'unknown cloud provider', got: %v", err)
+	}
+}
+
+func TestGenerateCmd_AWSCloudProviderWithSpot(t *testing.T) {
+	// Create a minimal YAML manifest so extraction succeeds
+	tmpDir := t.TempDir()
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-deploy
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "deploy.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--cloud-provider", "aws",
+		"--spot",
+		"--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("expected no error for --cloud-provider aws --spot, got: %v", err)
+	}
+}
+
+func TestGenerateCmd_GCPCloudProviderAccepted(t *testing.T) {
+	tmpDir := t.TempDir()
+	_, err := executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--cloud-provider", "gcp",
+		"--dry-run",
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "unknown cloud provider") {
+			t.Fatalf("gcp should be accepted as cloud provider, got: %v", err)
+		}
+	}
+}
+
+func TestGenerateCmd_AzureCloudProviderAccepted(t *testing.T) {
+	tmpDir := t.TempDir()
+	_, err := executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--cloud-provider", "azure",
+		"--dry-run",
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "unknown cloud provider") {
+			t.Fatalf("azure should be accepted as cloud provider, got: %v", err)
+		}
+	}
+}
+
+func TestGenerateCmd_SpotDefaultsToAWS(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-deploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "deploy.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// --spot without --cloud-provider should default to AWS (no error)
+	_, err := executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--spot",
+		"--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("expected no error for --spot without --cloud-provider, got: %v", err)
+	}
+}
+
 func TestGenerateCmd_HasDryRunFlag(t *testing.T) {
 	cmd := newGenerateCmd()
 	flag := cmd.Flags().Lookup("dry-run")

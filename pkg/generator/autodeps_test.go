@@ -461,3 +461,36 @@ func TestAutoDeps_NilResources_EmptyList(t *testing.T) {
 		t.Errorf("expected 0 dependencies for nil input, got %d: %+v", len(deps), deps)
 	}
 }
+
+// CR-2: InjectDependencies must deep-copy Templates map
+
+func TestInjectDeps_TemplatesMapIsDeepCopy(t *testing.T) {
+	original := &types.GeneratedChart{
+		Name:      "test",
+		ChartYAML: "apiVersion: v2\nname: test\nversion: 0.1.0\n",
+		Templates: map[string]string{
+			"templates/deployment.yaml": "kind: Deployment",
+		},
+		ExternalFiles: []types.ExternalFileInfo{
+			{Path: "files/config.json", Content: `{"key":"value"}`},
+		},
+	}
+
+	deps := []helm.Dependency{
+		{Name: "redis", Version: "18.x.x", Repository: "https://charts.bitnami.com/bitnami"},
+	}
+
+	result := InjectDependencies(original, deps)
+
+	// Mutate result's Templates — original must be unaffected
+	result.Templates["templates/new.yaml"] = "new content"
+	if _, exists := original.Templates["templates/new.yaml"]; exists {
+		t.Error("InjectDependencies shares Templates map reference — mutation of result affected original")
+	}
+
+	// Mutate result's ExternalFiles — original must be unaffected
+	result.ExternalFiles = append(result.ExternalFiles, types.ExternalFileInfo{Path: "files/new.json", Content: "new"})
+	if len(original.ExternalFiles) != 1 {
+		t.Errorf("InjectDependencies shares ExternalFiles slice — append to result affected original: len=%d", len(original.ExternalFiles))
+	}
+}
