@@ -148,8 +148,9 @@ jobs:
       uses: golangci/golangci-lint-action@v9
       with:
         version: latest
-        args: --timeout=5m --issues-exit-code=0
+        args: --timeout=5m
         only-new-issues: true
+      continue-on-error: true
 
   # ── Job 5: Security Scan ───────────────────────────────────────
   security-scan:
