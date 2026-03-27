@@ -5,11 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.0] - 2026-02-26
+## [0.7.0] - 2026-03-27
 
-> Phase 1 completion — new processors, pattern detectors, generator features, CLI commands
+> Phase 1 completion + Phase 2 Architecture Generation — 12 new Helm chart generators across 3 tiers
 
 ### Added
+
+#### Phase 2 Architecture Generators
+
+**Tier 1 — Infrastructure (PR #23)**
+- **Air-gapped support** (`--airgap-registry`): image list extraction, values-airgap.yaml, mirror-images.sh with skopeo
+- **Namespace governance** (`--namespace-resources`): auto-generate ResourceQuota, LimitRange, default NetworkPolicy per service group
+- **Auto-NetworkPolicy**: fine-grained NetworkPolicy from service relationship analysis, cross-namespace support, env-based port detection
+- **Multi-tenant overlay** (`--multi-tenant`): per-tenant namespace/quota/limitrange/networkpolicy via Helm `{{- range .Values.tenants }}`
+
+**Tier 2 — Detection & Annotation (PR #23)**
+- **Feature flags** (`--feature-flags`): conditional `{{- if .Values.features.<category> }}` guards for 6 categories (monitoring, ingress, autoscaling, security, storage, rbac)
+- **Cloud annotations** (`--cloud-provider`, `--cloud-internal`): AWS NLB/ALB, GCP NEG, Azure health probe annotations for Service/Ingress
+- **Ingress controller detection** (`--detect-ingress`): auto-detect nginx/traefik/haproxy/istio from IngressClass, annotations, images; inject controller-native annotations
+- **Workload-aware env profiles**: environment-specific values with workload type detection (web/worker/database/batch/cache) — 15 profile combinations
+
+**Tier 3 — Advanced Orchestration (PR #24)**
+- **Monorepo layout** (`--monorepo`): aggregate Makefile (lint/test/package/template/deps), .helmignore, chart-testing ct.yaml
+- **Spot/preemptible support** (`--spot`, `--spot-grace-period`): AWS/GCP/Azure tolerations, PDB with smart minAvailable, preStop graceful hooks
+- **Kustomize overlays** (`--kustomize`): base + dev/staging/prod overlays with strategic merge patches for replicas and resource limits
+- **Auto dependency detection** (`--auto-deps`): detect PostgreSQL, MySQL, Redis, MongoDB, RabbitMQ, Elasticsearch, Kafka from env vars, images, ports → Bitnami chart dependencies
 
 #### K8s Processors
 - **VPA** processor (`autoscaling.k8s.io/v1/VerticalPodAutoscaler`): updatePolicy, resourcePolicy, targetRef, recommenders
@@ -38,7 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Pattern analyzer now has 5 detectors (was 3) and 9 checkers (was 3)
-- Test coverage: 85.9% total (14 packages)
+- Test coverage: 86%+ total (14 packages), 161+ new Phase 2 tests (50 T1 + 59 T2 + 52 T3)
+- Generator package: 12 new files, 2,772 LOC implementation + 4,916 LOC tests
+- CLI: 12 new flags for Phase 2 generators
+
+### Known Issues
+- See [#29](https://github.com/AlexGromer/deckhouse-helm-generator/issues/29) for Phase 2 code review findings (tracked for v0.7.1)
 
 ---
 
