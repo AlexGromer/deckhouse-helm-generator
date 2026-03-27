@@ -322,3 +322,25 @@ AI-assisted estimate = solo_estimate / 15
 Conservative AI = solo_estimate / 10
 Worst case AI = solo_estimate / 5
 ```
+
+---
+
+## v0.7.0 — Phase 1 + Phase 2 Release (COMPLETED 2026-03-27)
+
+### Summary
+
+| Phase | Scope | Est (solo) | Actual (AI) | Velocity |
+|-------|-------|-----------|-------------|----------|
+| Phase 2 Tier 1 | 4 generators, 50 tests, 844 LOC | ~60h | ~2h | ~30x |
+| Phase 2 Tier 2 | 4 generators, 59 tests, 916 LOC | ~70h | ~2h | ~35x |
+| Phase 2 Tier 3 | 4 generators, 52 tests, 1,012 LOC | ~80h | ~2h | ~40x |
+| Code review | 7,700 LOC, 4 parallel agents | ~20h | ~0.6h | ~33x |
+| Release prep | CHANGELOG, release notes, tag, GoReleaser | ~4h | ~0.3h | ~13x |
+| **Total** | **12 generators, 161 tests, 2,772 LOC** | **~234h** | **~7h** | **~33x** |
+
+### Observations
+
+- Phase 2 velocity (~35x) significantly higher than Phase 1 (~15x) due to established TDD patterns
+- Code review with parallel agents achieved ~33x — near-instant for 7,700 LOC scope
+- Release prep is the lowest velocity task (prose + coordination > code generation)
+- Running average velocity (all versions): **~25x**

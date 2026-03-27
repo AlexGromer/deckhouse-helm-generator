@@ -112,6 +112,9 @@ const (
 // extractContainers returns the list of container maps from a ProcessedResource
 // whose spec follows the Pod template pattern (Deployment, StatefulSet, DaemonSet, Job, CronJob).
 func extractContainers(resource *types.ProcessedResource) []map[string]interface{} {
+	if resource == nil || resource.Original == nil {
+		return nil
+	}
 	obj := resource.Original.Object.Object
 	spec, ok := obj["spec"].(map[string]interface{})
 	if !ok {
@@ -159,6 +162,9 @@ func DetectWorkloadType(group *ServiceGroup) WorkloadType {
 	hasAMQPKafkaEnv  := false
 
 	for _, res := range group.Resources {
+		if res == nil || res.Original == nil {
+			continue
+		}
 		kind := res.Original.GVK.Kind
 
 		switch kind {

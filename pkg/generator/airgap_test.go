@@ -275,7 +275,10 @@ func TestAirgap_GenerateMirrorScript_SkopeoCommands(t *testing.T) {
 		{Repository: "redis", Tag: "7.2", FullRef: "redis:7.2"},
 	}
 
-	script := GenerateMirrorScript(refs, "registry.internal.com")
+	script, err := GenerateMirrorScript(refs, "registry.internal.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if !strings.Contains(script, "skopeo copy") {
 		t.Error("expected 'skopeo copy' commands in mirror script")
@@ -292,7 +295,10 @@ func TestAirgap_GenerateMirrorScript_SkopeoCommands(t *testing.T) {
 }
 
 func TestAirgap_GenerateMirrorScript_EmptyRefs(t *testing.T) {
-	script := GenerateMirrorScript(nil, "registry.internal.com")
+	script, err := GenerateMirrorScript(nil, "registry.internal.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Should have a header (shebang) but no copy commands
 	if !strings.Contains(script, "#!/") {
@@ -308,9 +314,64 @@ func TestAirgap_GenerateMirrorScript_DigestRef(t *testing.T) {
 		{Repository: "nginx", Digest: "sha256:abcdef123456", FullRef: "nginx@sha256:abcdef123456"},
 	}
 
-	script := GenerateMirrorScript(refs, "registry.internal.com")
+	script, err := GenerateMirrorScript(refs, "registry.internal.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if !strings.Contains(script, "nginx@sha256:abcdef123456") {
 		t.Error("expected digest reference preserved in mirror script")
+	}
+}
+
+func TestGenerateMirrorScript_RejectsShellInjectionInRegistry(t *testing.T) {
+	refs := []ImageRef{
+		{Repository: "nginx", Tag: "1.21", FullRef: "nginx:1.21"},
+	}
+
+	_, err := GenerateMirrorScript(refs, `reg"; rm -rf / #`)
+	if err == nil {
+		t.Fatal("expected error for shell injection in registry, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsafe characters") {
+		t.Errorf("expected 'unsafe characters' in error message, got: %v", err)
+	}
+}
+
+func TestGenerateMirrorScript_RejectsShellInjectionInImageRef(t *testing.T) {
+	refs := []ImageRef{
+		{Repository: "nginx", Tag: "1.21", FullRef: "nginx:1.21"},
+		{Repository: "evil", Tag: "latest", FullRef: "evil$(whoami):latest"},
+	}
+
+	script, err := GenerateMirrorScript(refs, "registry.example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The malicious image ref should be skipped
+	if strings.Contains(script, "whoami") {
+		t.Error("expected malicious image reference to be skipped, but it appeared in script")
+	}
+	// The valid image should still be present
+	if !strings.Contains(script, "nginx:1.21") {
+		t.Error("expected valid image 'nginx:1.21' to remain in script")
+	}
+}
+
+func TestGenerateMirrorScript_AcceptsValidRegistry(t *testing.T) {
+	refs := []ImageRef{
+		{Repository: "nginx", Tag: "1.21", FullRef: "nginx:1.21"},
+	}
+
+	script, err := GenerateMirrorScript(refs, "registry.example.com:5000")
+	if err != nil {
+		t.Fatalf("unexpected error for valid registry: %v", err)
+	}
+	if !strings.Contains(script, "registry.example.com:5000") {
+		t.Error("expected target registry in script output")
+	}
+	if !strings.Contains(script, "skopeo copy") {
+		t.Error("expected skopeo copy commands in script")
 	}
 }

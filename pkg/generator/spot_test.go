@@ -372,6 +372,112 @@ func TestSpot_InjectIntoJob_NoChanges(t *testing.T) {
 // Section 6: InjectSpotConfig — nil chart guard
 // ============================================================
 
+func TestSpot_InjectTolerations_InsidePodSpec(t *testing.T) {
+	deploymentYAML := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: myapp
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.21
+`
+	chart := makeChart("myapp", map[string]string{
+		"templates/deployment.yaml": deploymentYAML,
+	})
+
+	config := SpotConfig{
+		Provider:    SpotAWS,
+		GracePeriod: 15,
+		Enabled:     true,
+	}
+
+	result := InjectSpotConfig(chart, config)
+	if result == nil {
+		t.Fatal("InjectSpotConfig returned nil")
+	}
+
+	content := result.Templates["templates/deployment.yaml"]
+
+	// tolerations: must appear BEFORE containers:
+	tolIdx := strings.Index(content, "tolerations:")
+	conIdx := strings.Index(content, "containers:")
+	if tolIdx == -1 {
+		t.Fatalf("tolerations: not found in output:\n%s", content)
+	}
+	if conIdx == -1 {
+		t.Fatalf("containers: not found in output:\n%s", content)
+	}
+	if tolIdx >= conIdx {
+		t.Errorf("tolerations: (pos %d) must appear BEFORE containers: (pos %d) in pod spec.\nOutput:\n%s", tolIdx, conIdx, content)
+	}
+
+	// Both tolerations: and containers: must be at the same indentation level.
+	lines := strings.Split(content, "\n")
+	var tolIndent, conIndent string
+	for _, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if strings.HasPrefix(trimmed, "tolerations:") {
+			tolIndent = line[:len(line)-len(trimmed)]
+		}
+		if strings.HasPrefix(trimmed, "containers:") {
+			conIndent = line[:len(line)-len(trimmed)]
+		}
+	}
+	if tolIndent != conIndent {
+		t.Errorf("tolerations indent %q != containers indent %q", tolIndent, conIndent)
+	}
+
+	// tolerations: must NOT be at document root (zero indentation).
+	if tolIndent == "" {
+		t.Error("tolerations: is at document root (no indentation) — must be inside pod spec")
+	}
+}
+
+func TestSpot_InjectTolerations_Idempotent(t *testing.T) {
+	deploymentYAML := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.21
+`
+	chart := makeChart("myapp", map[string]string{
+		"templates/deployment.yaml": deploymentYAML,
+	})
+
+	config := SpotConfig{
+		Provider:    SpotAWS,
+		GracePeriod: 15,
+		Enabled:     true,
+	}
+
+	// Inject once.
+	result1 := InjectSpotConfig(chart, config)
+	content1 := result1.Templates["templates/deployment.yaml"]
+
+	// Inject again on the already-injected chart.
+	result2 := InjectSpotConfig(result1, config)
+	content2 := result2.Templates["templates/deployment.yaml"]
+
+	// Count occurrences of "tolerations:" — must be exactly 1.
+	count := strings.Count(content2, "tolerations:")
+	if count != 1 {
+		t.Errorf("expected exactly 1 'tolerations:' block after double injection, got %d.\nAfter first:\n%s\nAfter second:\n%s", count, content1, content2)
+	}
+}
+
 func TestSpot_NilChart_ReturnsNil(t *testing.T) {
 	config := SpotConfig{
 		Provider:    SpotAWS,

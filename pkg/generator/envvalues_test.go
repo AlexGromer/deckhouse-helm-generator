@@ -863,3 +863,34 @@ func makeGroupForEnv(name string, resources ...*types.ProcessedResource) *Servic
 		Strategy:  GroupByLabel,
 	}
 }
+
+// HC-3: Nil pointer dereference tests
+
+func TestExtractContainers_NilResource_ReturnsNil(t *testing.T) {
+	result := extractContainers(nil)
+	if result != nil {
+		t.Errorf("expected nil for nil resource, got %v", result)
+	}
+}
+
+func TestExtractContainers_NilOriginal_ReturnsNil(t *testing.T) {
+	res := &types.ProcessedResource{Original: nil}
+	result := extractContainers(res)
+	if result != nil {
+		t.Errorf("expected nil for nil Original, got %v", result)
+	}
+}
+
+func TestDetectWorkloadType_NilResourceInGroup_NoPanic(t *testing.T) {
+	group := &ServiceGroup{
+		Name:      "test",
+		Resources: []*types.ProcessedResource{nil, nil},
+		Namespace: "default",
+		Strategy:  GroupByLabel,
+	}
+	// Should not panic
+	wt := DetectWorkloadType(group)
+	if wt == "" {
+		t.Error("expected non-empty workload type")
+	}
+}

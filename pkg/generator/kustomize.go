@@ -73,6 +73,9 @@ func GenerateKustomizeLayout(chart *types.GeneratedChart) (*KustomizeOutput, err
 
 	for path, content := range chart.Templates {
 		name := strings.TrimPrefix(path, "templates/")
+		if err := validateResourceName(name); err != nil {
+			return nil, fmt.Errorf("invalid template path %q: %w", path, err)
+		}
 		resources[name] = content
 		resourceNames = append(resourceNames, name)
 	}

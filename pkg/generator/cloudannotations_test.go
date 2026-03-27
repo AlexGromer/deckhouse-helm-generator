@@ -396,6 +396,39 @@ func TestCloudAnnotations_MultipleServices_AllAnnotated(t *testing.T) {
 	}
 }
 
+// ============================================================
+// Section 8: Idempotency — no double annotations block
+// ============================================================
+
+func TestInjectAnnotations_Idempotent_NoDoubleBlock(t *testing.T) {
+	// Inject annotations twice on the same template and verify only one
+	// "annotations:" section exists (no double block).
+	tmpl := cloudIngressTemplate
+
+	firstAnnotations := map[string]string{
+		"first-key": "first-value",
+	}
+	secondAnnotations := map[string]string{
+		"second-key": "second-value",
+	}
+
+	result := injectAnnotationsIntoTemplate(tmpl, firstAnnotations)
+	result = injectAnnotationsIntoTemplate(result, secondAnnotations)
+
+	count := strings.Count(result, "  annotations:")
+	if count != 1 {
+		t.Errorf("expected exactly 1 'annotations:' block, got %d.\nFull output:\n%s", count, result)
+	}
+
+	// Both keys must be present.
+	if !strings.Contains(result, "first-key: first-value") {
+		t.Error("expected 'first-key: first-value' in merged annotations")
+	}
+	if !strings.Contains(result, "second-key: second-value") {
+		t.Error("expected 'second-key: second-value' in merged annotations")
+	}
+}
+
 func TestCloudAnnotations_NilChart_ReturnsNil(t *testing.T) {
 	config := CloudAnnotationConfig{
 		Provider: CloudAWS,

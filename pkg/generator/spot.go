@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -149,14 +150,56 @@ func InjectSpotConfig(chart *types.GeneratedChart, config SpotConfig) *types.Gen
 	}
 }
 
-// injectTolerationsIntoTemplate appends a tolerations section to a Kubernetes
-// workload template YAML string.
+// injectTolerationsIntoTemplate inserts a tolerations section into the pod spec
+// of a Kubernetes workload template YAML string. It finds the `containers:` key
+// inside the pod spec and inserts tolerations just before it at the same indentation.
+// If tolerations already exist in the template, the function is idempotent and returns
+// the template unchanged. If `containers:` is not found, falls back to appending at the end.
 func injectTolerationsIntoTemplate(template string, tolerations []map[string]interface{}) string {
 	if len(tolerations) == 0 {
 		return template
 	}
 
+	// Idempotency: skip if tolerations already present.
+	if strings.Contains(template, "tolerations:") {
+		return template
+	}
+
+	// Find `containers:` in the pod spec to determine insertion point and indentation.
+	// The regex captures the newline, leading whitespace, and the containers key.
+	// Note: matches the FIRST occurrence, which is correct for Deployment/StatefulSet/DaemonSet
+	// (spec.template.spec.containers). `initContainers:` does not match this pattern.
+	// For CronJob (nested jobTemplate.spec.template.spec.containers), only the first is patched.
+	re := regexp.MustCompile(`(\n)([ \t]+)(containers:\s*\n)`)
+	loc := re.FindStringIndex(template)
+	match := re.FindStringSubmatch(template)
+
+	if loc != nil && match != nil {
+		indent := match[2] // indentation of `containers:`
+
+		// Build tolerations block at the same indentation level.
+		var lines []string
+		lines = append(lines, indent+"tolerations:")
+		for _, tol := range tolerations {
+			key, _ := tol["key"].(string)
+			value, _ := tol["value"].(string)
+			effect, _ := tol["effect"].(string)
+			operator, _ := tol["operator"].(string)
+			lines = append(lines, indent+"- key: "+key)
+			lines = append(lines, indent+"  operator: "+operator)
+			lines = append(lines, indent+"  value: "+value)
+			lines = append(lines, indent+"  effect: "+effect)
+		}
+
+		tolerationsBlock := strings.Join(lines, "\n")
+		// Insert before `containers:` (after the preceding newline).
+		insertPos := loc[0] + 1 // after the \n
+		return template[:insertPos] + tolerationsBlock + "\n" + template[insertPos:]
+	}
+
+	// Fallback: containers: not found — append at end (may produce invalid YAML).
 	var lines []string
+	lines = append(lines, "      # FALLBACK: containers: not found in pod spec")
 	lines = append(lines, "      tolerations:")
 	for _, tol := range tolerations {
 		key, _ := tol["key"].(string)

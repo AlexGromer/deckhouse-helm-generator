@@ -254,6 +254,50 @@ func TestMonorepo_ChartNamesSanitized(t *testing.T) {
 }
 
 // ============================================================
+// Test: sanitizeChartName strips semicolons (injection vector)
+// ============================================================
+
+func TestSanitizeChartName_StripsSemicolon(t *testing.T) {
+	got := sanitizeChartName("my;chart")
+	if got != "mychart" {
+		t.Errorf("expected %q, got %q", "mychart", got)
+	}
+}
+
+// ============================================================
+// Test: sanitizeChartName strips $() command substitution
+// ============================================================
+
+func TestSanitizeChartName_StripsDollarParen(t *testing.T) {
+	got := sanitizeChartName("my$(cmd)chart")
+	if got != "mycmdchart" {
+		t.Errorf("expected %q, got %q", "mycmdchart", got)
+	}
+}
+
+// ============================================================
+// Test: sanitizeChartName strips tabs
+// ============================================================
+
+func TestSanitizeChartName_StripsTabs(t *testing.T) {
+	got := sanitizeChartName("my\tchart")
+	if got != "mychart" {
+		t.Errorf("expected %q, got %q", "mychart", got)
+	}
+}
+
+// ============================================================
+// Test: sanitizeChartName preserves valid names
+// ============================================================
+
+func TestSanitizeChartName_PreservesValid(t *testing.T) {
+	got := sanitizeChartName("my-chart-123")
+	if got != "my-chart-123" {
+		t.Errorf("expected %q, got %q", "my-chart-123", got)
+	}
+}
+
+// ============================================================
 // Test 10: RootDir matches chartName argument
 // ============================================================
 
@@ -271,5 +315,62 @@ func TestMonorepo_RootDirMatchesChartName(t *testing.T) {
 
 	if layout.RootDir != "myproject" {
 		t.Errorf("expected RootDir == 'myproject', got %q", layout.RootDir)
+	}
+}
+
+// ============================================================
+// Test HS-4a: CI workflow output is safe after HS-2 sanitization fix
+// ============================================================
+
+func TestMonorepoCIWorkflow_NoInjection(t *testing.T) {
+	// Chart name containing shell injection characters
+	chart := makeChart("my;echo pwned", map[string]string{
+		"templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test\n",
+	})
+
+	layout, err := GenerateMonorepoLayout([]*types.GeneratedChart{chart}, "injtest")
+	if err != nil {
+		t.Fatalf("GenerateMonorepoLayout returned unexpected error: %v", err)
+	}
+
+	// The CI workflow must NOT contain the raw injection payload
+	if strings.Contains(layout.CIWorkflow, ";") {
+		t.Errorf("CI workflow contains semicolon — injection not sanitized:\n%s", layout.CIWorkflow)
+	}
+	if strings.Contains(layout.CIWorkflow, "echo pwned") {
+		t.Errorf("CI workflow contains raw injection payload 'echo pwned':\n%s", layout.CIWorkflow)
+	}
+	if strings.Contains(layout.CIWorkflow, "my;echo") {
+		t.Errorf("CI workflow contains unsanitized chart name:\n%s", layout.CIWorkflow)
+	}
+
+	// The sanitized name should be present instead
+	if !strings.Contains(layout.CIWorkflow, "myecho") {
+		t.Errorf("CI workflow missing sanitized chart name 'myecho':\n%s", layout.CIWorkflow)
+	}
+}
+
+// ============================================================
+// Test HS-4b: CI workflow produces valid helm lint line for normal chart
+// ============================================================
+
+func TestMonorepoCIWorkflow_ValidOutput(t *testing.T) {
+	chart := makeChart("my-service", map[string]string{
+		"templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-service\n",
+	})
+
+	layout, err := GenerateMonorepoLayout([]*types.GeneratedChart{chart}, "proj")
+	if err != nil {
+		t.Fatalf("GenerateMonorepoLayout returned unexpected error: %v", err)
+	}
+
+	expectedLine := "run: helm lint charts/my-service"
+	if !strings.Contains(layout.CIWorkflow, expectedLine) {
+		t.Errorf("CI workflow missing expected line %q:\n%s", expectedLine, layout.CIWorkflow)
+	}
+
+	expectedName := "name: lint-my-service"
+	if !strings.Contains(layout.CIWorkflow, expectedName) {
+		t.Errorf("CI workflow missing expected step name %q:\n%s", expectedName, layout.CIWorkflow)
 	}
 }

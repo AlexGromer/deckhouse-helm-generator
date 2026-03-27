@@ -125,8 +125,14 @@ func generateCloudValues(config CloudAnnotationConfig) map[string]interface{} {
 	}
 }
 
-// injectAnnotationsIntoTemplate inserts an annotations block immediately after the
-// "metadata:\n  name: <value>" section in a YAML template string.
+// annotationsLineRegex matches an existing "  annotations:" line.
+var annotationsLineRegex = regexp.MustCompile(`(?m)^  annotations:\s*$`)
+
+// injectAnnotationsIntoTemplate inserts annotation key-value pairs into a YAML
+// template. It is idempotent: if an "  annotations:" block already exists right
+// after "metadata:\n  name: …", the new keys are merged into that block instead
+// of creating a duplicate.
+//
 // Annotation keys are sorted alphabetically for deterministic output.
 // This shared helper is used by both cloudannotations and ingressdetect injection paths.
 func injectAnnotationsIntoTemplate(template string, annotations map[string]string) string {
@@ -141,6 +147,40 @@ func injectAnnotationsIntoTemplate(template string, annotations map[string]strin
 	}
 	sort.Strings(keys)
 
+	// Check whether the template already contains an annotations block after
+	// the metadata/name section. We look for the pattern:
+	//   metadata:
+	//     name: <value>
+	//   annotations:
+	//     <existing keys>
+	// Match existing annotations block (handles both expanded and compact `annotations: {}` forms).
+	existingAnnotationsRe := regexp.MustCompile(
+		`(metadata:\s*\n\s+name:\s*\S+\n)(  annotations:\s*(?:\{\})?\s*\n(    \S+:.*\n)*)`,
+	)
+
+	if loc := existingAnnotationsRe.FindStringIndex(template); loc != nil {
+		// An annotations block already exists — append new keys to it.
+		match := existingAnnotationsRe.FindStringSubmatch(template)
+		existingBlock := match[0]
+
+		var newLines []string
+		for _, k := range keys {
+			// Only add the key if it is not already present in the block.
+			if !strings.Contains(existingBlock, k+":") {
+				newLines = append(newLines, fmt.Sprintf("    %s: %s", k, annotations[k]))
+			}
+		}
+
+		if len(newLines) == 0 {
+			return template // all keys already present
+		}
+
+		insertion := strings.Join(newLines, "\n") + "\n"
+		// Insert the new annotation lines at the end of the existing annotations block.
+		return template[:loc[1]] + insertion + template[loc[1]:]
+	}
+
+	// No existing annotations block — insert a new one after metadata/name.
 	var lines []string
 	lines = append(lines, "  annotations:")
 	for _, k := range keys {
