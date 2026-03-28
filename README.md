@@ -657,11 +657,6 @@ func RegisterAll(r *processor.Registry) {
 }
 ```
 
-## Ограничения и известные проблемы
-
-- Cluster Extractor (извлечение из live кластера) ещё не реализован
-- GitOps Extractor ещё не реализован
-
 ## Дорожная карта
 
 ### Выполнено
@@ -669,21 +664,20 @@ func RegisterAll(r *processor.Registry) {
 - **Phase 2**: 12 архитектурных генераторов (3 tier'а: infrastructure, detection, advanced)
 - **Phase 2.5**: 8 генераторов безопасности (PSS, RBAC, resource limits, image security, TLS, audit policy, admission policy, supply chain)
 - **Phase 3**: Deckhouse CRD процессоры (InstanceClass, GRPCRoute, TLSRoute, Canary), module scaffold, compatibility
-- **Phase 4**: Инфраструктура — hooks генератор, Deckhouse compatibility checker
+- **Phase 4**: Cluster Extractor (client-go), GitOps Extractor (go-git, ArgoCD/Flux), Multi-Source Merge (dedup, conflict resolution)
+- **Phase 5** (partial): Auto-Fix Engine (`dhg fix`), Generic CRD processing, DOT Graph (`dhg graph`), Migration (`dhg migrate`)
 
 ### Запланировано
 | Направление | Описание | Статус |
 |-------------|----------|--------|
-| Cluster Extractor | Генерация чартов из live K8s кластера через client-go | Планируется |
-| GitOps Extractor | Генерация чартов из Git репозиториев (ArgoCD/Flux) | Планируется |
-| Auto-Fix Engine | Авто-добавление securityContext, resource limits, health probes, PDB | Планируется |
-| CRD Support | Обработка произвольных CRD с извлечением схемы | Планируется |
-| Миграция | Обнаружение drift, планы миграции, обратная совместимость values | Планируется |
-| Secret Management | External Secrets Operator, Sealed Secrets, Vault CSI/Agent | Планируется |
-| Service Mesh | Istio, Linkerd, OpenTelemetry | Исследование |
-| Операторы БД | CloudNativePG, Percona, Redis Enterprise | Исследование |
-| Compliance Reports | Генерация отчётов соответствия PSS/CIS Benchmark | Планируется |
-| Multi-Cluster | Поддержка мультикластерных конфигураций и federation | Исследование |
+| Smart Analysis | Cost estimation, right-sizing, compliance-as-code, progressive delivery | Планируется |
+| Secret Management | External Secrets Operator, Sealed Secrets, Vault CSI/Agent, SOPS | Планируется |
+| Service Mesh | Istio (VirtualService, DestinationRule, AuthorizationPolicy), Linkerd | Планируется |
+| Observability | OpenTelemetry auto-instrumentation, SLO-based alerting (Sloth), Grafana dashboards | Планируется |
+| Performance | Parallel processing (goroutines), memory optimization, benchmarks | Планируется |
+| Операторы БД | CloudNativePG, Percona, Redis Enterprise, ClickHouse | Исследование |
+| AI/ML Workloads | Kubeflow, KServe, GPU scheduling, distributed training | Исследование |
+| Multi-Cluster | Мультикластерные конфигурации и federation | Исследование |
 
 ## Участие в разработке
 

@@ -85,3 +85,17 @@ docker pull ghcr.io/alexgromer/dhg:0.7.0
 # Binary (Linux amd64)
 curl -sL https://github.com/AlexGromer/deckhouse-helm-generator/releases/download/v0.7.0/dhg_Linux_x86_64.tar.gz | tar xz
 ```
+
+---
+
+## Post-Release Development (v0.7.3+)
+
+After the v0.7.0-v0.7.3 release cycle (code review #29 fully resolved, Go 1.26 upgrade), significant new functionality was merged:
+
+- **Phase 4 — Source Expansion (14 tasks):** Cluster Extractor via `client-go` (auth, filtering, pagination, secret handling), GitOps Extractor via `go-git` (clone, auth, YAML discovery, Kustomize overlay parsing, ArgoCD/Flux manifest parsing), Multi-Source Merger (resource deduplication, conflict resolution, source priority).
+- **Phase 5.1 — Auto-Fix Engine (7 tasks):** SecurityContext auto-add, resource limits heuristics, health probe detection, PDB auto-generation, `dhg fix` command, PSS auto-fix, graceful shutdown injection.
+- **Phase 5.2 — Generic CRD (3 tasks):** Dynamic CRD processing, OpenAPI schema extraction, `crds/` directory support.
+- **Phase 5.3 — Dependency Analysis (3 tasks):** DOT/Graphviz graph generation (`dhg graph`), circular dependency detection, decomposition recommendations.
+- **Phase 5.4 — Migration Support (3 tasks):** Drift detection (`dhg diff --existing-chart`), migration plan generation (`dhg migrate`), values backward compatibility.
+
+These changes total ~4,000 LOC of new functionality and will be included in the upcoming v0.8.0 release.
