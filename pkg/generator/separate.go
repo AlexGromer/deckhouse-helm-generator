@@ -94,7 +94,7 @@ func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Opti
 	helpers := helm.GenerateHelpers(chartName)
 
 	// Generate NOTES.txt.
-	notes := helm.GenerateNOTES(chartName, []string{chartName})
+	notes := helm.GenerateNOTES(chartName, []string{chartName}, helm.NOTESContext{})
 
 	return &types.GeneratedChart{
 		Name:      chartName,

@@ -864,6 +864,199 @@ func makeGroupForEnv(name string, resources ...*types.ProcessedResource) *Servic
 	}
 }
 
+// TestWorkload_WorkerDevProfile — Worker dev: replicas=1, debug logging
+func TestWorkload_WorkerDevProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(3), WorkloadWorker)
+
+	devData, ok := result["values-dev.yaml"]
+	if !ok {
+		t.Fatal("values-dev.yaml missing from worker workload result")
+	}
+	parsed := parseEnvYAML(t, devData)
+
+	if toInt(parsed["replicaCount"]) != 1 {
+		t.Errorf("worker dev replicas: got %v, want 1", parsed["replicaCount"])
+	}
+	if parsed["logLevel"] != "debug" {
+		t.Errorf("worker dev logLevel: got %v, want debug", parsed["logLevel"])
+	}
+}
+
+// TestWorkload_WorkerStagingProfile — Worker staging: replicas=2
+func TestWorkload_WorkerStagingProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadWorker)
+
+	stagingData, ok := result["values-staging.yaml"]
+	if !ok {
+		t.Fatal("values-staging.yaml missing from worker workload result")
+	}
+	parsed := parseEnvYAML(t, stagingData)
+
+	if toInt(parsed["replicaCount"]) != 2 {
+		t.Errorf("worker staging replicas: got %v, want 2", parsed["replicaCount"])
+	}
+}
+
+// TestWorkload_WorkerProdProfile — Worker prod: replicas=3, PDB minAvailable=1, no HPA
+func TestWorkload_WorkerProdProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadWorker)
+
+	prodData, ok := result["values-prod.yaml"]
+	if !ok {
+		t.Fatal("values-prod.yaml missing from worker workload result")
+	}
+	parsed := parseEnvYAML(t, prodData)
+
+	// Replicas
+	if toInt(parsed["replicaCount"]) != 3 {
+		t.Errorf("worker prod replicas: got %v, want 3", parsed["replicaCount"])
+	}
+
+	// PDB minAvailable=1
+	pdb, hasPDB := parsed["podDisruptionBudget"]
+	if !hasPDB {
+		t.Fatal("worker prod missing podDisruptionBudget section")
+	}
+	pdbMap, ok := pdb.(map[string]interface{})
+	if !ok {
+		t.Fatal("podDisruptionBudget is not a map")
+	}
+	if pdbMap["enabled"] != true {
+		t.Error("worker prod PDB must be enabled")
+	}
+	if toInt(pdbMap["minAvailable"]) != 1 {
+		t.Errorf("worker prod PDB minAvailable: got %v, want 1", pdbMap["minAvailable"])
+	}
+
+	// No HPA — workers scale based on queue depth, not CPU
+	if hpa, hasHPA := parsed["autoscaling"]; hasHPA {
+		if hpaMap, ok := hpa.(map[string]interface{}); ok {
+			if hpaMap["enabled"] == true {
+				t.Error("worker prod profile must not have HPA enabled")
+			}
+		}
+	}
+}
+
+// TestWorkload_CacheProdProfile — Cache prod: replicas=2, PDB minAvailable=1, memory limits
+func TestWorkload_CacheProdProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadCache)
+
+	prodData, ok := result["values-prod.yaml"]
+	if !ok {
+		t.Fatal("values-prod.yaml missing from cache workload result")
+	}
+	parsed := parseEnvYAML(t, prodData)
+
+	// Cache prod replicas=2
+	if toInt(parsed["replicaCount"]) != 2 {
+		t.Errorf("cache prod replicas: got %v, want 2", parsed["replicaCount"])
+	}
+
+	// PDB minAvailable=1
+	pdb, hasPDB := parsed["podDisruptionBudget"]
+	if !hasPDB {
+		t.Fatal("cache prod missing podDisruptionBudget section")
+	}
+	pdbMap, ok := pdb.(map[string]interface{})
+	if !ok {
+		t.Fatal("podDisruptionBudget is not a map")
+	}
+	if pdbMap["enabled"] != true {
+		t.Error("cache prod PDB must be enabled")
+	}
+	if toInt(pdbMap["minAvailable"]) != 1 {
+		t.Errorf("cache prod PDB minAvailable: got %v, want 1", pdbMap["minAvailable"])
+	}
+
+	// Memory limits must be present (cache is memory-bound)
+	resources, hasResources := parsed["resources"]
+	if !hasResources {
+		t.Fatal("cache prod profile missing resources section")
+	}
+	resMap, ok := resources.(map[string]interface{})
+	if !ok {
+		t.Fatal("resources is not a map")
+	}
+	limits, hasLimits := resMap["limits"]
+	if !hasLimits {
+		t.Fatal("cache prod resources missing limits")
+	}
+	limitsMap, ok := limits.(map[string]interface{})
+	if !ok {
+		t.Fatal("limits is not a map")
+	}
+	if _, hasMemory := limitsMap["memory"]; !hasMemory {
+		t.Error("cache prod resources.limits must have memory")
+	}
+}
+
+// TestWorkload_CacheDevProfile — Cache dev: replicas=1, debug logging
+func TestWorkload_CacheDevProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(3), WorkloadCache)
+
+	devData, ok := result["values-dev.yaml"]
+	if !ok {
+		t.Fatal("values-dev.yaml missing from cache workload result")
+	}
+	parsed := parseEnvYAML(t, devData)
+
+	if toInt(parsed["replicaCount"]) != 1 {
+		t.Errorf("cache dev replicas: got %v, want 1", parsed["replicaCount"])
+	}
+	if parsed["logLevel"] != "debug" {
+		t.Errorf("cache dev logLevel: got %v, want debug", parsed["logLevel"])
+	}
+}
+
+// TestWorkload_CacheStagingProfile — Cache staging: replicas=2
+func TestWorkload_CacheStagingProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadCache)
+
+	stagingData, ok := result["values-staging.yaml"]
+	if !ok {
+		t.Fatal("values-staging.yaml missing from cache workload result")
+	}
+	parsed := parseEnvYAML(t, stagingData)
+
+	if toInt(parsed["replicaCount"]) != 2 {
+		t.Errorf("cache staging replicas: got %v, want 2", parsed["replicaCount"])
+	}
+}
+
+// TestWorkload_DatabaseDevProfile — Database dev: replicas=1, debug logging
+func TestWorkload_DatabaseDevProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(3), WorkloadDatabase)
+
+	devData, ok := result["values-dev.yaml"]
+	if !ok {
+		t.Fatal("values-dev.yaml missing from database workload result")
+	}
+	parsed := parseEnvYAML(t, devData)
+
+	if toInt(parsed["replicaCount"]) != 1 {
+		t.Errorf("database dev replicas: got %v, want 1", parsed["replicaCount"])
+	}
+	if parsed["logLevel"] != "debug" {
+		t.Errorf("database dev logLevel: got %v, want debug", parsed["logLevel"])
+	}
+}
+
+// TestWorkload_DatabaseStagingProfile — Database staging: replicas=2
+func TestWorkload_DatabaseStagingProfile(t *testing.T) {
+	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadDatabase)
+
+	stagingData, ok := result["values-staging.yaml"]
+	if !ok {
+		t.Fatal("values-staging.yaml missing from database workload result")
+	}
+	parsed := parseEnvYAML(t, stagingData)
+
+	if toInt(parsed["replicaCount"]) != 2 {
+		t.Errorf("database staging replicas: got %v, want 2", parsed["replicaCount"])
+	}
+}
+
 // T2-LR-5: Redis + PVC disambiguation test
 
 func TestDetectWorkloadType_RedisWithPVC_IsNotCache(t *testing.T) {

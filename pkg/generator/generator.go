@@ -53,6 +53,17 @@ type Options struct {
 	// DeckhouseModule enables Deckhouse module scaffold generation
 	// (openapi/, images/, hooks/, helm_lib dependency).
 	DeckhouseModule bool
+
+	// TemplateStyle selects the template output style ("standard" or "helm").
+	TemplateStyle string
+
+	// ValuesFlat generates values.yaml with inline dot-notation path comments
+	// for easier --set reference (e.g., "# image.repository").
+	ValuesFlat bool
+
+	// IncludeHooks generates Helm lifecycle hook Job templates
+	// (pre-upgrade, post-install, pre-delete).
+	IncludeHooks bool
 }
 
 // Generator generates Helm charts from a resource graph.

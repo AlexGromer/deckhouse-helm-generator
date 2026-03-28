@@ -212,6 +212,11 @@ func GenerateIngressAnnotations(controller IngressController, features []Ingress
 			}
 		}
 
+	case ControllerIstio:
+		// Istio uses VirtualService/Gateway CRDs, not Ingress annotations.
+		// Annotation-based configuration is not applicable for Istio.
+		// TODO: Generate VirtualService templates from Ingress resources.
+
 	default:
 		// Unknown controller: return only the generic class annotation.
 		annotations["kubernetes.io/ingress.class"] = "nginx" // safe default fallback

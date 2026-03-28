@@ -61,6 +61,9 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	// Sort service names for consistent output
 	sort.Strings(serviceNames)
 
+	// TODO: apply template style variants (standard vs helm-specific functions)
+	// based on opts.TemplateStyle
+
 	// Build templates map
 	templates := make(map[string]string)
 	for _, group := range graph.Groups {
@@ -75,7 +78,13 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	chartYAML := helm.GenerateChartYAML(chartMeta)
 
 	// Generate values.yaml
-	valuesYAML, err := valuesBuilder.Build()
+	var valuesYAML string
+	var err error
+	if opts.ValuesFlat {
+		valuesYAML, err = valuesBuilder.BuildFlat()
+	} else {
+		valuesYAML, err = valuesBuilder.Build()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to build values.yaml: %w", err)
 	}
@@ -102,7 +111,7 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	}
 
 	// Generate NOTES.txt
-	notes := helm.GenerateNOTES(opts.ChartName, serviceNames)
+	notes := helm.GenerateNOTES(opts.ChartName, serviceNames, helm.NOTESContext{})
 
 	// Generate values.schema.json if requested
 	var valuesSchema string
@@ -126,6 +135,14 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	if opts.IncludeTests {
 		testFiles := GenerateHelmTests(chart)
 		for path, content := range testFiles {
+			chart.Templates[path] = content
+		}
+	}
+
+	// Generate Helm lifecycle hook Job templates if requested
+	if opts.IncludeHooks {
+		hookTemplates := GenerateHelmHooks(chart)
+		for path, content := range hookTemplates {
 			chart.Templates[path] = content
 		}
 	}

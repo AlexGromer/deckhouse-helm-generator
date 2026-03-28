@@ -78,6 +78,10 @@ func GenerateSpotPreStopHook(gracePeriod int) map[string]interface{} {
 // For low replica counts (<=2), minAvailable is set to 1.
 // For higher replica counts (>2), minAvailable is set to "50%".
 func GenerateSpotPDB(appName string, replicas int) string {
+	if replicas <= 0 {
+		replicas = 1 // safe default for invalid input
+	}
+
 	var minAvailable string
 	if replicas <= 2 {
 		minAvailable = "minAvailable: 1"
@@ -104,6 +108,10 @@ spec:
 // For low replica counts (<=2), minAvailable is set to 1.
 // For higher replica counts (>2), minAvailable is set to "50%".
 func GenerateSpotPDBHelm(chartName string, replicas int) string {
+	if replicas <= 0 {
+		replicas = 1 // safe default for invalid input
+	}
+
 	var minAvailable string
 	if replicas <= 2 {
 		minAvailable = "minAvailable: 1"

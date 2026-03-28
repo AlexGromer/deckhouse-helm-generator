@@ -107,6 +107,8 @@ func TestNewGenerateCmd_Flags(t *testing.T) {
 		"verbose",
 		"env-values",
 		"deckhouse-module",
+		"template-style",
+		"values-flat",
 	}
 
 	for _, name := range expectedFlags {
@@ -591,6 +593,122 @@ func TestNamespaceResources_SkipsDefaultNPWhenAutoNPExists(t *testing.T) {
 		for k := range templates {
 			t.Logf("  template: %s", k)
 		}
+	}
+}
+
+// ── TestGenerateCmd_TemplateStyleFlag ────────────────────────────────────────
+
+func TestGenerateCmd_TemplateStyleFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-deploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "deploy.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default value ("standard") should be accepted
+	_, err := executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--template-style", "standard",
+		"--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("expected no error for --template-style standard, got: %v", err)
+	}
+
+	// "helm" should be accepted
+	_, err = executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--template-style", "helm",
+		"--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("expected no error for --template-style helm, got: %v", err)
+	}
+
+	// Invalid value should return error
+	_, err = executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--template-style", "invalid",
+		"--dry-run",
+	)
+	if err == nil {
+		t.Fatal("expected error for --template-style invalid, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown template style") {
+		t.Errorf("expected error to mention 'unknown template style', got: %v", err)
+	}
+}
+
+// ── TestGenerateCmd_ValuesFlatFlag ───────────────────────────────────────────
+
+func TestGenerateCmd_ValuesFlatFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-deploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "deploy.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// --values-flat should be accepted without error
+	_, err := executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--values-flat",
+		"--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("expected no error for --values-flat, got: %v", err)
+	}
+
+	// Without --values-flat should also work (default behavior)
+	_, err = executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--dry-run",
+	)
+	if err != nil {
+		t.Fatalf("expected no error without --values-flat, got: %v", err)
 	}
 }
 
