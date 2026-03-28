@@ -1,48 +1,48 @@
 ---
-name: Bug Report
-about: Report a bug to help us improve
+name: Отчёт об ошибке
+about: Сообщите об ошибке, чтобы помочь нам стать лучше
 title: "[BUG] "
 labels: bug
 assignees: AlexGromer
 ---
 
-## Description
+## Описание
 
-A clear and concise description of the bug.
+Чёткое и краткое описание ошибки.
 
-## Steps to Reproduce
+## Шаги для воспроизведения
 
-1. Run `dhg ...`
-2. With input file `...`
-3. See error
+1. Запустите `dhg ...`
+2. С входным файлом `...`
+3. Появляется ошибка
 
-## Expected Behavior
+## Ожидаемое поведение
 
-What you expected to happen.
+Что вы ожидали увидеть.
 
-## Actual Behavior
+## Фактическое поведение
 
-What actually happened. Include error messages if any.
+Что произошло на самом деле. Включите сообщения об ошибках, если они есть.
 
-## Environment
+## Окружение
 
-- DHG version: `dhg version`
-- Go version: `go version`
-- OS: (e.g., Ubuntu 22.04, macOS 14)
-- Helm version (if relevant): `helm version`
+- Версия DHG: `dhg version`
+- Версия Go: `go version`
+- ОС: (например, Ubuntu 22.04, macOS 14)
+- Версия Helm (если применимо): `helm version`
 
-## Input Resources
-
-```yaml
-# Paste relevant Kubernetes manifests (redact sensitive data)
-```
-
-## Generated Output
+## Входные ресурсы
 
 ```yaml
-# Paste generated Helm chart output (if any)
+# Вставьте соответствующие Kubernetes-манифесты (скройте конфиденциальные данные)
 ```
 
-## Additional Context
+## Сгенерированный результат
 
-Add any other context about the problem here.
+```yaml
+# Вставьте сгенерированный вывод Helm-чарта (если есть)
+```
+
+## Дополнительный контекст
+
+Добавьте любую другую информацию о проблеме.

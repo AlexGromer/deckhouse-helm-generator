@@ -1,65 +1,65 @@
-# Security Policy
+# Политика безопасности
 
-## Supported Versions
+## Поддерживаемые версии
 
-| Version | Supported          |
+| Версия  | Поддержка          |
 |---------|--------------------|
 | 0.5.x   | :white_check_mark: |
 | 0.4.x   | :white_check_mark: |
 | < 0.4   | :x:                |
 
-## Reporting a Vulnerability
+## Сообщение об уязвимости
 
-If you discover a security vulnerability in this project, please report it responsibly.
+Если вы обнаружили уязвимость безопасности в этом проекте, пожалуйста, сообщите о ней ответственно.
 
-**Do NOT open a public GitHub issue for security vulnerabilities.**
+**НЕ открывайте публичный GitHub issue для уязвимостей безопасности.**
 
-### How to Report
+### Как сообщить
 
-1. **Email:** Send details to [alexei.pape@yandex.ru](mailto:alexei.pape@yandex.ru)
-2. **Subject:** `[SECURITY] deckhouse-helm-generator: <brief description>`
-3. **Include:**
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Affected versions
-   - Potential impact
-   - Suggested fix (if any)
+1. **Email:** Отправьте подробности на [alexei.pape@yandex.ru](mailto:alexei.pape@yandex.ru)
+2. **Тема письма:** `[SECURITY] deckhouse-helm-generator: <краткое описание>`
+3. **Включите:**
+   - Описание уязвимости
+   - Шаги для воспроизведения
+   - Затронутые версии
+   - Потенциальное воздействие
+   - Предлагаемое исправление (при наличии)
 
-### Response Timeline
+### Сроки реагирования
 
-| Action | Timeline |
-|--------|----------|
-| Acknowledgment | Within 48 hours |
-| Initial assessment | Within 7 days |
-| Fix release | Within 30 days (critical: 7 days) |
+| Действие | Срок |
+|----------|------|
+| Подтверждение получения | В течение 48 часов |
+| Первоначальная оценка | В течение 7 дней |
+| Выпуск исправления | В течение 30 дней (критические: 7 дней) |
 
-### What to Expect
+### Чего ожидать
 
-- You will receive an acknowledgment within 48 hours
-- We will work with you to understand and validate the issue
-- A fix will be developed and tested privately
-- Credit will be given in the release notes (unless you prefer anonymity)
-- A CVE will be requested if applicable
+- Вы получите подтверждение получения в течение 48 часов
+- Мы будем работать с вами для понимания и подтверждения проблемы
+- Исправление будет разработано и протестировано в закрытом режиме
+- Упоминание в примечаниях к релизу будет предоставлено (если вы не предпочитаете анонимность)
+- При необходимости будет запрошен CVE
 
-### Scope
+### Область действия
 
-The following are in scope:
-- Code in this repository
-- Dependencies used by this project
-- CI/CD pipeline security
-- Container images published to GHCR
+В область действия входят:
+- Код в этом репозитории
+- Зависимости, используемые проектом
+- Безопасность CI/CD-пайплайна
+- Образы контейнеров, опубликованные в GHCR
 
-The following are out of scope:
-- Third-party services and infrastructure
-- Social engineering attacks
-- Denial of service attacks
+Вне области действия:
+- Сторонние сервисы и инфраструктура
+- Атаки методами социальной инженерии
+- Атаки типа «отказ в обслуживании»
 
-## Security Practices
+## Практики безопасности
 
-This project follows these security practices:
+В этом проекте применяются следующие практики безопасности:
 
-- **Dependency scanning:** Dependabot monitors Go modules and GitHub Actions
-- **Secret detection:** Gitleaks runs on every PR
-- **Container scanning:** Trivy scans Docker images for vulnerabilities
-- **Code review:** All changes require review before merge
-- **Branch protection:** Force pushes to `main` are prohibited
+- **Сканирование зависимостей:** Dependabot отслеживает Go-модули и GitHub Actions
+- **Обнаружение секретов:** Gitleaks запускается при каждом PR
+- **Сканирование контейнеров:** Trivy проверяет Docker-образы на наличие уязвимостей
+- **Код-ревью:** Все изменения требуют проверки перед слиянием
+- **Защита веток:** Force push в `main` запрещён

@@ -1,16 +1,16 @@
-# Contributing to Deckhouse Helm Generator
+# Участие в разработке Deckhouse Helm Generator
 
-Thank you for your interest in contributing!
+Спасибо за ваш интерес к участию в проекте!
 
-## Getting Started
+## Начало работы
 
-### Prerequisites
+### Требования
 
 - Go 1.22+
 - Make
-- Helm 3.x (for E2E tests)
+- Helm 3.x (для E2E-тестов)
 
-### Setup
+### Настройка окружения
 
 ```bash
 git clone https://github.com/AlexGromer/deckhouse-helm-generator.git
@@ -19,67 +19,67 @@ make build
 make test
 ```
 
-## Development Workflow
+## Рабочий процесс разработки
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Run tests: `make test`
-5. Run linter: `make lint` (or `golangci-lint run`)
-6. Commit with a descriptive message
-7. Push and open a Pull Request
+1. Сделайте форк репозитория
+2. Создайте ветку для функциональности: `git checkout -b feature/my-feature`
+3. Внесите изменения
+4. Запустите тесты: `make test`
+5. Запустите линтер: `make lint` (или `golangci-lint run`)
+6. Сделайте коммит с описательным сообщением
+7. Отправьте изменения и откройте Pull Request
 
-## Code Style
+## Стиль кода
 
-- Follow standard Go conventions (`gofmt`, `goimports`)
-- All exported functions must have comments
-- Use table-driven tests
-- Handle all errors (linter enforces `errcheck`)
+- Следуйте стандартным соглашениям Go (`gofmt`, `goimports`)
+- Все экспортируемые функции должны содержать комментарии
+- Используйте табличные тесты (table-driven tests)
+- Обрабатывайте все ошибки (линтер проверяет `errcheck`)
 
-## Project Structure
+## Структура проекта
 
 ```
-cmd/dhg/          # CLI entry point
+cmd/dhg/          # Точка входа CLI
 pkg/
-  analyzer/       # Relationship detection between K8s resources
-  extractor/      # Extract resources from YAML/directories
-  generator/      # Helm chart generation
-  helm/           # Helm chart model and rendering
-  processor/      # Per-resource-type processing (k8s/, deckhouse/)
+  analyzer/       # Обнаружение связей между ресурсами Kubernetes
+  extractor/      # Извлечение ресурсов из YAML/директорий
+  generator/      # Генерация Helm-чартов
+  helm/           # Модель Helm-чарта и рендеринг
+  processor/      # Обработка по типам ресурсов (k8s/, deckhouse/)
 tests/
-  e2e/            # End-to-end tests with Helm lint
-  integration/    # Integration tests for pipelines
+  e2e/            # Сквозные тесты с Helm lint
+  integration/    # Интеграционные тесты для пайплайнов
 ```
 
-## Adding a New Processor
+## Добавление нового процессора
 
-1. Create `pkg/processor/k8s/<resource>.go` (or `deckhouse/`)
-2. Implement the `Processor` interface
-3. Register in `pkg/processor/registry.go`
-4. Add unit tests in `<resource>_test.go`
-5. Add test fixtures in `pkg/testutil/fixtures/` if needed
+1. Создайте `pkg/processor/k8s/<resource>.go` (или `deckhouse/`)
+2. Реализуйте интерфейс `Processor`
+3. Зарегистрируйте в `pkg/processor/registry.go`
+4. Добавьте модульные тесты в `<resource>_test.go`
+5. При необходимости добавьте тестовые фикстуры в `pkg/testutil/fixtures/`
 
-## Testing
+## Тестирование
 
 ```bash
-make test              # Unit tests
-make test-integration  # Integration tests
-make test-e2e          # End-to-end tests
-make test-all          # All tests
-make coverage          # Coverage report
+make test              # Модульные тесты
+make test-integration  # Интеграционные тесты
+make test-e2e          # Сквозные тесты
+make test-all          # Все тесты
+make coverage          # Отчёт о покрытии
 ```
 
-## Pull Request Guidelines
+## Рекомендации по Pull Request
 
-- Keep PRs focused on a single change
-- Fill in the PR template completely
-- Ensure all CI checks pass
-- Update documentation if behavior changes
-- Add tests for new functionality
+- Делайте PR сфокусированными на одном изменении
+- Полностью заполняйте шаблон PR
+- Убедитесь, что все проверки CI проходят
+- Обновляйте документацию при изменении поведения
+- Добавляйте тесты для новой функциональности
 
-## Commit Messages
+## Сообщения коммитов
 
-Follow conventional commits:
+Следуйте формату Conventional Commits:
 
 ```
 feat: add support for Argo Rollouts
@@ -89,12 +89,12 @@ chore: bump golangci-lint to v1.62
 test: add edge cases for Secret processor
 ```
 
-## Reporting Issues
+## Сообщение о проблемах
 
-- Use [Bug Report](.github/ISSUE_TEMPLATE/bug_report.md) for bugs
-- Use [Feature Request](.github/ISSUE_TEMPLATE/feature_request.md) for features
-- Check existing issues before creating new ones
+- Используйте [Отчёт об ошибке](.github/ISSUE_TEMPLATE/bug_report.md) для багов
+- Используйте [Запрос на функциональность](.github/ISSUE_TEMPLATE/feature_request.md) для новых возможностей
+- Проверьте существующие issues перед созданием новых
 
-## License
+## Лицензия
 
-By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
+Участвуя в проекте, вы соглашаетесь с тем, что ваши вклады будут лицензированы на условиях Apache License 2.0.
