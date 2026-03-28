@@ -49,6 +49,10 @@ var neverWrapKinds = map[string]bool{
 }
 
 // kindRegex extracts the value of the top-level `kind:` field from a YAML document.
+// Uses line-anchored regex which may match kind: inside ConfigMap data blocks or
+// YAML comments. For correctness, use sigs.k8s.io/yaml parsing instead. Current
+// approach is sufficient for generated templates where kind: always appears at
+// document root.
 var kindRegex = regexp.MustCompile(`(?m)^kind:\s*(\S+)`)
 
 // DefaultFeatureFlagConfig returns a FeatureFlagConfig with all six standard
@@ -153,8 +157,12 @@ func InjectFeatureFlags(chart *types.GeneratedChart, config *FeatureFlagConfig) 
 }
 
 // wrapTemplateWithFeatureFlag surrounds templateContent with a Helm feature-flag
-// conditional guard for the given category.
+// conditional guard for the given category.  If the content is already wrapped
+// with a features guard, it is returned unchanged (idempotent).
 func wrapTemplateWithFeatureFlag(templateContent string, category FeatureCategory) string {
+	if strings.HasPrefix(strings.TrimSpace(templateContent), "{{- if .Values.features.") {
+		return templateContent
+	}
 	return fmt.Sprintf("{{- if .Values.features.%s }}\n%s\n{{- end }}", category, templateContent)
 }
 
