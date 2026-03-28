@@ -36,11 +36,14 @@
 
 | Metric | Value |
 |--------|-------|
-| New generators | 12 |
+| New generators (Phase 2) | 12 architecture + 8 security = 20 |
+| New processors (Phase 3) | 4 (InstanceClass, GRPCRoute, TLSRoute, Canary) |
 | New CLI flags | 12 |
+| Total processors | 45+ |
+| Total generator files | 38 |
 | New tests (Phase 2) | 161 (50 + 59 + 52) |
-| Implementation LOC | 2,772 |
-| Test LOC | 4,916 |
+| Implementation LOC | 2,772+ |
+| Test LOC | 4,916+ |
 | Test:impl ratio | 1.78:1 |
 | Total packages green | 14/14 |
 | Coverage | 86%+ |

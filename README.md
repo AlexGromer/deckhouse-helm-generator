@@ -1,6 +1,6 @@
 # Deckhouse Helm Generator (DHG)
 
-![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 [![codecov](https://codecov.io/gh/AlexGromer/deckhouse-helm-generator/graph/badge.svg)](https://codecov.io/gh/AlexGromer/deckhouse-helm-generator)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 
@@ -278,20 +278,21 @@ dhg generate -f ./full-stack --chart-name webapp \
               └───────────────────────┘
 ```
 
-## Поддерживаемые ресурсы (36 процессоров)
+## Поддерживаемые ресурсы (45+ процессоров)
 
-### Стандартные Kubernetes (18 процессоров)
+### Стандартные Kubernetes (22 процессора)
 
 - ✅ **Основные рабочие нагрузки**: Deployment, StatefulSet, DaemonSet
 - ✅ **Сервисы и сеть**: Service, Ingress, NetworkPolicy
 - ✅ **Конфигурация**: ConfigMap, Secret
 - ✅ **Хранилище**: PersistentVolumeClaim
-- ✅ **Автомасштабирование**: HorizontalPodAutoscaler (HPA)
+- ✅ **Автомасштабирование**: HorizontalPodAutoscaler (HPA), VPA
 - ✅ **Бюджет прерываний**: PodDisruptionBudget (PDB)
 - ✅ **Пакетные задачи**: CronJob, Job
 - ✅ **RBAC и идентификация**: ServiceAccount, Role, ClusterRole, RoleBinding, ClusterRoleBinding
+- ✅ **Политики**: PriorityClass, LimitRange, ResourceQuota
 
-### Deckhouse CRD (7 процессоров)
+### Deckhouse CRD (8 процессоров)
 
 - ✅ **ModuleConfig** (`deckhouse.io/v1alpha1`): настройки модулей с version tracking
 - ✅ **IngressNginxController** (`deckhouse.io/v1`): inlet, hostPort/hostWithFailover
@@ -300,6 +301,7 @@ dhg generate -f ./full-stack --chart-name webapp \
 - ✅ **DexAuthenticator** (`deckhouse.io/v1`): applicationDomain, разрешённые группы
 - ✅ **User** (`deckhouse.io/v1`): email, groups, ttl
 - ✅ **Group** (`deckhouse.io/v1`): список участников
+- ✅ **InstanceClass** (`deckhouse.io/v1`): cloud instance specifications
 
 ### Мониторинг (4 процессора)
 
@@ -308,10 +310,12 @@ dhg generate -f ./full-stack --chart-name webapp \
 - ✅ **PrometheusRule** (`monitoring.coreos.com/v1`): группы правил alert/record
 - ✅ **GrafanaDashboard**: ConfigMap с label `grafana_dashboard: "1"`
 
-### Gateway API (2 процессора)
+### Gateway API (4 процессора)
 
 - ✅ **HTTPRoute** (`gateway.networking.k8s.io/v1`): parentRefs, hostnames, rules
 - ✅ **Gateway** (`gateway.networking.k8s.io/v1`): gatewayClassName, listeners, TLS
+- ✅ **GRPCRoute** (`gateway.networking.k8s.io/v1`): gRPC backend routing
+- ✅ **TLSRoute** (`gateway.networking.k8s.io/v1alpha2`): TLS passthrough routing
 
 ### KEDA (2 процессора)
 
@@ -323,9 +327,10 @@ dhg generate -f ./full-stack --chart-name webapp \
 - ✅ **Certificate** (`cert-manager.io/v1`): dnsNames, issuerRef, secretName
 - ✅ **ClusterIssuer** (`cert-manager.io/v1`): ACME, selfSigned, CA
 
-### Argo Rollouts (1 процессор)
+### Argo Rollouts (2 процессора)
 
 - ✅ **Rollout** (`argoproj.io/v1alpha1`): стратегии canary/blueGreen
+- ✅ **Canary** (`flagger.app/v1beta1`): progressive delivery с Flagger
 
 ## Интеграция с Deckhouse
 
@@ -569,7 +574,7 @@ Flags:
 
 ### Требования
 
-- Go 1.22+
+- Go 1.26+
 - make
 - (опционально) Helm 3.x для тестирования результатов
 
@@ -597,7 +602,7 @@ make build-all
 ├── pkg/
 │   ├── extractor/        # Извлечение ресурсов
 │   ├── analyzer/         # Анализ связей
-│   ├── processor/        # Обработка ресурсов (36 процессоров)
+│   ├── processor/        # Обработка ресурсов (45+ процессоров)
 │   │   └── k8s/          # K8s + Deckhouse + Monitoring + Gateway + KEDA + cert-manager + Argo
 │   ├── generator/        # Генерация charts
 │   ├── helm/             # Утилиты Helm
@@ -659,18 +664,16 @@ func RegisterAll(r *processor.Registry) {
 
 ## Дорожная карта
 
-### Текущая версия (v0.7.x)
-- 38+ процессоров K8s ресурсов
-- 4 режима вывода: Universal, Separate, Library, Umbrella
-- 12 генераторов архитектуры: air-gap, namespace governance, auto-NetworkPolicy, multi-tenant, feature flags, cloud annotations (AWS/GCP/Azure), ingress detection, monorepo, spot instances, Kustomize overlays, auto-dependencies
-- Генерация модулей Deckhouse
-- Генерация тестов helm-unittest (--include-tests)
-- 86%+ покрытие тестами
+### Выполнено
+- **Phase 1**: Core pipeline, 45+ процессоров, pattern detectors, CLI (`validate`, `diff`)
+- **Phase 2**: 12 архитектурных генераторов (3 tier'а: infrastructure, detection, advanced)
+- **Phase 2.5**: 8 генераторов безопасности (PSS, RBAC, resource limits, image security, TLS, audit policy, admission policy, supply chain)
+- **Phase 3**: Deckhouse CRD процессоры (InstanceClass, GRPCRoute, TLSRoute, Canary), module scaffold, compatibility
+- **Phase 4**: Инфраструктура — hooks генератор, Deckhouse compatibility checker
 
 ### Запланировано
 | Направление | Описание | Статус |
 |-------------|----------|--------|
-| Безопасность и Compliance | PSS миграция, генерация RBAC, External Secrets | Планируется |
 | Cluster Extractor | Генерация чартов из live K8s кластера через client-go | Планируется |
 | GitOps Extractor | Генерация чартов из Git репозиториев (ArgoCD/Flux) | Планируется |
 | Auto-Fix Engine | Авто-добавление securityContext, resource limits, health probes, PDB | Планируется |
@@ -679,6 +682,8 @@ func RegisterAll(r *processor.Registry) {
 | Secret Management | External Secrets Operator, Sealed Secrets, Vault CSI/Agent | Планируется |
 | Service Mesh | Istio, Linkerd, OpenTelemetry | Исследование |
 | Операторы БД | CloudNativePG, Percona, Redis Enterprise | Исследование |
+| Compliance Reports | Генерация отчётов соответствия PSS/CIS Benchmark | Планируется |
+| Multi-Cluster | Поддержка мультикластерных конфигураций и federation | Исследование |
 
 ## Участие в разработке
 
@@ -694,7 +699,10 @@ Apache License 2.0 — см. [LICENSE](LICENSE).
 
 ## Авторы
 
-- Команда Deckhouse
+- **Alex Gromer** — System Architect, End-to-End Engineer
+  - DevOps/Infrastructure: Deckhouse (K8s), Astra Linux, Java Spring microservices
+  - Systems programming: Go, Rust, C
+  - [GitHub](https://github.com/AlexGromer)
 
 ## Ссылки
 
