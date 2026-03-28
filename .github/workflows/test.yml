@@ -221,10 +221,13 @@ jobs:
 
     - name: Merge coverage profiles
       run: |
-        # Install gocovmerge
-        go install github.com/wadey/gocovmerge@latest
-        # Merge all coverage profiles
-        gocovmerge coverage/coverage*.txt > coverage-merged.txt
+        # Merge Go coverage profiles without external tools.
+        # First file provides the header (mode: set/atomic), remaining
+        # files are appended without their header line.
+        head -1 coverage/coverage-unit.txt > coverage-merged.txt
+        for f in coverage/coverage*.txt; do
+          tail -n +2 "$f" >> coverage-merged.txt
+        done
         # Display coverage
         go tool cover -func=coverage-merged.txt
 
