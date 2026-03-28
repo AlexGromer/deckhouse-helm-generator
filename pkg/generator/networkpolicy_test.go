@@ -526,3 +526,66 @@ func TestAutoNP_GroupNameSpecialChars(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================
+// 2.6.2: Default-Deny NetworkPolicy
+// ============================================================
+
+func TestDefaultDeny_HasDenyAllIngress(t *testing.T) {
+	result := GenerateDefaultDenyPolicy("default")
+
+	if !strings.Contains(result, "kind: NetworkPolicy") {
+		t.Error("expected kind: NetworkPolicy")
+	}
+	if !strings.Contains(result, "name: default-deny-all") {
+		t.Error("expected name: default-deny-all")
+	}
+	if !strings.Contains(result, "podSelector: {}") {
+		t.Error("expected empty podSelector (matches all pods)")
+	}
+	if !strings.Contains(result, "- Ingress") {
+		t.Error("expected Ingress in policyTypes")
+	}
+	if !strings.Contains(result, "- Egress") {
+		t.Error("expected Egress in policyTypes")
+	}
+}
+
+func TestDefaultDeny_AllowsDNS(t *testing.T) {
+	result := GenerateDefaultDenyPolicy("default")
+
+	if !strings.Contains(result, "port: 53") {
+		t.Error("expected DNS port 53 in egress rules")
+	}
+	if !strings.Contains(result, "protocol: UDP") {
+		t.Error("expected UDP protocol for DNS")
+	}
+	if !strings.Contains(result, "protocol: TCP") {
+		t.Error("expected TCP protocol for DNS")
+	}
+	if !strings.Contains(result, "kube-system") {
+		t.Error("expected kube-system namespace for DNS egress")
+	}
+}
+
+func TestDefaultDeny_UsesHelmNamespace(t *testing.T) {
+	result := GenerateDefaultDenyPolicy("my-namespace")
+
+	if !strings.Contains(result, "namespace: {{ .Release.Namespace }}") {
+		t.Error("expected Helm template for namespace")
+	}
+	if strings.Contains(result, "namespace: my-namespace") {
+		t.Error("must NOT contain literal namespace")
+	}
+}
+
+func TestDefaultDeny_EmptyNamespace(t *testing.T) {
+	result := GenerateDefaultDenyPolicy("")
+
+	if !strings.Contains(result, "kind: NetworkPolicy") {
+		t.Error("expected valid NetworkPolicy even with empty namespace")
+	}
+	if !strings.Contains(result, "{{ .Release.Namespace }}") {
+		t.Error("expected Helm template namespace even with empty input")
+	}
+}

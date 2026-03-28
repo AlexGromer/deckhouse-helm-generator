@@ -98,11 +98,11 @@ func TestAddChecker(t *testing.T) {
 
 func TestDefaultAnalyzer_HasDetectorsAndCheckers(t *testing.T) {
 	a := DefaultAnalyzer()
-	if len(a.detectors) != 5 {
-		t.Errorf("DefaultAnalyzer detectors = %d; want 5", len(a.detectors))
+	if len(a.detectors) != 6 {
+		t.Errorf("DefaultAnalyzer detectors = %d; want 6", len(a.detectors))
 	}
-	if len(a.checkers) != 9 {
-		t.Errorf("DefaultAnalyzer checkers = %d; want 9", len(a.checkers))
+	if len(a.checkers) != 10 {
+		t.Errorf("DefaultAnalyzer checkers = %d; want 10", len(a.checkers))
 	}
 }
 
@@ -3712,5 +3712,158 @@ func TestPodSecurityStandardsChecker_NonWorkloadSkipped(t *testing.T) {
 		if p.ID == "BP-PSS-001" {
 			t.Error("Job should not be checked by PodSecurityStandardsChecker")
 		}
+	}
+}
+
+// ── SidecarDetector ─────────────────────────────────────────────────────────
+
+func TestSidecarDetector_EnvoyDetected(t *testing.T) {
+	d := NewSidecarDetector()
+	g := makeGraph()
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{"name": "app", "image": "myapp:latest"},
+		{"name": "envoy", "image": "envoyproxy/envoy:v1.30"},
+	})
+
+	patterns := d.Detect(g)
+	if len(patterns) == 0 {
+		t.Fatal("expected sidecar pattern to be detected for envoy container")
+	}
+	if patterns[0] != PatternSidecar {
+		t.Errorf("expected PatternSidecar, got %s", patterns[0])
+	}
+}
+
+func TestSidecarDetector_FluentBitDetected(t *testing.T) {
+	d := NewSidecarDetector()
+	g := makeGraph()
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{"name": "app", "image": "myapp:latest"},
+		{"name": "fluent-bit", "image": "fluent/fluent-bit:2.0"},
+	})
+
+	patterns := d.Detect(g)
+	if len(patterns) == 0 {
+		t.Fatal("expected sidecar pattern to be detected for fluent-bit container")
+	}
+	if patterns[0] != PatternSidecar {
+		t.Errorf("expected PatternSidecar, got %s", patterns[0])
+	}
+}
+
+func TestSidecarDetector_NoSidecar(t *testing.T) {
+	d := NewSidecarDetector()
+	g := makeGraph()
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{"name": "app", "image": "myapp:latest"},
+	})
+
+	patterns := d.Detect(g)
+	if len(patterns) != 0 {
+		t.Error("expected no sidecar pattern for single-container workload")
+	}
+}
+
+func TestSidecarDetector_ImageMatch(t *testing.T) {
+	d := NewSidecarDetector()
+	g := makeGraph()
+	addWorkloadWithContainers(g, "Deployment", "app", "app", []map[string]interface{}{
+		{"name": "app", "image": "myapp:latest"},
+		{"name": "sidecar", "image": "registry.io/istio-proxy:1.20"},
+	})
+
+	patterns := d.Detect(g)
+	if len(patterns) == 0 {
+		t.Fatal("expected sidecar pattern when image contains istio-proxy")
+	}
+}
+
+// ── TopologySpreadChecker ───────────────────────────────────────────────────
+
+func TestTopologySpreadChecker_RecommendsTSC(t *testing.T) {
+	c := NewTopologySpreadChecker()
+	g := makeGraph()
+	pr := addWorkloadWithContainers(g, "Deployment", "web", "web", []map[string]interface{}{
+		{"name": "web", "image": "nginx:latest"},
+	})
+	pr.Values["replicas"] = int64(3)
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-TSC-001" && !p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected BP-TSC-001 for multi-replica deployment without TSC")
+	}
+}
+
+func TestTopologySpreadChecker_ExistingTSC(t *testing.T) {
+	c := NewTopologySpreadChecker()
+	g := makeGraph()
+	pr := addWorkloadWithContainers(g, "Deployment", "web", "web", []map[string]interface{}{
+		{"name": "web", "image": "nginx:latest"},
+	})
+	pr.Values["replicas"] = int64(3)
+	pr.Values["topologySpreadConstraints"] = []interface{}{
+		map[string]interface{}{
+			"maxSkew":           int64(1),
+			"topologyKey":       "topology.kubernetes.io/zone",
+			"whenUnsatisfiable": "DoNotSchedule",
+		},
+	}
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-TSC-001" {
+			t.Error("should not flag BP-TSC-001 when TSC is properly configured")
+		}
+		if p.ID == "BP-TSC-002" {
+			t.Error("should not flag BP-TSC-002 for valid TSC configuration")
+		}
+	}
+}
+
+func TestTopologySpreadChecker_SingleReplicaIgnored(t *testing.T) {
+	c := NewTopologySpreadChecker()
+	g := makeGraph()
+	addWorkloadWithContainers(g, "Deployment", "web", "web", []map[string]interface{}{
+		{"name": "web", "image": "nginx:latest"},
+	})
+	// replicas defaults to 1
+
+	practices := c.Check(g)
+	for _, p := range practices {
+		if p.ID == "BP-TSC-001" {
+			t.Error("should not recommend TSC for single-replica deployment")
+		}
+	}
+}
+
+func TestTopologySpreadChecker_InvalidMaxSkew(t *testing.T) {
+	c := NewTopologySpreadChecker()
+	g := makeGraph()
+	pr := addWorkloadWithContainers(g, "Deployment", "web", "web", []map[string]interface{}{
+		{"name": "web", "image": "nginx:latest"},
+	})
+	pr.Values["replicas"] = int64(3)
+	pr.Values["topologySpreadConstraints"] = []interface{}{
+		map[string]interface{}{
+			"maxSkew":     int64(10),
+			"topologyKey": "topology.kubernetes.io/zone",
+		},
+	}
+
+	practices := c.Check(g)
+	found := false
+	for _, p := range practices {
+		if p.ID == "BP-TSC-002" && !p.Compliant {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected BP-TSC-002 for invalid maxSkew value")
 	}
 }

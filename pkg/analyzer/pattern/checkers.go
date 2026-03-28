@@ -938,3 +938,111 @@ func (c *PodSecurityStandardsChecker) classifyPSSLevel(resource *types.Processed
 
 	return pssRestricted
 }
+
+// TopologySpreadChecker checks for topology spread constraints best practices.
+type TopologySpreadChecker struct{}
+
+func NewTopologySpreadChecker() *TopologySpreadChecker {
+	return &TopologySpreadChecker{}
+}
+
+func (c *TopologySpreadChecker) Name() string {
+	return "topology-spread"
+}
+
+func (c *TopologySpreadChecker) Category() string {
+	return "High Availability"
+}
+
+func (c *TopologySpreadChecker) Check(graph *types.ResourceGraph) []BestPractice {
+	practices := make([]BestPractice, 0)
+
+	missingTSC := make([]types.ResourceKey, 0)
+	invalidTSC := make([]types.ResourceKey, 0)
+
+	for key, resource := range graph.Resources {
+		if key.GVK.Kind != "Deployment" && key.GVK.Kind != "StatefulSet" {
+			continue
+		}
+
+		// Check replicas — only relevant for multi-replica workloads
+		replicas := int64(1)
+		if r, ok := resource.Values["replicas"].(int64); ok {
+			replicas = r
+		}
+
+		tsc, hasTSC := resource.Values["topologySpreadConstraints"]
+		if !hasTSC || tsc == nil {
+			if replicas > 1 {
+				missingTSC = append(missingTSC, key)
+			}
+			continue
+		}
+
+		// Validate existing TSC
+		tscList, ok := tsc.([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, item := range tscList {
+			constraint, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Validate topologyKey is set
+			topologyKey, _ := constraint["topologyKey"].(string)
+			if topologyKey == "" {
+				invalidTSC = append(invalidTSC, key)
+				break
+			}
+
+			// Validate maxSkew — should be reasonable (1-3)
+			if maxSkew, ok := constraint["maxSkew"].(int64); ok {
+				if maxSkew < 1 || maxSkew > 3 {
+					invalidTSC = append(invalidTSC, key)
+					break
+				}
+			}
+		}
+	}
+
+	if len(missingTSC) > 0 {
+		practices = append(practices, BestPractice{
+			ID:          "BP-TSC-001",
+			Title:       "Missing Topology Spread Constraints",
+			Description: "Multi-replica workloads should define topologySpreadConstraints for even pod distribution",
+			Category:    c.Category(),
+			Severity:    SeverityWarning,
+			Compliant:   false,
+			Recommendations: []string{
+				"Add topologySpreadConstraints with topologyKey: topology.kubernetes.io/zone",
+				"Set maxSkew: 1 for strict distribution across zones",
+				"Use whenUnsatisfiable: DoNotSchedule for critical workloads",
+			},
+			AffectedResources: missingTSC,
+			AutoFixable:       false,
+		})
+	}
+
+	if len(invalidTSC) > 0 {
+		practices = append(practices, BestPractice{
+			ID:          "BP-TSC-002",
+			Title:       "Invalid Topology Spread Constraints Configuration",
+			Description: "Topology spread constraints have invalid or suboptimal configuration",
+			Category:    c.Category(),
+			Severity:    SeverityWarning,
+			Compliant:   false,
+			Recommendations: []string{
+				"Ensure topologyKey is set (e.g., topology.kubernetes.io/zone)",
+				"Set maxSkew between 1 and 3 for reasonable distribution",
+				"Review whenUnsatisfiable policy for your availability requirements",
+			},
+			AffectedResources: invalidTSC,
+			AutoFixable:       false,
+		})
+	}
+
+	return practices
+}

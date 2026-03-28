@@ -325,3 +325,44 @@ func generateNetworkPolicy(group *ServiceGroup, ingressPorts, egressPorts []port
 
 	return sb.String()
 }
+
+// GenerateDefaultDenyPolicy generates a default-deny-all NetworkPolicy for the given namespace.
+// Ingress: deny all except from same namespace.
+// Egress: deny all except DNS (UDP+TCP 53 to kube-system).
+func GenerateDefaultDenyPolicy(namespace string) string {
+	var sb strings.Builder
+
+	sb.WriteString("apiVersion: networking.k8s.io/v1\n")
+	sb.WriteString("kind: NetworkPolicy\n")
+	sb.WriteString("metadata:\n")
+	sb.WriteString("  name: default-deny-all\n")
+	if namespace != "" {
+		sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
+	} else {
+		sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
+	}
+	sb.WriteString("spec:\n")
+	sb.WriteString("  podSelector: {}\n")
+	sb.WriteString("  policyTypes:\n")
+	sb.WriteString("    - Ingress\n")
+	sb.WriteString("    - Egress\n")
+
+	// Ingress: allow only from same namespace
+	sb.WriteString("  ingress:\n")
+	sb.WriteString("    - from:\n")
+	sb.WriteString("        - podSelector: {}\n")
+
+	// Egress: allow only DNS to kube-system
+	sb.WriteString("  egress:\n")
+	sb.WriteString("    - to:\n")
+	sb.WriteString("        - namespaceSelector:\n")
+	sb.WriteString("            matchLabels:\n")
+	sb.WriteString("              kubernetes.io/metadata.name: kube-system\n")
+	sb.WriteString("      ports:\n")
+	sb.WriteString("        - port: 53\n")
+	sb.WriteString("          protocol: UDP\n")
+	sb.WriteString("        - port: 53\n")
+	sb.WriteString("          protocol: TCP\n")
+
+	return sb.String()
+}
