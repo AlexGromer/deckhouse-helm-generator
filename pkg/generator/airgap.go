@@ -18,8 +18,9 @@ type ImageRef struct {
 }
 
 // imageRefRegex matches image references in YAML templates.
+// Requires 2+ spaces of indentation to avoid matching annotations and configmap data fields.
 // Handles: image: nginx:1.21, image: registry.example.com/app:v2, image: nginx@sha256:abc
-var imageRefRegex = regexp.MustCompile(`(?m)image:\s*["']?([^\s"']+)["']?`)
+var imageRefRegex = regexp.MustCompile(`(?m)^\s{2,}image:\s*["']?([^\s"']+)["']?`)
 
 // ExtractImageReferences scans all templates in a chart for image references.
 func ExtractImageReferences(chart *types.GeneratedChart) []ImageRef {
@@ -58,6 +59,14 @@ func ExtractImageReferences(chart *types.GeneratedChart) []ImageRef {
 // parseImageRef parses a raw image string into an ImageRef.
 func parseImageRef(raw string) ImageRef {
 	ref := ImageRef{FullRef: raw}
+
+	// Strip known URI scheme prefixes (oci://, docker://) before parsing
+	for _, scheme := range []string{"oci://", "docker://"} {
+		if strings.HasPrefix(raw, scheme) {
+			raw = strings.TrimPrefix(raw, scheme)
+			break
+		}
+	}
 
 	// Check for digest reference: image@sha256:...
 	if idx := strings.Index(raw, "@"); idx != -1 {

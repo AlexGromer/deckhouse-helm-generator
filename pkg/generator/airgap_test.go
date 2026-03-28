@@ -316,6 +316,43 @@ func TestAirgap_GenerateMirrorScript_DigestRef(t *testing.T) {
 	}
 }
 
+func TestAirgap_ParseImageRef_StripOCIScheme(t *testing.T) {
+	ref := parseImageRef("oci://registry.example.com/app:v1")
+	if strings.Contains(ref.Repository, "oci://") {
+		t.Errorf("expected oci:// scheme stripped from repository, got '%s'", ref.Repository)
+	}
+	if ref.Repository != "registry.example.com/app" {
+		t.Errorf("expected repository 'registry.example.com/app', got '%s'", ref.Repository)
+	}
+	if ref.Tag != "v1" {
+		t.Errorf("expected tag 'v1', got '%s'", ref.Tag)
+	}
+}
+
+func TestAirgap_ParseImageRef_StripDockerScheme(t *testing.T) {
+	ref := parseImageRef("docker://nginx:1.21")
+	if strings.Contains(ref.Repository, "docker://") {
+		t.Errorf("expected docker:// scheme stripped from repository, got '%s'", ref.Repository)
+	}
+	if ref.Repository != "nginx" {
+		t.Errorf("expected repository 'nginx', got '%s'", ref.Repository)
+	}
+	if ref.Tag != "1.21" {
+		t.Errorf("expected tag '1.21', got '%s'", ref.Tag)
+	}
+}
+
+func TestAirgap_ExtractImageReferences_IgnoresTopLevelImageField(t *testing.T) {
+	chart := makeChart("myapp", map[string]string{
+		"templates/configmap.yaml": "image: fake:1.0\n",
+	})
+
+	refs := ExtractImageReferences(chart)
+	if len(refs) != 0 {
+		t.Errorf("expected 0 image refs from top-level image field, got %d: %+v", len(refs), refs)
+	}
+}
+
 func TestGenerateMirrorScript_RejectsShellInjectionInRegistry(t *testing.T) {
 	refs := []ImageRef{
 		{Repository: "nginx", Tag: "1.21", FullRef: "nginx:1.21"},

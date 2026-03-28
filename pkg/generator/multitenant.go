@@ -15,6 +15,10 @@ func GenerateMultiTenantOverlay(chart *types.GeneratedChart, tenantCount int) *t
 	if tenantCount <= 0 {
 		return chart
 	}
+	// Cap tenant count to a reasonable upper bound to prevent excessive resource generation.
+	if tenantCount > 100 {
+		tenantCount = 100
+	}
 
 	// Build tenant entries for values.yaml
 	tenants := make([]interface{}, 0, tenantCount)
@@ -22,6 +26,7 @@ func GenerateMultiTenantOverlay(chart *types.GeneratedChart, tenantCount int) *t
 		tenants = append(tenants, map[string]interface{}{
 			"name":      fmt.Sprintf("tenant-%d", i),
 			"namespace": fmt.Sprintf("%s-tenant-%d", chart.Name, i),
+			// Default tenant resources. Override via values.yaml after generation.
 			"resources": map[string]interface{}{
 				"cpu":    "1",
 				"memory": "2Gi",

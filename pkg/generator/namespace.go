@@ -13,7 +13,7 @@ type NamespaceOpts struct {
 }
 
 // GenerateNamespaceResources generates namespace-level governance templates.
-// Returns map of template path → template content.
+// Returns map of template path -> template content.
 func GenerateNamespaceResources(groups []*ServiceGroup, opts NamespaceOpts) map[string]string {
 	if len(groups) == 0 {
 		return make(map[string]string)
@@ -61,7 +61,7 @@ func GenerateResourceQuotaTemplate(group *ServiceGroup) string {
 	sb.WriteString("apiVersion: v1\n")
 	sb.WriteString("kind: ResourceQuota\n")
 	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-%s-quota\n", group.Name, group.Name))
+	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-quota\n", group.Name))
 	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
 	sb.WriteString("  labels:\n")
 	sb.WriteString(fmt.Sprintf("    {{- include \"%s.labels\" . | nindent 4 }}\n", group.Name))
@@ -98,8 +98,10 @@ func GenerateLimitRangeTemplate(group *ServiceGroup) string {
 	sb.WriteString("apiVersion: v1\n")
 	sb.WriteString("kind: LimitRange\n")
 	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-%s-limits\n", group.Name, group.Name))
+	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-limits\n", group.Name))
 	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
+	sb.WriteString("  labels:\n")
+	sb.WriteString(fmt.Sprintf("    {{- include \"%s.labels\" . | nindent 4 }}\n", group.Name))
 	sb.WriteString("spec:\n")
 	sb.WriteString("  limits:\n")
 	sb.WriteString("    - type: Container\n")
@@ -122,7 +124,7 @@ func GenerateNetworkPolicyTemplate(group *ServiceGroup) string {
 	sb.WriteString("apiVersion: networking.k8s.io/v1\n")
 	sb.WriteString("kind: NetworkPolicy\n")
 	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-%s-default\n", group.Name, group.Name))
+	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-default\n", group.Name))
 	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
 	sb.WriteString("spec:\n")
 	sb.WriteString("  podSelector: {}\n")

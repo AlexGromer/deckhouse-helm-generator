@@ -148,6 +148,11 @@ func extractEnvBasedPorts(group *ServiceGroup) []portInfo {
 }
 
 // extractEnvVarsFromWorkload extracts env var names from a workload resource.
+// Note: similar container extraction exists in envvalues.go:extractContainers().
+// These helpers are kept separate because they extract different fields
+// (env vars vs images vs ports) and have different nil-guard patterns.
+// Consolidation into a shared workload.go is tracked but deferred
+// to avoid unnecessary abstraction for 3 distinct use cases.
 func extractEnvVarsFromWorkload(r *types.ProcessedResource) map[string]string {
 	result := make(map[string]string)
 

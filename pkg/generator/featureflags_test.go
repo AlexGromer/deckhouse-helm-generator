@@ -554,3 +554,24 @@ func TestMergeFeatureValues_EmptyInput_GeneratesFeatures(t *testing.T) {
 		t.Error("expected 'security:' key in features section")
 	}
 }
+
+// ============================================================
+// Test 17: wrapTemplateWithFeatureFlag is idempotent
+// ============================================================
+
+func TestFeatureFlags_WrapIdempotent(t *testing.T) {
+	original := "apiVersion: monitoring.coreos.com/v1\nkind: ServiceMonitor\nmetadata:\n  name: myapp"
+
+	wrapped := wrapTemplateWithFeatureFlag(original, FeatureMonitoring)
+	doubleWrapped := wrapTemplateWithFeatureFlag(wrapped, FeatureMonitoring)
+
+	if wrapped != doubleWrapped {
+		t.Errorf("wrapTemplateWithFeatureFlag is not idempotent:\nfirst wrap:\n%s\n\nsecond wrap:\n%s", wrapped, doubleWrapped)
+	}
+
+	// Verify only one guard exists
+	guardCount := strings.Count(doubleWrapped, "{{- if .Values.features.")
+	if guardCount != 1 {
+		t.Errorf("expected exactly 1 feature guard, got %d", guardCount)
+	}
+}

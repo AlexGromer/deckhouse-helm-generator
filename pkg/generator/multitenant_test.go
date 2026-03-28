@@ -108,6 +108,7 @@ func TestMultiTenant_TenantNames(t *testing.T) {
 		t.Fatal("expected 'tenants' array in values")
 	}
 
+	expectedNames := []string{"tenant-1", "tenant-2"}
 	for i, tenant := range tenants {
 		tenantMap, ok := tenant.(map[string]interface{})
 		if !ok {
@@ -117,9 +118,8 @@ func TestMultiTenant_TenantNames(t *testing.T) {
 		if !ok {
 			t.Fatalf("tenant %d missing 'name' field", i)
 		}
-		expectedName := "tenant-" + strings.TrimPrefix(name, "tenant-")
-		if name != expectedName {
-			t.Errorf("tenant %d: expected name pattern 'tenant-N', got '%s'", i, name)
+		if name != expectedNames[i] {
+			t.Errorf("tenant %d: expected name %q, got %q", i, expectedNames[i], name)
 		}
 	}
 }
@@ -282,7 +282,29 @@ func TestMultiTenant_DNSPolicy_HasBothProtocols(t *testing.T) {
 }
 
 // ============================================================
-// Subtask 11: Preserves existing templates
+// Subtask 11: Tenant count upper bound
+// ============================================================
+
+func TestMultiTenant_TenantCountCappedAt100(t *testing.T) {
+	chart := makeBaseChart("myapp")
+	result := GenerateMultiTenantOverlay(chart, 200)
+
+	var vals map[string]interface{}
+	if err := yaml.Unmarshal([]byte(result.ValuesYAML), &vals); err != nil {
+		t.Fatalf("failed to parse ValuesYAML: %v", err)
+	}
+
+	tenants, ok := vals["tenants"].([]interface{})
+	if !ok {
+		t.Fatal("expected 'tenants' array in values")
+	}
+	if len(tenants) != 100 {
+		t.Errorf("expected tenantCount capped at 100, got %d", len(tenants))
+	}
+}
+
+// ============================================================
+// Subtask 12: Preserves existing templates
 // ============================================================
 
 func TestMultiTenant_PreservesExistingTemplates(t *testing.T) {

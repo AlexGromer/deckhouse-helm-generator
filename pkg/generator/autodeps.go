@@ -214,6 +214,11 @@ func InjectDependencies(chart *types.GeneratedChart, deps []helm.Dependency) *ty
 
 // extractEnvVars returns the environment variable names and values from a
 // container map. Names are upper-cased for consistent matching.
+// Note: similar container extraction exists in envvalues.go:extractContainers().
+// These helpers are kept separate because they extract different fields
+// (env vars vs images vs ports) and have different nil-guard patterns.
+// Consolidation into a shared workload.go is tracked but deferred
+// to avoid unnecessary abstraction for 3 distinct use cases.
 func extractEnvVars(container map[string]interface{}) (names []string, values []string) {
 	rawEnv, ok := container["env"].([]interface{})
 	if !ok {
