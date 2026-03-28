@@ -176,7 +176,10 @@ func mergeFeatureValues(existingYAML string, config *FeatureFlagConfig, usedCate
 	// Parse existing values into a generic map.
 	base := make(map[string]interface{})
 	if strings.TrimSpace(existingYAML) != "" {
-		_ = yaml.Unmarshal([]byte(existingYAML), &base)
+		if err := yaml.Unmarshal([]byte(existingYAML), &base); err != nil {
+			// Defensive: return original YAML unchanged on parse failure.
+			return existingYAML
+		}
 	}
 
 	// Build the features sub-map using only categories present in config.Categories.

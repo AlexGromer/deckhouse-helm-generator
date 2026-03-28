@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -171,6 +172,7 @@ func GenerateIngressAnnotations(controller IngressController, features []Ingress
 		}
 
 	case ControllerTraefik:
+		var middlewares []string
 		for _, f := range features {
 			switch f {
 			case IngressRateLimit:
@@ -178,14 +180,18 @@ func GenerateIngressAnnotations(controller IngressController, features []Ingress
 			case IngressSSLRedirect:
 				annotations["traefik.ingress.kubernetes.io/redirect-entry-point"] = "https"
 			case IngressCanary:
-				annotations["traefik.ingress.kubernetes.io/router.middlewares"] = "canary@kubernetescrd"
+				middlewares = append(middlewares, "canary@kubernetescrd")
 			case IngressCORS:
-				annotations["traefik.ingress.kubernetes.io/router.middlewares"] = "cors@kubernetescrd"
+				middlewares = append(middlewares, "cors@kubernetescrd")
 			case IngressAuth:
-				annotations["traefik.ingress.kubernetes.io/router.middlewares"] = "auth@kubernetescrd"
+				middlewares = append(middlewares, "auth@kubernetescrd")
 			case IngressRewrite:
-				annotations["traefik.ingress.kubernetes.io/router.middlewares"] = "rewrite@kubernetescrd"
+				middlewares = append(middlewares, "rewrite@kubernetescrd")
 			}
+		}
+		if len(middlewares) > 0 {
+			sort.Strings(middlewares)
+			annotations["traefik.ingress.kubernetes.io/router.middlewares"] = strings.Join(middlewares, ",")
 		}
 
 	case ControllerHAProxy:

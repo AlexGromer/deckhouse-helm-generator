@@ -122,6 +122,14 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 		ExternalFiles: externalFiles,
 	}
 
+	// Generate helm-unittest test files if requested
+	if opts.IncludeTests {
+		testFiles := GenerateHelmTests(chart)
+		for path, content := range testFiles {
+			chart.Templates[path] = content
+		}
+	}
+
 	return []*types.GeneratedChart{chart}, nil
 }
 

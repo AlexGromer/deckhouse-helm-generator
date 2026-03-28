@@ -492,3 +492,199 @@ func TestSpot_NilChart_ReturnsNil(t *testing.T) {
 		t.Errorf("expected nil return for nil chart input, got %+v", result)
 	}
 }
+
+// ============================================================
+// Section 7: InjectSpotConfig — PDB generation
+// ============================================================
+
+func TestInjectSpotConfig_GeneratesPDB(t *testing.T) {
+	deploymentYAML := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+spec:
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: myapp
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.21
+`
+	chart := makeChart("myapp", map[string]string{
+		"templates/deployment.yaml": deploymentYAML,
+	})
+
+	config := SpotConfig{
+		Provider:    SpotAWS,
+		GracePeriod: 15,
+		Enabled:     true,
+	}
+
+	result := InjectSpotConfig(chart, config)
+	if result == nil {
+		t.Fatal("InjectSpotConfig returned nil for a valid chart")
+	}
+
+	// PDB template must exist under the derived key.
+	pdbKey := "templates/deployment-spot-pdb.yaml"
+	pdbContent, ok := result.Templates[pdbKey]
+	if !ok {
+		t.Fatalf("expected PDB template at key %q, available keys: %v", pdbKey, templateKeys(result))
+	}
+
+	// Must be a PodDisruptionBudget.
+	if !strings.Contains(pdbContent, "kind: PodDisruptionBudget") {
+		t.Errorf("PDB template must contain 'kind: PodDisruptionBudget', got:\n%s", pdbContent)
+	}
+
+	// With replicas=3, minAvailable should be "50%".
+	if !strings.Contains(pdbContent, `"50%"`) {
+		t.Errorf("PDB template for replicas=3 must contain '50%%', got:\n%s", pdbContent)
+	}
+
+	// Must use Helm template syntax for the name.
+	if !strings.Contains(pdbContent, `{{ include "myapp.fullname" . }}`) {
+		t.Errorf("PDB template must use Helm fullname helper, got:\n%s", pdbContent)
+	}
+
+	// Must use Helm template syntax for selector labels.
+	if !strings.Contains(pdbContent, `include "myapp.selectorLabels" .`) {
+		t.Errorf("PDB template must use Helm selectorLabels helper, got:\n%s", pdbContent)
+	}
+
+	// Original deployment template must still exist and be unaffected by PDB addition.
+	if _, ok := result.Templates["templates/deployment.yaml"]; !ok {
+		t.Error("original deployment template must still be present")
+	}
+}
+
+func TestInjectSpotConfig_GeneratesPDB_LowReplicas(t *testing.T) {
+	deploymentYAML := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.21
+`
+	chart := makeChart("myapp", map[string]string{
+		"templates/deployment.yaml": deploymentYAML,
+	})
+
+	config := SpotConfig{
+		Provider:    SpotGCP,
+		GracePeriod: 15,
+		Enabled:     true,
+	}
+
+	result := InjectSpotConfig(chart, config)
+	if result == nil {
+		t.Fatal("InjectSpotConfig returned nil")
+	}
+
+	pdbContent, ok := result.Templates["templates/deployment-spot-pdb.yaml"]
+	if !ok {
+		t.Fatalf("expected PDB template, available keys: %v", templateKeys(result))
+	}
+
+	// With replicas=1 (<=2), minAvailable should be 1.
+	if !strings.Contains(pdbContent, "minAvailable: 1") {
+		t.Errorf("PDB template for replicas=1 must contain 'minAvailable: 1', got:\n%s", pdbContent)
+	}
+}
+
+func TestInjectSpotConfig_GeneratesPDB_StatefulSet(t *testing.T) {
+	stsYAML := `apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mydb
+spec:
+  replicas: 5
+  template:
+    spec:
+      containers:
+        - name: db
+          image: postgres:15
+`
+	chart := makeChart("mydb", map[string]string{
+		"templates/statefulset.yaml": stsYAML,
+	})
+
+	config := SpotConfig{
+		Provider:    SpotAzure,
+		GracePeriod: 30,
+		Enabled:     true,
+	}
+
+	result := InjectSpotConfig(chart, config)
+	if result == nil {
+		t.Fatal("InjectSpotConfig returned nil")
+	}
+
+	pdbKey := "templates/statefulset-spot-pdb.yaml"
+	pdbContent, ok := result.Templates[pdbKey]
+	if !ok {
+		t.Fatalf("expected PDB template at key %q, available keys: %v", pdbKey, templateKeys(result))
+	}
+
+	if !strings.Contains(pdbContent, "kind: PodDisruptionBudget") {
+		t.Errorf("PDB template must contain 'kind: PodDisruptionBudget', got:\n%s", pdbContent)
+	}
+
+	// replicas=5 → 50%
+	if !strings.Contains(pdbContent, `"50%"`) {
+		t.Errorf("PDB template for replicas=5 must contain '50%%', got:\n%s", pdbContent)
+	}
+}
+
+func TestInjectSpotConfig_NoPDB_ForJob(t *testing.T) {
+	jobYAML := `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: myjob
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: job
+          image: busybox:1.36
+`
+	chart := makeChart("myapp", map[string]string{
+		"templates/job.yaml": jobYAML,
+	})
+
+	config := SpotConfig{
+		Provider:    SpotAWS,
+		GracePeriod: 15,
+		Enabled:     true,
+	}
+
+	result := InjectSpotConfig(chart, config)
+	if result == nil {
+		t.Fatal("InjectSpotConfig returned nil")
+	}
+
+	// No PDB should be generated for a Job.
+	for key := range result.Templates {
+		if strings.Contains(key, "spot-pdb") {
+			t.Errorf("Job must NOT produce a PDB template, but found key %q", key)
+		}
+	}
+}
+
+// templateKeys returns all template map keys for diagnostic output.
+func templateKeys(chart *types.GeneratedChart) []string {
+	keys := make([]string, 0, len(chart.Templates))
+	for k := range chart.Templates {
+		keys = append(keys, k)
+	}
+	return keys
+}

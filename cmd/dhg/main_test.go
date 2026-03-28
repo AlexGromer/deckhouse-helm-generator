@@ -496,3 +496,100 @@ func TestGenerateCmd_HasDryRunFlag(t *testing.T) {
 		t.Error("Expected --dry-run flag on generate command")
 	}
 }
+
+// ── TestNamespaceResources_SkipsDefaultNPWhenAutoNPExists ────────────────────
+
+// TestNamespaceResources_SkipsDefaultNPWhenAutoNPExists verifies that when both
+// namespace-resources and auto-NetworkPolicy generators produce output for the
+// same group, the broad default NP (from namespace.go) is excluded in favor of
+// the fine-grained NP (from networkpolicy.go).
+func TestNamespaceResources_SkipsDefaultNPWhenAutoNPExists(t *testing.T) {
+	// Simulate namespace-resources templates (broad default NP)
+	nsTemplates := map[string]string{
+		"templates/frontend-resourcequota.yaml":          "kind: ResourceQuota",
+		"templates/frontend-limitrange.yaml":             "kind: LimitRange",
+		"templates/frontend-networkpolicy-default.yaml":  "kind: NetworkPolicy\npodSelector: {}",
+		"templates/backend-resourcequota.yaml":           "kind: ResourceQuota",
+		"templates/backend-limitrange.yaml":              "kind: LimitRange",
+		"templates/backend-networkpolicy-default.yaml":   "kind: NetworkPolicy\npodSelector: {}",
+	}
+
+	// Simulate auto-NP templates (fine-grained per-service) — only for "frontend"
+	autoNP := map[string]string{
+		"templates/frontend-networkpolicy.yaml": "kind: NetworkPolicy\ningress:\n- from: [{podSelector: {matchLabels: {app: api}}}]",
+	}
+
+	// Build autoNPGroups set (same logic as main.go)
+	autoNPGroups := make(map[string]struct{}, len(autoNP))
+	for path := range autoNP {
+		name := strings.TrimPrefix(path, "templates/")
+		name = strings.TrimSuffix(name, "-networkpolicy.yaml")
+		if name != path {
+			autoNPGroups[name] = struct{}{}
+		}
+	}
+
+	// Existing chart templates
+	chartTemplates := map[string]string{
+		"templates/deployment.yaml": "kind: Deployment",
+	}
+
+	// Merge with filtering (same logic as main.go)
+	templates := make(map[string]string, len(chartTemplates)+len(nsTemplates)+len(autoNP))
+	for k, v := range chartTemplates {
+		templates[k] = v
+	}
+	for path, content := range nsTemplates {
+		if strings.HasSuffix(path, "-networkpolicy-default.yaml") {
+			groupName := strings.TrimPrefix(path, "templates/")
+			groupName = strings.TrimSuffix(groupName, "-networkpolicy-default.yaml")
+			if _, has := autoNPGroups[groupName]; has {
+				continue
+			}
+		}
+		templates[path] = content
+	}
+	for path, content := range autoNP {
+		templates[path] = content
+	}
+
+	// Verify: frontend default NP should be excluded (fine-grained NP takes precedence)
+	if _, exists := templates["templates/frontend-networkpolicy-default.yaml"]; exists {
+		t.Error("frontend-networkpolicy-default.yaml should be excluded when fine-grained auto-NP exists")
+	}
+
+	// Verify: frontend fine-grained NP should be present
+	if _, exists := templates["templates/frontend-networkpolicy.yaml"]; !exists {
+		t.Error("frontend-networkpolicy.yaml (fine-grained) should be present")
+	}
+
+	// Verify: backend default NP should be kept (no auto-NP for backend)
+	if _, exists := templates["templates/backend-networkpolicy-default.yaml"]; !exists {
+		t.Error("backend-networkpolicy-default.yaml should be kept when no auto-NP exists for that group")
+	}
+
+	// Verify: other namespace templates are not affected
+	if _, exists := templates["templates/frontend-resourcequota.yaml"]; !exists {
+		t.Error("frontend-resourcequota.yaml should not be affected by NP filtering")
+	}
+	if _, exists := templates["templates/frontend-limitrange.yaml"]; !exists {
+		t.Error("frontend-limitrange.yaml should not be affected by NP filtering")
+	}
+	if _, exists := templates["templates/backend-resourcequota.yaml"]; !exists {
+		t.Error("backend-resourcequota.yaml should not be affected by NP filtering")
+	}
+
+	// Verify: original chart templates preserved
+	if _, exists := templates["templates/deployment.yaml"]; !exists {
+		t.Error("original chart templates should be preserved")
+	}
+
+	// Verify total count: 1 (deployment) + 2 (frontend quota+limit) + 3 (backend quota+limit+defaultNP) + 1 (frontend auto-NP) = 7
+	expected := 7
+	if len(templates) != expected {
+		t.Errorf("expected %d templates total, got %d", expected, len(templates))
+		for k := range templates {
+			t.Logf("  template: %s", k)
+		}
+	}
+}

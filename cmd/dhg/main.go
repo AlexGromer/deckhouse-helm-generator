@@ -107,6 +107,7 @@ func newGenerateCmd() *cobra.Command {
 		spotGracePeriod    int
 		kustomize          bool
 		autoDeps           bool
+		tenantCount        int
 	)
 
 	cmd := &cobra.Command{
@@ -159,6 +160,7 @@ Examples:
 				spotGracePeriod:    spotGracePeriod,
 				kustomize:          kustomize,
 				autoDeps:           autoDeps,
+				tenantCount:        tenantCount,
 			})
 		},
 	}
@@ -197,6 +199,7 @@ Examples:
 	cmd.Flags().IntVar(&spotGracePeriod, "spot-grace-period", 15, "Grace period in seconds for spot instance preStop hook")
 	cmd.Flags().BoolVar(&kustomize, "kustomize", false, "Generate Kustomize layout with base and dev/staging/prod overlays")
 	cmd.Flags().BoolVar(&autoDeps, "auto-deps", false, "Auto-detect infrastructure dependencies (PostgreSQL, Redis, etc.)")
+	cmd.Flags().IntVar(&tenantCount, "tenant-count", 2, "Number of tenant examples to scaffold (default: 2)")
 
 	_ = cmd.MarkFlagRequired("chart-name")
 
@@ -238,6 +241,7 @@ type generateOptions struct {
 	spotGracePeriod    int
 	kustomize          bool
 	autoDeps           bool
+	tenantCount        int
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -540,6 +544,20 @@ drain:
 		// cross-tenant isolation.
 		autoNP := generator.GenerateAutoNetworkPolicies(graph, groupingResult.Groups)
 
+		// Build a set of group names that have fine-grained auto-NP policies.
+		// When a group has a fine-grained NP (e.g. templates/<group>-networkpolicy.yaml),
+		// we skip the broad default NP from namespace resources
+		// (templates/<group>-networkpolicy-default.yaml) to avoid conflicting policies.
+		autoNPGroups := make(map[string]struct{}, len(autoNP))
+		for path := range autoNP {
+			// Extract group name from "templates/<group>-networkpolicy.yaml"
+			name := strings.TrimPrefix(path, "templates/")
+			name = strings.TrimSuffix(name, "-networkpolicy.yaml")
+			if name != path { // successfully trimmed both
+				autoNPGroups[name] = struct{}{}
+			}
+		}
+
 		// Copy-on-write: build a new Templates map instead of mutating in place.
 		for i, chart := range charts {
 			templates := make(map[string]string, len(chart.Templates)+len(nsTemplates)+len(autoNP))
@@ -547,6 +565,14 @@ drain:
 				templates[k] = v
 			}
 			for path, content := range nsTemplates {
+				// Skip default NP for groups that have fine-grained auto-NP
+				if strings.HasSuffix(path, "-networkpolicy-default.yaml") {
+					groupName := strings.TrimPrefix(path, "templates/")
+					groupName = strings.TrimSuffix(groupName, "-networkpolicy-default.yaml")
+					if _, has := autoNPGroups[groupName]; has {
+						continue
+					}
+				}
 				templates[path] = content
 			}
 			for path, content := range autoNP {
@@ -572,7 +598,7 @@ drain:
 			fmt.Printf("\n[4e/5] Applying multi-tenant overlay...\n")
 		}
 		for i, chart := range charts {
-			charts[i] = generator.GenerateMultiTenantOverlay(chart, 2) // default 2 tenants
+			charts[i] = generator.GenerateMultiTenantOverlay(chart, opts.tenantCount)
 		}
 	}
 

@@ -512,3 +512,45 @@ func TestFeatureFlags_UnguardedNetworkPolicy_StillWrapped(t *testing.T) {
 		t.Error("original NetworkPolicy YAML must be preserved inside the guards")
 	}
 }
+
+// ============================================================
+// Test 15: mergeFeatureValues with malformed YAML returns original
+// ============================================================
+
+func TestMergeFeatureValues_MalformedYAML_ReturnsOriginal(t *testing.T) {
+	malformed := "key: [invalid yaml\n  broken: {{"
+	config := DefaultFeatureFlagConfig()
+	usedCategories := map[FeatureCategory]bool{
+		FeatureMonitoring: true,
+	}
+
+	result := mergeFeatureValues(malformed, config, usedCategories)
+
+	if result != malformed {
+		t.Errorf("expected malformed YAML to be returned unchanged\ngot:  %q\nwant: %q", result, malformed)
+	}
+}
+
+// ============================================================
+// Test 16: mergeFeatureValues with empty input generates features
+// ============================================================
+
+func TestMergeFeatureValues_EmptyInput_GeneratesFeatures(t *testing.T) {
+	config := DefaultFeatureFlagConfig()
+	usedCategories := map[FeatureCategory]bool{
+		FeatureMonitoring: true,
+		FeatureSecurity:   true,
+	}
+
+	result := mergeFeatureValues("", config, usedCategories)
+
+	if !strings.Contains(result, "features:") {
+		t.Error("expected 'features:' section in output for empty input")
+	}
+	if !strings.Contains(result, "monitoring:") {
+		t.Error("expected 'monitoring:' key in features section")
+	}
+	if !strings.Contains(result, "security:") {
+		t.Error("expected 'security:' key in features section")
+	}
+}
