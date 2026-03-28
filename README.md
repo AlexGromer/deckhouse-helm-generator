@@ -657,6 +657,33 @@ func RegisterAll(r *processor.Registry) {
 - Cluster extractor (извлечение из live кластера) еще не реализован
 - GitOps extractor еще не реализован
 
+## Roadmap
+
+### Current (v0.7.x)
+
+- 38+ K8s resource type processors
+- 4 output modes: Universal, Separate, Library, Umbrella
+- 12 architecture generators: air-gap, namespace governance, auto-NetworkPolicy, multi-tenant, feature flags, cloud annotations (AWS/GCP/Azure), ingress detection, monorepo, spot instances, Kustomize overlays, auto-dependencies
+- Deckhouse module scaffolding
+- Helm-unittest test generation (`--include-tests`)
+- 86%+ test coverage
+
+### Planned
+
+| Area | Description | Status |
+|------|-------------|--------|
+| Security & Compliance | PSS auto-migration, RBAC generation, External Secrets integration | Planned |
+| Cluster Extractor | Generate charts from live K8s cluster via client-go | Planned |
+| GitOps Extractor | Generate charts from Git repositories (ArgoCD/Flux) | Planned |
+| Auto-Fix Engine | Auto-add securityContext, resource limits, health probes, PDB | Planned |
+| CRD Support | Generic CRD processing with schema extraction | Planned |
+| Migration Tools | Drift detection, migration plans, backward-compatible values | Planned |
+| Secret Management | External Secrets Operator, Sealed Secrets, Vault CSI/Agent | Planned |
+| Service Mesh | Istio, Linkerd, OpenTelemetry integration | Research |
+| Database Operators | CloudNativePG, Percona, Redis Enterprise processors | Research |
+
+See [Issues](https://github.com/AlexGromer/deckhouse-helm-generator/issues) for detailed tracking.
+
 ## Contributing
 
 1. Fork the repository

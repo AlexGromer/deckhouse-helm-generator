@@ -123,6 +123,18 @@ claude_desktop_config.json
 settings.local.json
 *.claude-session
 *.claude-transcript
+.claude-ver
+.claude-init-attempted
+
+# ─────────────────────────────────────────────────────────────────────
+# INTERNAL DEVELOPMENT FILES (not for public repo)
+# ─────────────────────────────────────────────────────────────────────
+BACKLOG.md
+ARCHITECTURE.md
+FILEMAP.md
+CHANGELOG.md
+docs/ROADMAP.md
+docs/velocity*.md
 
 # ─────────────────────────────────────────────────────────────────────
 # INFRASTRUCTURE
