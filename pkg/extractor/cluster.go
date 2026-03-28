@@ -7,14 +7,43 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// ClusterExtractor extracts Kubernetes resources from a live cluster.
-type ClusterExtractor struct {
-	// TODO: Add client-go client
+// ClusterExtractorConfig holds configuration for extracting resources from a live cluster.
+type ClusterExtractorConfig struct {
+	// Kubeconfig is the path to the kubeconfig file.
+	Kubeconfig string
+
+	// Context is the kubeconfig context to use.
+	Context string
+
+	// Namespace limits extraction to a specific namespace.
+	Namespace string
+
+	// Selector is a label selector to filter resources.
+	Selector string
+
+	// ExcludeNamespaces lists namespaces to skip during extraction.
+	ExcludeNamespaces []string
+
+	// IncludeSecrets controls whether Secret resources are extracted.
+	IncludeSecrets bool
+
+	// SecretStrategy defines how secrets are handled: "mask", "ref", or "include".
+	SecretStrategy string
 }
 
-// NewClusterExtractor creates a new cluster extractor.
+// ClusterExtractor extracts Kubernetes resources from a live cluster.
+type ClusterExtractor struct {
+	config ClusterExtractorConfig
+}
+
+// NewClusterExtractor creates a new cluster extractor with default config.
 func NewClusterExtractor() *ClusterExtractor {
 	return &ClusterExtractor{}
+}
+
+// NewClusterExtractorWithConfig creates a new cluster extractor with the given config.
+func NewClusterExtractorWithConfig(cfg ClusterExtractorConfig) *ClusterExtractor {
+	return &ClusterExtractor{config: cfg}
 }
 
 // Source returns the source type.
@@ -25,7 +54,7 @@ func (e *ClusterExtractor) Source() types.Source {
 // Validate checks if the cluster connection is valid.
 func (e *ClusterExtractor) Validate(ctx context.Context, opts Options) error {
 	// TODO: Implement cluster validation
-	return fmt.Errorf("cluster extractor not yet implemented")
+	return fmt.Errorf("cluster extraction not yet implemented (use --file instead)")
 }
 
 // Extract extracts resources from a Kubernetes cluster.
@@ -37,7 +66,7 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 		defer close(resources)
 		defer close(errors)
 
-		errors <- fmt.Errorf("cluster extractor not yet implemented")
+		errors <- fmt.Errorf("cluster extraction not yet implemented (use --file instead)")
 	}()
 
 	return resources, errors

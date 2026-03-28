@@ -477,6 +477,7 @@ func DefaultAnalyzer() *Analyzer {
 	a.AddChecker(NewGracefulShutdownChecker())
 	a.AddChecker(NewPodSecurityStandardsChecker())
 	a.AddChecker(NewTopologySpreadChecker())
+	a.AddChecker(NewDeckhouseCompatChecker())
 
 	return a
 }

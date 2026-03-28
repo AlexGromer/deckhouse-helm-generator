@@ -581,6 +581,35 @@ func TestClusterExtractor_Extract_NotImplemented(t *testing.T) {
 	}
 }
 
+func TestClusterExtractor_NotImplementedError(t *testing.T) {
+	ce := NewClusterExtractorWithConfig(ClusterExtractorConfig{
+		Kubeconfig:     "~/.kube/config",
+		Context:        "prod",
+		Namespace:      "default",
+		Selector:       "app=web",
+		IncludeSecrets: false,
+		SecretStrategy: "mask",
+	})
+
+	err := ce.Validate(context.Background(), Options{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	const want = "cluster extraction not yet implemented (use --file instead)"
+	if err.Error() != want {
+		t.Errorf("error = %q; want %q", err.Error(), want)
+	}
+
+	_, errCh := ce.Extract(context.Background(), Options{})
+	for e := range errCh {
+		if e == nil {
+			t.Error("expected non-nil error from Extract")
+		} else if e.Error() != want {
+			t.Errorf("Extract error = %q; want %q", e.Error(), want)
+		}
+	}
+}
+
 // ── GitOpsExtractor stub ─────────────────────────────────────────────────────
 
 func TestGitOpsExtractor_Source(t *testing.T) {
@@ -609,6 +638,33 @@ func TestGitOpsExtractor_Extract_NotImplemented(t *testing.T) {
 	}
 	if !gotErr {
 		t.Error("expected error from gitops extractor")
+	}
+}
+
+func TestGitOpsExtractor_NotImplementedError(t *testing.T) {
+	ge := NewGitOpsExtractorWithConfig(GitOpsExtractorConfig{
+		RepoURL: "git@github.com:org/repo.git",
+		Branch:  "main",
+		SSHKey:  "~/.ssh/id_ed25519",
+		Depth:   1,
+	})
+
+	err := ge.Validate(context.Background(), Options{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	const want = "gitops extraction not yet implemented (use --file instead)"
+	if err.Error() != want {
+		t.Errorf("error = %q; want %q", err.Error(), want)
+	}
+
+	_, errCh := ge.Extract(context.Background(), Options{})
+	for e := range errCh {
+		if e == nil {
+			t.Error("expected non-nil error from Extract")
+		} else if e.Error() != want {
+			t.Errorf("Extract error = %q; want %q", e.Error(), want)
+		}
 	}
 }
 

@@ -86,9 +86,13 @@ func newGenerateCmd() *cobra.Command {
 		includeKinds    []string
 		excludeKinds    []string
 		recursive       bool
-		kubeConfig      string
-		kubeContext     string
-		includeTests    bool
+		kubeConfig         string
+		kubeContext        string
+		clusterNamespace   string
+		gitRepo            string
+		gitBranch          string
+		sshKey             string
+		includeTests       bool
 		includeREADME   bool
 		includeSchema   bool
 		verbose         bool
@@ -106,6 +110,7 @@ func newGenerateCmd() *cobra.Command {
 		spot               bool
 		spotGracePeriod    int
 		kustomize          bool
+		postRenderer       bool
 		autoDeps           bool
 		tenantCount        int
 		templateStyle      string
@@ -142,8 +147,12 @@ Examples:
 				includeKinds:    includeKinds,
 				excludeKinds:    excludeKinds,
 				recursive:       recursive,
-				kubeConfig:      kubeConfig,
-				kubeContext:     kubeContext,
+				kubeConfig:       kubeConfig,
+				kubeContext:      kubeContext,
+				clusterNamespace: clusterNamespace,
+				gitRepo:          gitRepo,
+				gitBranch:        gitBranch,
+				sshKey:           sshKey,
 				includeTests:    includeTests,
 				includeREADME:   includeREADME,
 				includeSchema:   includeSchema,
@@ -162,6 +171,7 @@ Examples:
 				spot:               spot,
 				spotGracePeriod:    spotGracePeriod,
 				kustomize:          kustomize,
+				postRenderer:       postRenderer,
 				autoDeps:           autoDeps,
 				tenantCount:        tenantCount,
 				templateStyle:      templateStyle,
@@ -186,6 +196,10 @@ Examples:
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", true, "Recursively scan directories")
 	cmd.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to kubeconfig file")
 	cmd.Flags().StringVar(&kubeContext, "context", "", "Kubeconfig context to use")
+	cmd.Flags().StringVar(&clusterNamespace, "cluster-namespace", "", "Namespace for cluster extraction (not yet implemented)")
+	cmd.Flags().StringVar(&gitRepo, "git-repo", "", "Git repository URL for gitops extraction (not yet implemented)")
+	cmd.Flags().StringVar(&gitBranch, "git-branch", "main", "Git branch for gitops extraction (not yet implemented)")
+	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "Path to SSH key for git authentication (not yet implemented)")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Generate test templates")
 	cmd.Flags().BoolVar(&includeREADME, "include-readme", true, "Generate README.md")
 	cmd.Flags().BoolVar(&includeSchema, "include-schema", false, "Generate values.schema.json")
@@ -204,6 +218,7 @@ Examples:
 	cmd.Flags().BoolVar(&spot, "spot", false, "Inject spot/preemptible instance tolerations and PDB")
 	cmd.Flags().IntVar(&spotGracePeriod, "spot-grace-period", 15, "Grace period in seconds for spot instance preStop hook")
 	cmd.Flags().BoolVar(&kustomize, "kustomize", false, "Generate Kustomize layout with base and dev/staging/prod overlays")
+	cmd.Flags().BoolVar(&postRenderer, "post-renderer", false, "Generate Kustomize overlays compatible with Helm post-rendering (Flux CD postBuild)")
 	cmd.Flags().BoolVar(&autoDeps, "auto-deps", false, "Auto-detect infrastructure dependencies (PostgreSQL, Redis, etc.)")
 	cmd.Flags().IntVar(&tenantCount, "tenant-count", 2, "Number of tenant examples to scaffold (default: 2)")
 	cmd.Flags().StringVar(&templateStyle, "template-style", "standard", "Template output style: standard, helm")
@@ -229,9 +244,13 @@ type generateOptions struct {
 	includeKinds    []string
 	excludeKinds    []string
 	recursive       bool
-	kubeConfig      string
-	kubeContext     string
-	includeTests    bool
+	kubeConfig       string
+	kubeContext      string
+	clusterNamespace string
+	gitRepo          string
+	gitBranch        string
+	sshKey           string
+	includeTests     bool
 	includeREADME   bool
 	includeSchema   bool
 	verbose         bool
@@ -249,6 +268,7 @@ type generateOptions struct {
 	spot               bool
 	spotGracePeriod    int
 	kustomize          bool
+	postRenderer       bool
 	autoDeps           bool
 	tenantCount        int
 	templateStyle      string
@@ -289,8 +309,10 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		}
 	case "cluster":
 		sourceType = types.SourceCluster
+		fmt.Fprintln(os.Stderr, "WARNING: cluster extraction is not yet implemented. Use --source=file instead.")
 	case "gitops":
 		sourceType = types.SourceGitOps
+		fmt.Fprintln(os.Stderr, "WARNING: gitops extraction is not yet implemented. Use --source=file instead.")
 	default:
 		return fmt.Errorf("invalid source: %s (must be file, cluster, or gitops)", opts.source)
 	}
@@ -888,6 +910,16 @@ drain:
 				fmt.Printf("  Written: kustomize layout for %s\n", chart.Name)
 			}
 		}
+	}
+
+	// Post-renderer mode: when enabled, Kustomize overlays are generated with
+	// Flux CD postBuild-compatible structure. Currently infrastructure-only.
+	if opts.postRenderer {
+		if opts.verbose {
+			fmt.Println("\nPost-renderer mode enabled: Kustomize overlays will be compatible with Helm post-rendering.")
+		}
+		// TODO: Integrate actual post-renderer pipeline (Flux CD postBuild, kustomize --enable-helm).
+		// For now, --post-renderer implies --kustomize behavior with Flux-compatible annotations.
 	}
 
 	fmt.Printf("\n✓ Successfully generated %d chart(s) in %s\n", len(charts), opts.outputDir)

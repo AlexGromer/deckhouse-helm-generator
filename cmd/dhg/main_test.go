@@ -731,3 +731,16 @@ func TestGenerateCmd_MonorepoKustomizeConflict(t *testing.T) {
 		t.Errorf("expected error to mention 'mutually exclusive', got: %v", err)
 	}
 }
+
+// ── TestGenerateCmd_PostRendererFlag ──────────────────────────────────────────
+
+func TestGenerateCmd_PostRendererFlag(t *testing.T) {
+	cmd := newGenerateCmd()
+	flag := cmd.Flags().Lookup("post-renderer")
+	if flag == nil {
+		t.Fatal("Expected --post-renderer flag on generate command")
+	}
+	if flag.DefValue != "false" {
+		t.Errorf("Expected default value 'false', got '%s'", flag.DefValue)
+	}
+}
