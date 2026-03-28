@@ -62,6 +62,11 @@ func RegisterAll(r *processor.Registry) {
 	// Gateway API
 	r.Register(NewHTTPRouteProcessor())
 	r.Register(NewGatewayProcessor())
+	r.Register(NewGRPCRouteProcessor())
+	r.Register(NewTLSRouteProcessor())
+
+	// Flagger
+	r.Register(NewFlaggerCanaryProcessor())
 
 	// Monitoring (Prometheus Operator + Grafana)
 	r.Register(NewServiceMonitorProcessor())
@@ -77,4 +82,11 @@ func RegisterAll(r *processor.Registry) {
 	r.Register(NewDexAuthenticatorProcessor())
 	r.Register(NewUserProcessor())
 	r.Register(NewGroupProcessor())
+
+	// Deckhouse cloud InstanceClasses
+	r.Register(NewOpenstackInstanceClassProcessor())
+	r.Register(NewAWSInstanceClassProcessor())
+	r.Register(NewGCPInstanceClassProcessor())
+	r.Register(NewAzureInstanceClassProcessor())
+	r.Register(NewYandexInstanceClassProcessor())
 }

@@ -101,8 +101,8 @@ func TestDefaultAnalyzer_HasDetectorsAndCheckers(t *testing.T) {
 	if len(a.detectors) != 6 {
 		t.Errorf("DefaultAnalyzer detectors = %d; want 6", len(a.detectors))
 	}
-	if len(a.checkers) != 10 {
-		t.Errorf("DefaultAnalyzer checkers = %d; want 10", len(a.checkers))
+	if len(a.checkers) != 11 {
+		t.Errorf("DefaultAnalyzer checkers = %d; want 11", len(a.checkers))
 	}
 }
 

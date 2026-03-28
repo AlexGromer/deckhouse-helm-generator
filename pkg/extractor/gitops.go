@@ -7,14 +7,34 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// GitOpsExtractor extracts Kubernetes resources from a git repository.
-type GitOpsExtractor struct {
-	// TODO: Add go-git client
+// GitOpsExtractorConfig holds configuration for extracting resources from a git repository.
+type GitOpsExtractorConfig struct {
+	// RepoURL is the URL of the git repository.
+	RepoURL string
+
+	// Branch is the branch to check out (default: main).
+	Branch string
+
+	// SSHKey is the path to an SSH private key for authentication.
+	SSHKey string
+
+	// Depth limits the clone depth (0 = full clone).
+	Depth int
 }
 
-// NewGitOpsExtractor creates a new gitops extractor.
+// GitOpsExtractor extracts Kubernetes resources from a git repository.
+type GitOpsExtractor struct {
+	config GitOpsExtractorConfig
+}
+
+// NewGitOpsExtractor creates a new gitops extractor with default config.
 func NewGitOpsExtractor() *GitOpsExtractor {
 	return &GitOpsExtractor{}
+}
+
+// NewGitOpsExtractorWithConfig creates a new gitops extractor with the given config.
+func NewGitOpsExtractorWithConfig(cfg GitOpsExtractorConfig) *GitOpsExtractor {
+	return &GitOpsExtractor{config: cfg}
 }
 
 // Source returns the source type.
@@ -25,7 +45,7 @@ func (e *GitOpsExtractor) Source() types.Source {
 // Validate checks if the git repository is accessible.
 func (e *GitOpsExtractor) Validate(ctx context.Context, opts Options) error {
 	// TODO: Implement git validation
-	return fmt.Errorf("gitops extractor not yet implemented")
+	return fmt.Errorf("gitops extraction not yet implemented (use --file instead)")
 }
 
 // Extract extracts resources from a git repository.
@@ -37,7 +57,7 @@ func (e *GitOpsExtractor) Extract(ctx context.Context, opts Options) (<-chan *ty
 		defer close(resources)
 		defer close(errors)
 
-		errors <- fmt.Errorf("gitops extractor not yet implemented")
+		errors <- fmt.Errorf("gitops extraction not yet implemented (use --file instead)")
 	}()
 
 	return resources, errors
