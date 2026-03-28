@@ -336,6 +336,16 @@ func TestKustomize_ResourcesSorted(t *testing.T) {
 // Subtask 12: Empty chart (no templates) — returns error
 // ============================================================
 
+func TestKustomize_NilChart_ReturnsError(t *testing.T) {
+	out, err := GenerateKustomizeLayout(nil)
+	if err == nil {
+		t.Error("expected error for nil chart, got nil")
+	}
+	if out != nil {
+		t.Errorf("expected nil output on error, got %+v", out)
+	}
+}
+
 func TestKustomize_EmptyChart_ReturnsError(t *testing.T) {
 	chart := &types.GeneratedChart{
 		Name:       "empty",

@@ -283,6 +283,11 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		return fmt.Errorf("invalid source: %s (must be file, cluster, or gitops)", opts.source)
 	}
 
+	// Validate mutually exclusive flags
+	if opts.monorepo && opts.kustomize {
+		return fmt.Errorf("--monorepo and --kustomize are mutually exclusive")
+	}
+
 	// Validate cloud provider
 	if opts.cloudProvider != "" {
 		switch opts.cloudProvider {
@@ -514,11 +519,21 @@ drain:
 			})
 
 			// Add values-airgap.yaml
-			airgapValues := generator.GenerateAirgapValues(refs, opts.airgapRegistry)
+			airgapValues := generator.GenerateAirgapValues(opts.airgapRegistry)
 			airgapYAML, _ := yaml.Marshal(airgapValues)
 			chart.ExternalFiles = append(chart.ExternalFiles, types.ExternalFileInfo{
 				Path: "values-airgap.yaml", Content: string(airgapYAML),
 			})
+		}
+	}
+
+	// Pre-compute resource grouping (reused by namespace resources and env values).
+	var groupingResult *generator.GroupingResult
+	if opts.namespaceResources || opts.envValues {
+		var err error
+		groupingResult, err = generator.GroupResources(graph)
+		if err != nil {
+			return fmt.Errorf("resource grouping: %w", err)
 		}
 	}
 
@@ -527,7 +542,6 @@ drain:
 		if opts.verbose {
 			fmt.Printf("\n[4d/5] Generating namespace governance resources...\n")
 		}
-		groupingResult, _ := generator.GroupResources(graph)
 		nsOpts := generator.NamespaceOpts{
 			ResourceQuota: true,
 			LimitRange:    true,
@@ -739,7 +753,7 @@ drain:
 
 		// Build a name→group index for workload-aware profile selection.
 		var groupsByName map[string]*generator.ServiceGroup
-		if groupingResult, err := generator.GroupResources(graph); err == nil && len(groupingResult.Groups) > 0 {
+		if groupingResult != nil && len(groupingResult.Groups) > 0 {
 			groupsByName = make(map[string]*generator.ServiceGroup, len(groupingResult.Groups))
 			for _, g := range groupingResult.Groups {
 				groupsByName[g.Name] = g

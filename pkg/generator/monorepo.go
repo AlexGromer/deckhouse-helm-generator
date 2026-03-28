@@ -25,6 +25,9 @@ func GenerateMonorepoLayout(charts []*types.GeneratedChart, projectName string) 
 		return nil, fmt.Errorf("monorepo layout requires at least one chart")
 	}
 
+	chartsCopy := make([]*types.GeneratedChart, len(charts))
+	copy(chartsCopy, charts)
+
 	chartNames := make([]string, 0, len(charts))
 	for _, c := range charts {
 		chartNames = append(chartNames, c.Name)
@@ -32,7 +35,7 @@ func GenerateMonorepoLayout(charts []*types.GeneratedChart, projectName string) 
 
 	return &MonorepoLayout{
 		RootDir:    projectName,
-		Charts:     charts,
+		Charts:     chartsCopy,
 		Makefile:   generateMonorepoMakefile(chartNames),
 		HelmIgnore: generateMonorepoHelmIgnore(),
 		CIWorkflow: generateMonorepoCIWorkflow(chartNames),

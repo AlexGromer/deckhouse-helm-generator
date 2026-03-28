@@ -113,7 +113,7 @@ func GenerateImageList(refs []ImageRef) string {
 }
 
 // GenerateAirgapValues generates values-airgap.yaml with global.imageRegistry override.
-func GenerateAirgapValues(_ []ImageRef, registry string) map[string]interface{} {
+func GenerateAirgapValues(registry string) map[string]interface{} {
 	return map[string]interface{}{
 		"global": map[string]interface{}{
 			"imageRegistry": registry,
