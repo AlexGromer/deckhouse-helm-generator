@@ -1,36 +1,36 @@
 ---
-name: Feature Request
-about: Suggest a new feature or improvement
+name: Запрос на функциональность
+about: Предложите новую функцию или улучшение
 title: "[FEATURE] "
 labels: enhancement
 assignees: AlexGromer
 ---
 
-## Problem
+## Проблема
 
-A clear description of the problem this feature would solve.
-Example: "I'm always frustrated when ..."
+Чёткое описание проблемы, которую решит данная функциональность.
+Пример: "Меня всегда расстраивает, когда ..."
 
-## Proposed Solution
+## Предлагаемое решение
 
-A clear description of what you want to happen.
+Чёткое описание того, что вы хотите получить.
 
-## Use Case
-
-```yaml
-# Example Kubernetes resources that should be supported
-```
-
-## Expected Output
+## Сценарий использования
 
 ```yaml
-# Expected Helm chart output
+# Примеры ресурсов Kubernetes, которые должны поддерживаться
 ```
 
-## Alternatives Considered
+## Ожидаемый результат
 
-Any alternative solutions or features you've considered.
+```yaml
+# Ожидаемый вывод Helm-чарта
+```
 
-## Additional Context
+## Рассмотренные альтернативы
 
-Add any other context, screenshots, or references.
+Любые альтернативные решения или возможности, которые вы рассматривали.
+
+## Дополнительный контекст
+
+Добавьте любую другую информацию, скриншоты или ссылки.

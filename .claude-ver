@@ -1,5 +1,0 @@
-config-version: 9.1.0
-initialized: 2026-03-27
-stack: Go 1.24, Cobra CLI, GoReleaser, Helm
-domains: development, devops
-project_type: development
