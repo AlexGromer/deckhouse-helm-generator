@@ -300,33 +300,26 @@ func TestKustomize_ResourcesSorted(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Collect resource file names from base.
-	names := make([]string, 0, len(out.Base.Resources))
+	// Build the expected sorted order from the resource map keys.
+	expected := make([]string, 0, len(out.Base.Resources))
 	for name := range out.Base.Resources {
-		names = append(names, name)
+		expected = append(expected, name)
 	}
-	sort.Strings(names) // canonical sorted order
+	sort.Strings(expected)
 
-	// The Kustomization content must list resources in sorted order.
-	// Verify by checking that the sort order matches what is declared.
-	if !sort.StringsAreSorted(names) {
-		// This branch is logically unreachable after sort.Strings above;
-		// the real contract is that the kustomization.yaml text is sorted.
-		t.Error("invariant violated: sort.Strings produced unsorted slice")
-	}
-
-	// Verify the kustomization lists the resources in ascending order.
+	// Parse the kustomization YAML and verify resource lines appear in
+	// alphabetical order by comparing their positions in the text.
 	kust := out.Base.Kustomization
 	lastIdx := -1
-	for _, name := range names {
+	for i, name := range expected {
 		idx := strings.Index(kust, name)
 		if idx == -1 {
 			t.Errorf("resource %q not found in base kustomization.yaml", name)
 			continue
 		}
 		if idx <= lastIdx {
-			t.Errorf("resource %q appears before %q in kustomization.yaml — resources must be alphabetically sorted",
-				name, names[sort.SearchStrings(names, name)-1])
+			t.Errorf("resource %q (index %d) appears at position %d, before previous resource %q at position %d — resources must be alphabetically sorted",
+				name, i, idx, expected[i-1], lastIdx)
 		}
 		lastIdx = idx
 	}

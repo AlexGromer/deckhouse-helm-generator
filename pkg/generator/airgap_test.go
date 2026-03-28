@@ -388,6 +388,18 @@ func TestGenerateMirrorScript_RejectsShellInjectionInImageRef(t *testing.T) {
 	}
 }
 
+func TestAirgap_ParseImageRef_EmptyString(t *testing.T) {
+	ref := parseImageRef("")
+	if ref.Repository != "" {
+		t.Errorf("expected empty repository for empty input, got '%s'", ref.Repository)
+	}
+	// Empty string falls through to case 1 (no colon) → Tag = "latest"
+	// The key assertion is no panic on empty input.
+	if ref.Tag != "latest" {
+		t.Errorf("expected tag 'latest' for empty input, got '%s'", ref.Tag)
+	}
+}
+
 func TestGenerateMirrorScript_AcceptsValidRegistry(t *testing.T) {
 	refs := []ImageRef{
 		{Repository: "nginx", Tag: "1.21", FullRef: "nginx:1.21"},

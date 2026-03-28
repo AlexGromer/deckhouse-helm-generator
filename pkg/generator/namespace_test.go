@@ -311,6 +311,21 @@ func TestNamespace_GenerateNamespaceResources_EmptyGroups(t *testing.T) {
 	}
 }
 
+func TestNamespace_NilGroupInSlice(t *testing.T) {
+	opts := NamespaceOpts{
+		ResourceQuota: true,
+		LimitRange:    true,
+		NetworkPolicy: true,
+	}
+
+	// Slice contains a nil element — must not panic.
+	result := GenerateNamespaceResources([]*ServiceGroup{nil}, opts)
+
+	if len(result) != 0 {
+		t.Errorf("expected 0 templates for nil group in slice, got %d", len(result))
+	}
+}
+
 func TestNamespace_GenerateNamespaceResources_MultipleGroups(t *testing.T) {
 	deploy1 := makeResourceWithValues("Deployment", "frontend", "default", nil, map[string]interface{}{})
 	deploy2 := makeResourceWithValues("Deployment", "backend", "default", nil, map[string]interface{}{})

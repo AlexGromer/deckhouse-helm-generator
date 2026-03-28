@@ -214,7 +214,7 @@ func GenerateIngressAnnotations(controller IngressController, features []Ingress
 
 	default:
 		// Unknown controller: return only the generic class annotation.
-		annotations["kubernetes.io/ingress.class"] = ""
+		annotations["kubernetes.io/ingress.class"] = "nginx" // safe default fallback
 	}
 
 	return annotations

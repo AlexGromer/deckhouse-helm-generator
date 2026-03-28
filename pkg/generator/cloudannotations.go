@@ -85,6 +85,8 @@ func InjectCloudAnnotations(chart *types.GeneratedChart, config CloudAnnotationC
 			}
 		}
 
+		// Only AWS Ingress gets ALB annotations. GCP and Azure configure
+		// load balancers via Service annotations (handled above), not Ingress.
 		if extractKind(content) == "Ingress" && config.Provider == CloudAWS {
 			scheme := config.Scheme
 			if scheme == "" {

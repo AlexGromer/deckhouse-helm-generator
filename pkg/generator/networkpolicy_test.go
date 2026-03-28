@@ -13,31 +13,7 @@ import (
 // Test Helpers
 // ============================================================
 
-// makeDeploymentWithEnv creates a Deployment ProcessedResource with env vars.
-func makeDeploymentWithEnv(name, namespace string, envVars map[string]string) *types.ProcessedResource {
-	r := makeProcessedResource("Deployment", name, namespace, nil)
-	envList := make([]interface{}, 0, len(envVars))
-	for k, v := range envVars {
-		envList = append(envList, map[string]interface{}{
-			"name":  k,
-			"value": v,
-		})
-	}
-	r.Original.Object.Object["spec"] = map[string]interface{}{
-		"template": map[string]interface{}{
-			"spec": map[string]interface{}{
-				"containers": []interface{}{
-					map[string]interface{}{
-						"name":  "app",
-						"image": name + ":latest",
-						"env":   envList,
-					},
-				},
-			},
-		},
-	}
-	return r
-}
+// makeDeploymentWithEnv is defined in testhelpers_test.go.
 
 // makeServiceWithPorts creates a Service ProcessedResource with specified ports.
 func makeServiceWithPorts(name, namespace string, ports []int64) *types.ProcessedResource {
@@ -479,5 +455,74 @@ func TestExtractServicePorts_AcceptsStringPort(t *testing.T) {
 	}
 	if ports[0].Protocol != "TCP" {
 		t.Errorf("expected protocol TCP, got %s", ports[0].Protocol)
+	}
+}
+
+// ============================================================
+// Edge-case tests
+// ============================================================
+
+func TestAutoNP_ExtractServicePorts_IgnoresDaemonSet(t *testing.T) {
+	// DaemonSet resource only (no Service) — extractServicePorts must return 0 ports.
+	ds := makeProcessedResource("DaemonSet", "log-agent", "default", nil)
+	ds.Original.Object.Object["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"name":  "agent",
+						"image": "fluentbit:latest",
+						"ports": []interface{}{
+							map[string]interface{}{"containerPort": int64(2020)},
+						},
+					},
+				},
+			},
+		},
+	}
+	group := makeGroup("log-agent", "default", []*types.ProcessedResource{ds})
+
+	ports := extractServicePorts(group)
+	if len(ports) != 0 {
+		t.Errorf("expected 0 ports from DaemonSet-only group, got %d: %v", len(ports), ports)
+	}
+}
+
+func TestAutoNP_BuildCrossNamespaceIndex_NilGraph(t *testing.T) {
+	deploy := makeDeploymentWithEnv("myapp", "default", nil)
+	groups := []*ServiceGroup{
+		makeGroup("myapp", "default", []*types.ProcessedResource{deploy}),
+	}
+
+	// nil graph must not panic and should return empty map.
+	result := buildCrossNamespaceIndex(nil, groups)
+
+	if result == nil {
+		t.Fatal("expected non-nil empty map, got nil")
+	}
+	if len(result) != 0 {
+		t.Errorf("expected 0 entries for nil graph, got %d", len(result))
+	}
+}
+
+func TestAutoNP_GroupNameSpecialChars(t *testing.T) {
+	deploy := makeDeploymentWithEnv("my-app_v2.test", "default", nil)
+	svc := makeServiceWithPorts("my-app_v2.test-svc", "default", []int64{8080})
+	group := makeGroup("my-app_v2.test", "default", []*types.ProcessedResource{deploy, svc})
+	graph := buildGraph([]*types.ProcessedResource{deploy, svc}, nil)
+
+	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+
+	if len(result) == 0 {
+		t.Fatal("expected at least 1 NetworkPolicy for group with special chars")
+	}
+
+	for _, content := range result {
+		if !strings.Contains(content, "kind: NetworkPolicy") {
+			t.Error("generated content must contain 'kind: NetworkPolicy'")
+		}
+		if !strings.Contains(content, "my-app_v2.test") {
+			t.Error("generated content must contain the group name with special chars")
+		}
 	}
 }

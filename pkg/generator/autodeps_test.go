@@ -636,3 +636,34 @@ func TestInjectDeps_ValidYAMLOutput(t *testing.T) {
 		t.Errorf("expected 2 dependencies in parsed YAML, got %d", len(depsList))
 	}
 }
+
+// ============================================================
+// Section 10: DetectCommonDependencies — KAFKA_BOOTSTRAP_SERVERS
+// ============================================================
+
+// TestAutoDeps_KafkaBootstrapServersCanonical verifies that a Deployment with
+// KAFKA_BOOTSTRAP_SERVERS env var is detected as requiring the kafka dependency.
+func TestAutoDeps_KafkaBootstrapServersCanonical(t *testing.T) {
+	resources := []*types.ProcessedResource{
+		makeDeploymentWithEnv("myapp", "default", map[string]string{
+			"KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
+		}),
+	}
+
+	deps := DetectCommonDependencies(resources)
+
+	if len(deps) == 0 {
+		t.Fatal("expected at least 1 dependency detected from KAFKA_BOOTSTRAP_SERVERS env var")
+	}
+
+	found := false
+	for _, d := range deps {
+		if d.Name == "kafka" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'kafka' dependency from KAFKA_BOOTSTRAP_SERVERS env var, got: %+v", deps)
+	}
+}

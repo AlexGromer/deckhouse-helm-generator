@@ -7,6 +7,10 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
+// defaultCTTimeout is the default --timeout value for helm operations in
+// the chart-testing (ct) configuration.
+const defaultCTTimeout = "600s"
+
 // MonorepoLayout represents a multi-chart monorepo project structure with
 // shared tooling (Makefile, chart-testing config, .helmignore).
 type MonorepoLayout struct {
@@ -138,6 +142,6 @@ func generateMonorepoCTConfig() string {
 	b.WriteString("chart-dirs:\n")
 	b.WriteString("  - charts/\n")
 	b.WriteString("chart-repos: []\n")
-	b.WriteString("helm-extra-args: --timeout 600s\n")
+	b.WriteString(fmt.Sprintf("helm-extra-args: --timeout %s\n", defaultCTTimeout))
 	return b.String()
 }
