@@ -106,6 +106,6 @@ func (r *Registry) Get(source types.Source) (Extractor, bool) {
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	r.Register(NewFileExtractor())
-	// TODO: Add cluster and gitops extractors
+	r.Register(NewGitOpsExtractor())
 	return r
 }

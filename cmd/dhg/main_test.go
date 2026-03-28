@@ -51,8 +51,8 @@ func TestNewRootCmd(t *testing.T) {
 	}
 
 	got := len(cmd.Commands())
-	if got != 5 {
-		t.Errorf("expected 5 subcommands, got %d", got)
+	if got != 7 {
+		t.Errorf("expected 7 subcommands (generate, analyze, validate, diff, version, fix, migrate), got %d", got)
 	}
 }
 

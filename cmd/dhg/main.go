@@ -66,6 +66,8 @@ It supports extracting resources from:
 	rootCmd.AddCommand(newAnalyzeCmd())
 	rootCmd.AddCommand(newValidateCmd())
 	rootCmd.AddCommand(newDiffCmd())
+	rootCmd.AddCommand(newMigrateCmd())
+	rootCmd.AddCommand(newFixCmd())
 	rootCmd.AddCommand(newVersionCmd())
 
 	return rootCmd
@@ -1316,6 +1318,342 @@ func runValidate(_ context.Context, opts validateOptions) error {
 	return nil
 }
 
+func newMigrateCmd() *cobra.Command {
+	var (
+		fromDir string
+		sourceFiles []string
+		chartName   string
+		chartVersion string
+		appVersion  string
+		mode        string
+		verbose     bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Detect drift and generate migration plan between existing and new chart",
+		Long: `Compare an existing Helm chart directory with a newly generated chart
+from source manifests. Produces a drift report and step-by-step migration plan.
+
+Examples:
+  # Compare existing chart with newly generated one
+  dhg migrate --from ./chart --source ./manifests --chart-name myapp
+
+  # Verbose output with custom chart version
+  dhg migrate --from ./chart -f ./manifests --chart-name myapp --chart-version 0.2.0 -v`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runMigrate(cmd.Context(), migrateOptions{
+				fromDir:      fromDir,
+				sourceFiles:  sourceFiles,
+				chartName:    chartName,
+				chartVersion: chartVersion,
+				appVersion:   appVersion,
+				mode:         mode,
+				verbose:      verbose,
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&fromDir, "from", "", "Path to existing chart directory (required)")
+	cmd.Flags().StringSliceVarP(&sourceFiles, "source", "f", []string{}, "Path(s) to source manifest files/directories (required)")
+	cmd.Flags().StringVar(&chartName, "chart-name", "", "Name of the chart (required)")
+	cmd.Flags().StringVar(&chartVersion, "chart-version", "0.1.0", "Chart version for generated chart")
+	cmd.Flags().StringVar(&appVersion, "app-version", "1.0.0", "Application version for generated chart")
+	cmd.Flags().StringVar(&mode, "mode", "universal", "Output mode: universal, separate, library, umbrella")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+
+	_ = cmd.MarkFlagRequired("from")
+	_ = cmd.MarkFlagRequired("chart-name")
+
+	return cmd
+}
+
+type migrateOptions struct {
+	fromDir      string
+	sourceFiles  []string
+	chartName    string
+	chartVersion string
+	appVersion   string
+	mode         string
+	verbose      bool
+}
+
+func runMigrate(ctx context.Context, opts migrateOptions) error {
+	// Validate existing chart directory
+	info, err := os.Stat(opts.fromDir)
+	if err != nil {
+		return fmt.Errorf("cannot access existing chart: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", opts.fromDir)
+	}
+
+	// Load existing chart from disk
+	existingChart, err := loadChartFromDir(opts.fromDir)
+	if err != nil {
+		return fmt.Errorf("failed to load existing chart: %w", err)
+	}
+
+	if opts.verbose {
+		fmt.Printf("Loaded existing chart %q from %s\n", existingChart.Name, opts.fromDir)
+		fmt.Printf("  Templates: %d\n", len(existingChart.Templates))
+	}
+
+	if len(opts.sourceFiles) == 0 {
+		return fmt.Errorf("no source files provided: use --source/-f to specify manifest paths")
+	}
+
+	var outputMode types.OutputMode
+	switch opts.mode {
+	case "universal":
+		outputMode = types.OutputModeUniversal
+	case "separate":
+		outputMode = types.OutputModeSeparate
+	case "library":
+		outputMode = types.OutputModeLibrary
+	case "umbrella":
+		outputMode = types.OutputModeUmbrella
+	default:
+		return fmt.Errorf("invalid mode: %s", opts.mode)
+	}
+
+	// Extract resources
+	extractorRegistry := extractor.DefaultRegistry()
+	ext, ok := extractorRegistry.Get(types.SourceFile)
+	if !ok {
+		return fmt.Errorf("no extractor available for file source")
+	}
+
+	extractOpts := extractor.Options{
+		Paths:     opts.sourceFiles,
+		Recursive: true,
+	}
+
+	if err := ext.Validate(ctx, extractOpts); err != nil {
+		return fmt.Errorf("extractor validation failed: %w", err)
+	}
+
+	resourceChan, errChan := ext.Extract(ctx, extractOpts)
+
+	var extractedResources []*types.ExtractedResource
+drain:
+	for {
+		select {
+		case resource, ok := <-resourceChan:
+			if !ok {
+				resourceChan = nil
+				if errChan == nil {
+					break drain
+				}
+				continue
+			}
+			extractedResources = append(extractedResources, resource)
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil
+				if resourceChan == nil {
+					break drain
+				}
+				continue
+			}
+			if opts.verbose {
+				fmt.Fprintf(os.Stderr, "  Warning: %v\n", err)
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	if len(extractedResources) == 0 {
+		return fmt.Errorf("no resources extracted from source files")
+	}
+
+	// Process resources
+	processorRegistry := processor.NewRegistry()
+	k8s.RegisterAll(processorRegistry)
+	valueProcessor := value.DefaultProcessor()
+	externalFileManager := value.NewExternalFileManager()
+
+	allResourcesMap := make(map[types.ResourceKey]*types.ExtractedResource)
+	for _, r := range extractedResources {
+		allResourcesMap[r.ResourceKey()] = r
+	}
+
+	var processedResources []*types.ProcessedResource
+	for _, extracted := range extractedResources {
+		procCtx := processor.Context{
+			Ctx:                 ctx,
+			ChartName:           opts.chartName,
+			OutputMode:          outputMode,
+			Namespace:           extracted.Object.GetNamespace(),
+			AllResources:        allResourcesMap,
+			ExternalFileManager: externalFileManager,
+			ValueProcessor:      valueProcessor,
+		}
+		result, err := processorRegistry.Process(procCtx, extracted.Object)
+		if err != nil {
+			return fmt.Errorf("failed to process %s: %w", extracted.ResourceKey().String(), err)
+		}
+		processedResources = append(processedResources, &types.ProcessedResource{
+			Original:        extracted,
+			ServiceName:     result.ServiceName,
+			TemplatePath:    result.TemplatePath,
+			TemplateContent: result.TemplateContent,
+			ValuesPath:      result.ValuesPath,
+			Values:          result.Values,
+			Dependencies:    result.Dependencies,
+		})
+	}
+
+	// Analyze relationships
+	a := analyzer.NewDefaultAnalyzer()
+	detector.RegisterAll(a)
+	graph, err := a.Analyze(ctx, processedResources)
+	if err != nil {
+		return fmt.Errorf("analysis failed: %w", err)
+	}
+
+	// Generate new chart
+	generatorRegistry := generator.DefaultRegistry()
+	gen, err := generatorRegistry.Get(outputMode)
+	if err != nil {
+		return fmt.Errorf("failed to get generator: %w", err)
+	}
+
+	genOpts := generator.Options{
+		ChartName:    opts.chartName,
+		ChartVersion: opts.chartVersion,
+		AppVersion:   opts.appVersion,
+		Mode:         outputMode,
+	}
+
+	charts, err := gen.Generate(ctx, graph, genOpts)
+	if err != nil {
+		return fmt.Errorf("chart generation failed: %w", err)
+	}
+
+	if len(charts) == 0 {
+		return fmt.Errorf("no charts generated")
+	}
+
+	newChart := charts[0]
+
+	// Detect drift
+	drift := generator.DetectDrift(existingChart, newChart)
+
+	if !drift.HasDrift() {
+		fmt.Println("No drift detected. Charts are identical.")
+		return nil
+	}
+
+	// Print drift summary
+	fmt.Printf("Drift detected: %d changes\n\n", drift.TotalItems())
+	if len(drift.Templates) > 0 {
+		fmt.Printf("Templates (%d):\n", len(drift.Templates))
+		for _, item := range drift.Templates {
+			fmt.Printf("  [%s] %s — %s\n", item.Category, item.Path, item.Detail)
+		}
+		fmt.Println()
+	}
+	if len(drift.Values) > 0 {
+		fmt.Printf("Values (%d):\n", len(drift.Values))
+		for _, item := range drift.Values {
+			fmt.Printf("  [%s] %s — %s\n", item.Category, item.Path, item.Detail)
+		}
+		fmt.Println()
+	}
+	if len(drift.Helpers) > 0 {
+		fmt.Printf("Helpers (%d):\n", len(drift.Helpers))
+		for _, item := range drift.Helpers {
+			fmt.Printf("  [%s] %s — %s\n", item.Category, item.Path, item.Detail)
+		}
+		fmt.Println()
+	}
+
+	// Print migration plan
+	plan := generator.GenerateMigrationPlan(drift)
+	fmt.Println(plan)
+
+	// Print values migration template if there are value changes
+	if len(drift.Values) > 0 {
+		migration := generator.GenerateValuesMigration(existingChart.ValuesYAML, newChart.ValuesYAML)
+		if !strings.Contains(migration, "No value migrations needed") {
+			fmt.Println("## Values Migration Template (_migrate.tpl)")
+			fmt.Println(migration)
+		}
+	}
+
+	return nil
+}
+
+// loadChartFromDir reads a Helm chart directory into a GeneratedChart struct.
+func loadChartFromDir(dir string) (*types.GeneratedChart, error) {
+	chart := &types.GeneratedChart{
+		Templates: make(map[string]string),
+	}
+
+	// Read Chart.yaml
+	chartYAML, err := os.ReadFile(filepath.Join(dir, "Chart.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Chart.yaml: %w", err)
+	}
+	chart.ChartYAML = string(chartYAML)
+
+	// Extract name from Chart.yaml
+	var chartMeta struct {
+		Name string `json:"name"`
+	}
+	if err := yaml.Unmarshal(chartYAML, &chartMeta); err == nil {
+		chart.Name = chartMeta.Name
+	}
+	chart.Path = dir
+
+	// Read values.yaml (optional)
+	if data, err := os.ReadFile(filepath.Join(dir, "values.yaml")); err == nil {
+		chart.ValuesYAML = string(data)
+	}
+
+	// Read _helpers.tpl (optional)
+	if data, err := os.ReadFile(filepath.Join(dir, "templates", "_helpers.tpl")); err == nil {
+		chart.Helpers = string(data)
+	}
+
+	// Read NOTES.txt (optional)
+	if data, err := os.ReadFile(filepath.Join(dir, "templates", "NOTES.txt")); err == nil {
+		chart.Notes = string(data)
+	}
+
+	// Read templates
+	templatesDir := filepath.Join(dir, "templates")
+	if info, err := os.Stat(templatesDir); err == nil && info.IsDir() {
+		err := filepath.Walk(templatesDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return err
+			}
+			relPath, err := filepath.Rel(dir, path)
+			if err != nil {
+				return err
+			}
+			// Skip _helpers.tpl and NOTES.txt (already loaded)
+			base := filepath.Base(path)
+			if base == "_helpers.tpl" || base == "NOTES.txt" {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			chart.Templates[relPath] = string(data)
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to read templates: %w", err)
+		}
+	}
+
+	return chart, nil
+}
+
 func newDiffCmd() *cobra.Command {
 	var (
 		color bool
@@ -1505,6 +1843,261 @@ func printUnifiedDiff(content1, content2 string, color bool) {
 			}
 		}
 	}
+}
+
+func newFixCmd() *cobra.Command {
+	var (
+		paths        []string
+		outputDir    string
+		chartName    string
+		workloadType string
+		verbose      bool
+		recursive    bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "fix",
+		Short: "Auto-fix Kubernetes manifests with security best practices",
+		Long: `Auto-fix Kubernetes manifests by injecting:
+  - SecurityContext (runAsNonRoot, readOnlyRootFilesystem, etc.)
+  - Resource requests/limits
+  - Health probes (liveness, readiness, startup)
+  - PodDisruptionBudgets
+  - PSS restricted compliance
+  - Graceful shutdown hooks
+
+Examples:
+  dhg fix -f ./manifests -o ./fixed
+  dhg fix -f ./manifests -o ./fixed --workload-type worker`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runFix(cmd.Context(), fixOptions{
+				paths:        paths,
+				outputDir:    outputDir,
+				chartName:    chartName,
+				workloadType: workloadType,
+				verbose:      verbose,
+				recursive:    recursive,
+			})
+		},
+	}
+
+	cmd.Flags().StringSliceVarP(&paths, "file", "f", []string{}, "Path(s) to YAML files or directories")
+	cmd.Flags().StringVarP(&outputDir, "output", "o", "./fixed", "Output directory for fixed manifests")
+	cmd.Flags().StringVar(&chartName, "chart-name", "fixed-chart", "Name of the output chart")
+	cmd.Flags().StringVar(&workloadType, "workload-type", "web", "Workload type for resource profiles: web, worker, database, batch, cache")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	cmd.Flags().BoolVarP(&recursive, "recursive", "r", true, "Recursively scan directories")
+
+	_ = cmd.MarkFlagRequired("file")
+
+	return cmd
+}
+
+type fixOptions struct {
+	paths        []string
+	outputDir    string
+	chartName    string
+	workloadType string
+	verbose      bool
+	recursive    bool
+}
+
+func runFix(ctx context.Context, opts fixOptions) error {
+	if opts.verbose {
+		fmt.Printf("Auto-fix: reading manifests from %v\n", opts.paths)
+	}
+
+	// Step 1: Extract resources
+	extractorRegistry := extractor.DefaultRegistry()
+	ext, ok := extractorRegistry.Get(types.SourceFile)
+	if !ok {
+		return fmt.Errorf("file extractor not available")
+	}
+
+	extractOpts := extractor.Options{
+		Paths:     opts.paths,
+		Recursive: opts.recursive,
+	}
+
+	if err := ext.Validate(ctx, extractOpts); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
+	resourceChan, errChan := ext.Extract(ctx, extractOpts)
+
+	var extractedResources []*types.ExtractedResource
+drainFix:
+	for {
+		select {
+		case resource, ok := <-resourceChan:
+			if !ok {
+				resourceChan = nil
+				if errChan == nil {
+					break drainFix
+				}
+				continue
+			}
+			extractedResources = append(extractedResources, resource)
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil
+				if resourceChan == nil {
+					break drainFix
+				}
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	if len(extractedResources) == 0 {
+		return fmt.Errorf("no resources extracted from %v", opts.paths)
+	}
+
+	if opts.verbose {
+		fmt.Printf("Extracted %d resources\n", len(extractedResources))
+	}
+
+	// Step 2: Process resources
+	processorRegistry := processor.NewRegistry()
+	k8s.RegisterAll(processorRegistry)
+
+	valueProcessor := value.DefaultProcessor()
+	externalFileManager := value.NewExternalFileManager()
+
+	allResourcesMap := make(map[types.ResourceKey]*types.ExtractedResource)
+	for _, r := range extractedResources {
+		allResourcesMap[r.ResourceKey()] = r
+	}
+
+	var processedResources []*types.ProcessedResource
+	for _, extracted := range extractedResources {
+		procCtx := processor.Context{
+			Ctx:                 ctx,
+			ChartName:           opts.chartName,
+			OutputMode:          types.OutputModeUniversal,
+			Namespace:           extracted.Object.GetNamespace(),
+			AllResources:        allResourcesMap,
+			ExternalFileManager: externalFileManager,
+			ValueProcessor:      valueProcessor,
+		}
+
+		result, err := processorRegistry.Process(procCtx, extracted.Object)
+		if err != nil {
+			return fmt.Errorf("failed to process %s: %w", extracted.ResourceKey().String(), err)
+		}
+
+		processedResources = append(processedResources, &types.ProcessedResource{
+			Original:        extracted,
+			ServiceName:     result.ServiceName,
+			TemplatePath:    result.TemplatePath,
+			TemplateContent: result.TemplateContent,
+			ValuesPath:      result.ValuesPath,
+			Values:          result.Values,
+			Dependencies:    result.Dependencies,
+		})
+	}
+
+	// Step 3: Analyze relationships
+	anlzr := analyzer.NewDefaultAnalyzer()
+	detector.RegisterAll(anlzr)
+
+	graph, err := anlzr.Analyze(ctx, processedResources)
+	if err != nil {
+		return fmt.Errorf("analysis failed: %w", err)
+	}
+
+	// Step 4: Generate chart
+	generatorRegistry := generator.DefaultRegistry()
+	gen, err := generatorRegistry.Get(types.OutputModeUniversal)
+	if err != nil {
+		return fmt.Errorf("failed to get generator: %w", err)
+	}
+
+	genOpts := generator.Options{
+		OutputDir:    opts.outputDir,
+		ChartName:    opts.chartName,
+		ChartVersion: "0.1.0",
+		AppVersion:   "1.0.0",
+		Mode:         types.OutputModeUniversal,
+	}
+
+	charts, err := gen.Generate(ctx, graph, genOpts)
+	if err != nil {
+		return fmt.Errorf("chart generation failed: %w", err)
+	}
+
+	if len(charts) == 0 {
+		return fmt.Errorf("no charts generated")
+	}
+
+	// Step 5: Apply all fixes
+	wt := generator.WorkloadType(opts.workloadType)
+	for i, chart := range charts {
+		fixed, fixResult := generator.ApplyAllFixes(chart, wt)
+		charts[i] = fixed
+
+		if opts.verbose {
+			fmt.Printf("Chart %q fixes applied:\n", chart.Name)
+			fmt.Printf("  SecurityContext: %d\n", fixResult.SecurityContextInjected)
+			fmt.Printf("  Resources:      %d\n", fixResult.ResourcesInjected)
+			fmt.Printf("  HealthProbes:   %d\n", fixResult.HealthProbesInjected)
+			fmt.Printf("  PDBs:           %d\n", fixResult.PDBsGenerated)
+			fmt.Printf("  PSS Restricted: %d\n", fixResult.PSSRestrictedApplied)
+			fmt.Printf("  GracefulShutdown: %d\n", fixResult.GracefulShutdownAdded)
+		} else {
+			total := fixResult.SecurityContextInjected + fixResult.ResourcesInjected +
+				fixResult.HealthProbesInjected + fixResult.PDBsGenerated +
+				fixResult.PSSRestrictedApplied + fixResult.GracefulShutdownAdded
+			fmt.Printf("Applied %d fixes to chart %q\n", total, chart.Name)
+		}
+	}
+
+	// Step 6: Write output
+	for _, chart := range charts {
+		chartDir := filepath.Join(opts.outputDir, chart.Name)
+		if err := os.MkdirAll(chartDir, 0o755); err != nil {
+			return fmt.Errorf("creating output directory: %w", err)
+		}
+
+		if chart.ChartYAML != "" {
+			if err := os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(chart.ChartYAML), 0o644); err != nil {
+				return fmt.Errorf("writing Chart.yaml: %w", err)
+			}
+		}
+
+		if chart.ValuesYAML != "" {
+			if err := os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte(chart.ValuesYAML), 0o644); err != nil {
+				return fmt.Errorf("writing values.yaml: %w", err)
+			}
+		}
+
+		if chart.Helpers != "" {
+			tplDir := filepath.Join(chartDir, "templates")
+			if err := os.MkdirAll(tplDir, 0o755); err != nil {
+				return fmt.Errorf("creating templates directory: %w", err)
+			}
+			if err := os.WriteFile(filepath.Join(tplDir, "_helpers.tpl"), []byte(chart.Helpers), 0o644); err != nil {
+				return fmt.Errorf("writing _helpers.tpl: %w", err)
+			}
+		}
+
+		for tplPath, content := range chart.Templates {
+			fullPath := filepath.Join(chartDir, tplPath)
+			dir := filepath.Dir(fullPath)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return fmt.Errorf("creating directory %s: %w", dir, err)
+			}
+			if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+				return fmt.Errorf("writing template %s: %w", tplPath, err)
+			}
+		}
+	}
+
+	fmt.Printf("Fixed charts written to %s\n", opts.outputDir)
+	return nil
 }
 
 func newVersionCmd() *cobra.Command {
