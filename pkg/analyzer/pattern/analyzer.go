@@ -464,6 +464,7 @@ func DefaultAnalyzer() *Analyzer {
 	a.AddDetector(NewDeckhouseDetector())
 	a.AddDetector(NewJobDetector())
 	a.AddDetector(NewOperatorDetector())
+	a.AddDetector(NewSidecarDetector())
 
 	// Add best practice checkers
 	a.AddChecker(NewResourceLimitsChecker())
@@ -475,6 +476,7 @@ func DefaultAnalyzer() *Analyzer {
 	a.AddChecker(NewDaemonSetPatternChecker())
 	a.AddChecker(NewGracefulShutdownChecker())
 	a.AddChecker(NewPodSecurityStandardsChecker())
+	a.AddChecker(NewTopologySpreadChecker())
 
 	return a
 }

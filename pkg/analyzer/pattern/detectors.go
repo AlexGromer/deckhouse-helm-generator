@@ -239,3 +239,66 @@ func (d *DeckhouseDetector) Detect(graph *types.ResourceGraph) []ArchitecturePat
 
 	return patterns
 }
+
+// SidecarDetector detects known sidecar containers and recommends injection.
+type SidecarDetector struct{}
+
+func NewSidecarDetector() *SidecarDetector {
+	return &SidecarDetector{}
+}
+
+func (d *SidecarDetector) Name() string {
+	return "sidecar"
+}
+
+// sidecarSignature maps container name/image substrings to sidecar type.
+var sidecarSignatures = map[string]string{
+	"envoy":                "service mesh",
+	"istio-proxy":          "service mesh",
+	"fluent-bit":           "logging",
+	"fluentd":              "logging",
+	"filebeat":             "logging",
+	"vault-agent":          "secrets",
+	"datadog-agent":        "monitoring",
+	"prometheus-exporter":  "monitoring",
+}
+
+func (d *SidecarDetector) Detect(graph *types.ResourceGraph) []ArchitecturePattern {
+	patterns := make([]ArchitecturePattern, 0)
+
+	workloadKinds := map[string]bool{
+		"Deployment":  true,
+		"StatefulSet": true,
+		"DaemonSet":   true,
+	}
+
+	for key, resource := range graph.Resources {
+		if !workloadKinds[key.GVK.Kind] {
+			continue
+		}
+
+		containers, ok := resource.Values["containers"]
+		if !ok || containers == nil {
+			continue
+		}
+
+		containerList, ok := containers.([]map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, container := range containerList {
+			name, _ := container["name"].(string)
+			image, _ := container["image"].(string)
+
+			for sig := range sidecarSignatures {
+				if strings.Contains(strings.ToLower(name), sig) || strings.Contains(strings.ToLower(image), sig) {
+					patterns = append(patterns, PatternSidecar)
+					return patterns
+				}
+			}
+		}
+	}
+
+	return patterns
+}

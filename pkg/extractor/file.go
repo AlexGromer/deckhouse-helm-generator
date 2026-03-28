@@ -91,6 +91,8 @@ func (e *FileExtractor) extractPath(ctx context.Context, path string, opts Optio
 }
 
 func (e *FileExtractor) extractDirectory(ctx context.Context, dir string, opts Options, resources chan<- *types.ExtractedResource, errors chan<- error) error {
+	fileCount := 0
+
 	walkFn := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			errors <- fmt.Errorf("error walking %s: %w", path, err)
@@ -112,6 +114,12 @@ func (e *FileExtractor) extractDirectory(ctx context.Context, dir string, opts O
 		// Only process YAML files
 		if !isYAMLFile(path) {
 			return nil
+		}
+
+		fileCount++
+		// Print progress to stderr for large directories
+		if fileCount%10 == 0 {
+			fmt.Fprintf(os.Stderr, "Processing file %d...\n", fileCount)
 		}
 
 		if err := e.extractFile(ctx, path, opts, resources, errors); err != nil {
