@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ['1.23', '1.24']
+        go-version: ['1.25', '1.26']
 
     steps:
     - name: Checkout code
@@ -46,7 +46,7 @@ jobs:
           ./cmd/... ./pkg/...
 
     - name: Upload coverage artifact
-      if: matrix.go-version == '1.24'
+      if: matrix.go-version == '1.26'
       uses: actions/upload-artifact@v6
       with:
         name: coverage-unit
@@ -66,7 +66,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: '1.26'
         cache: true
 
     - name: Download dependencies
@@ -102,7 +102,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: '1.26'
         cache: true
 
     - name: Download dependencies
@@ -142,7 +142,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: stable
+        go-version: '1.26'
 
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v9
@@ -199,7 +199,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: '1.26'
 
     - name: Download unit coverage
       uses: actions/download-artifact@v7
@@ -221,13 +221,10 @@ jobs:
 
     - name: Merge coverage profiles
       run: |
-        # Merge Go coverage profiles without external tools.
-        # First file provides the header (mode: set/atomic), remaining
-        # files are appended without their header line.
-        head -1 coverage/coverage-unit.txt > coverage-merged.txt
-        for f in coverage/coverage*.txt; do
-          tail -n +2 "$f" >> coverage-merged.txt
-        done
+        # Install gocovmerge (requires Go 1.25+, satisfied by Go 1.26)
+        go install github.com/wadey/gocovmerge@latest
+        # Merge all coverage profiles
+        gocovmerge coverage/coverage*.txt > coverage-merged.txt
         # Display coverage
         go tool cover -func=coverage-merged.txt
 
@@ -264,7 +261,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: '1.26'
         cache: true
 
     - name: Build binary
