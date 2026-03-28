@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -237,6 +238,7 @@ func buildCrossNamespaceIndex(graph *types.ResourceGraph, groups []*ServiceGroup
 		for ns := range nsMap {
 			result[name] = append(result[name], ns)
 		}
+		sort.Strings(result[name])
 	}
 	return result
 }
@@ -249,9 +251,7 @@ func generateNetworkPolicy(group *ServiceGroup, ingressPorts, egressPorts []port
 	sb.WriteString("kind: NetworkPolicy\n")
 	sb.WriteString("metadata:\n")
 	sb.WriteString(fmt.Sprintf("  name: %s-netpol\n", group.Name))
-	if group.Namespace != "" {
-		sb.WriteString(fmt.Sprintf("  namespace: %s\n", group.Namespace))
-	}
+	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
 	sb.WriteString("spec:\n")
 	sb.WriteString("  podSelector:\n")
 	sb.WriteString("    matchLabels:\n")

@@ -323,6 +323,47 @@ func TestIngressAnnotations_TraefikAnnotations(t *testing.T) {
 	}
 }
 
+func TestTraefik_MultiFeature_CommaSeparated(t *testing.T) {
+	annotations := GenerateIngressAnnotations(ControllerTraefik, []IngressFeature{
+		IngressCanary, IngressCORS, IngressAuth,
+	})
+
+	val, ok := annotations["traefik.ingress.kubernetes.io/router.middlewares"]
+	if !ok {
+		t.Fatal("expected annotation 'traefik.ingress.kubernetes.io/router.middlewares'")
+	}
+
+	// Values must be sorted and comma-separated with no trailing comma.
+	expected := "auth@kubernetescrd,canary@kubernetescrd,cors@kubernetescrd"
+	if val != expected {
+		t.Errorf("expected %q, got %q", expected, val)
+	}
+
+	// Must not contain trailing comma.
+	if strings.HasSuffix(val, ",") {
+		t.Error("router.middlewares value must not have trailing comma")
+	}
+}
+
+func TestTraefik_SingleFeature_NoComma(t *testing.T) {
+	annotations := GenerateIngressAnnotations(ControllerTraefik, []IngressFeature{IngressCanary})
+
+	val, ok := annotations["traefik.ingress.kubernetes.io/router.middlewares"]
+	if !ok {
+		t.Fatal("expected annotation 'traefik.ingress.kubernetes.io/router.middlewares'")
+	}
+
+	expected := "canary@kubernetescrd"
+	if val != expected {
+		t.Errorf("expected %q, got %q", expected, val)
+	}
+
+	// Single feature must not contain a comma.
+	if strings.Contains(val, ",") {
+		t.Errorf("single feature must not contain comma, got %q", val)
+	}
+}
+
 func TestIngressAnnotations_HAProxySSLRedirect(t *testing.T) {
 	annotations := GenerateIngressAnnotations(ControllerHAProxy, []IngressFeature{IngressSSLRedirect})
 

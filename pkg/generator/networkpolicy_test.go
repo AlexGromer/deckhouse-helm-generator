@@ -1,6 +1,8 @@
 package generator
 
 import (
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -364,5 +366,89 @@ func TestAutoNP_CrossNamespace(t *testing.T) {
 	}
 	if !hasNsSelector {
 		t.Error("expected namespaceSelector in cross-namespace NetworkPolicy")
+	}
+}
+
+// ============================================================
+// M-5: Namespace uses Helm Release.Namespace template
+// ============================================================
+
+func TestAutoNP_UsesHelmReleaseNamespace(t *testing.T) {
+	deploy := makeDeploymentWithEnv("myapp", "hardcoded-ns", nil)
+	group := makeGroup("myapp", "hardcoded-ns", []*types.ProcessedResource{deploy})
+	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
+
+	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+
+	for _, content := range result {
+		if !strings.Contains(content, "namespace: {{ .Release.Namespace }}") {
+			t.Error("expected namespace to use Helm template {{ .Release.Namespace }}")
+		}
+		if strings.Contains(content, "namespace: hardcoded-ns") {
+			t.Error("namespace must NOT contain literal source namespace 'hardcoded-ns'")
+		}
+	}
+}
+
+// ============================================================
+// M-6: Deterministic output of buildCrossNamespaceIndex
+// ============================================================
+
+func TestBuildCrossNamespaceIndex_Deterministic(t *testing.T) {
+	// Create 4 groups across 4 namespaces with cross-namespace relationships
+	deployA := makeDeploymentWithEnv("svc-a", "ns-alpha", nil)
+	deployB := makeDeploymentWithEnv("svc-b", "ns-beta", nil)
+	deployC := makeDeploymentWithEnv("svc-c", "ns-gamma", nil)
+	deployD := makeDeploymentWithEnv("svc-d", "ns-delta", nil)
+
+	groups := []*ServiceGroup{
+		makeGroup("svc-a", "ns-alpha", []*types.ProcessedResource{deployA}),
+		makeGroup("svc-b", "ns-beta", []*types.ProcessedResource{deployB}),
+		makeGroup("svc-c", "ns-gamma", []*types.ProcessedResource{deployC}),
+		makeGroup("svc-d", "ns-delta", []*types.ProcessedResource{deployD}),
+	}
+
+	// Build relationships: A->B, A->C, A->D, B->C, B->D, C->D
+	rels := []types.Relationship{
+		{From: resourceKey(deployA), To: resourceKey(deployB), Type: types.RelationNameReference},
+		{From: resourceKey(deployA), To: resourceKey(deployC), Type: types.RelationNameReference},
+		{From: resourceKey(deployA), To: resourceKey(deployD), Type: types.RelationNameReference},
+		{From: resourceKey(deployB), To: resourceKey(deployC), Type: types.RelationNameReference},
+		{From: resourceKey(deployB), To: resourceKey(deployD), Type: types.RelationNameReference},
+		{From: resourceKey(deployC), To: resourceKey(deployD), Type: types.RelationNameReference},
+	}
+
+	graph := buildGraph([]*types.ProcessedResource{deployA, deployB, deployC, deployD}, rels)
+
+	// Call 5 times and verify all results are identical
+	var firstResult map[string][]string
+	for i := 0; i < 5; i++ {
+		result := buildCrossNamespaceIndex(graph, groups)
+
+		// Verify each slice is sorted
+		for name, namespaces := range result {
+			if !sort.StringsAreSorted(namespaces) {
+				t.Errorf("iteration %d: namespaces for %q are not sorted: %v", i, name, namespaces)
+			}
+		}
+
+		if firstResult == nil {
+			firstResult = result
+			continue
+		}
+
+		if !reflect.DeepEqual(firstResult, result) {
+			t.Errorf("iteration %d: result differs from first iteration\nfirst: %v\ngot:   %v", i, firstResult, result)
+		}
+	}
+
+	// Verify svc-a has 3 cross-namespace entries (ns-beta, ns-gamma, ns-delta) — all sorted
+	if got := firstResult["svc-a"]; len(got) != 3 {
+		t.Errorf("svc-a: expected 3 cross-namespace entries, got %d: %v", len(got), got)
+	} else {
+		want := []string{"ns-beta", "ns-delta", "ns-gamma"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("svc-a: expected %v, got %v", want, got)
+		}
 	}
 }

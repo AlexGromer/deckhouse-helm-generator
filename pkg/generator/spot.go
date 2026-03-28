@@ -97,6 +97,32 @@ spec:
 `, appName, minAvailable, appName)
 }
 
+// GenerateSpotPDBHelm returns a PodDisruptionBudget YAML string using Helm template
+// syntax for the name and selector labels, suitable for inclusion in a Helm chart.
+// For low replica counts (<=2), minAvailable is set to 1.
+// For higher replica counts (>2), minAvailable is set to "50%".
+func GenerateSpotPDBHelm(chartName string, replicas int) string {
+	var minAvailable string
+	if replicas <= 2 {
+		minAvailable = "minAvailable: 1"
+	} else {
+		minAvailable = `minAvailable: "50%"`
+	}
+
+	return fmt.Sprintf(`apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "%s.fullname" . }}-pdb
+  labels:
+    {{- include "%s.labels" . | nindent 4 }}
+spec:
+  %s
+  selector:
+    matchLabels:
+      {{- include "%s.selectorLabels" . | nindent 6 }}
+`, chartName, chartName, minAvailable, chartName)
+}
+
 // GenerateSpotValues returns a values map containing spot instance configuration
 // suitable for inclusion in a Helm chart's values.yaml.
 func GenerateSpotValues(config SpotConfig) map[string]interface{} {
@@ -126,6 +152,9 @@ func InjectSpotConfig(chart *types.GeneratedChart, config SpotConfig) *types.Gen
 		templates[k] = v
 	}
 
+	// defaultReplicas is used when replica count cannot be parsed from the template.
+	const defaultReplicas = 2
+
 	for name, content := range templates {
 		// Only inject into Deployments and StatefulSets.
 		if strings.Contains(content, "kind: Deployment") || strings.Contains(content, "kind: StatefulSet") {
@@ -134,6 +163,11 @@ func InjectSpotConfig(chart *types.GeneratedChart, config SpotConfig) *types.Gen
 				continue
 			}
 			templates[name] = injectTolerationsIntoTemplate(content, tolerations)
+
+			// Generate a PDB template for each Deployment/StatefulSet.
+			replicas := extractReplicas(content, defaultReplicas)
+			pdbKey := spotPDBTemplateKey(name)
+			templates[pdbKey] = GenerateSpotPDBHelm(chart.Name, replicas)
 		}
 	}
 
@@ -214,4 +248,27 @@ func injectTolerationsIntoTemplate(template string, tolerations []map[string]int
 
 	tolerationsBlock := strings.Join(lines, "\n")
 	return template + "\n" + tolerationsBlock
+}
+
+// extractReplicas parses the `replicas:` value from a Kubernetes workload template.
+// Returns defaultVal if the field is absent or uses a Helm template expression.
+func extractReplicas(content string, defaultVal int) int {
+	re := regexp.MustCompile(`replicas:\s*(\d+)`)
+	m := re.FindStringSubmatch(content)
+	if m == nil {
+		return defaultVal
+	}
+	var n int
+	if _, err := fmt.Sscanf(m[1], "%d", &n); err != nil {
+		return defaultVal
+	}
+	return n
+}
+
+// spotPDBTemplateKey derives a PDB template map key from the source template key.
+// For example, "templates/deployment.yaml" → "templates/deployment-spot-pdb.yaml".
+func spotPDBTemplateKey(templateKey string) string {
+	ext := ".yaml"
+	base := strings.TrimSuffix(templateKey, ext)
+	return base + "-spot-pdb" + ext
 }
