@@ -58,36 +58,7 @@ func makeIngressClass(name, controller string) *types.ProcessedResource {
 	}
 }
 
-// makeDeploymentWithImage creates a ProcessedResource representing a Deployment
-// whose first container uses the given image string.
-func makeDeploymentWithImage(name, image string) *types.ProcessedResource {
-	obj := &unstructured.Unstructured{}
-	obj.SetKind("Deployment")
-	obj.SetName(name)
-	obj.SetAPIVersion("apps/v1")
-	obj.Object["spec"] = map[string]interface{}{
-		"template": map[string]interface{}{
-			"spec": map[string]interface{}{
-				"containers": []interface{}{
-					map[string]interface{}{
-						"name":  "main",
-						"image": image,
-					},
-				},
-			},
-		},
-	}
-	return &types.ProcessedResource{
-		Original: &types.ExtractedResource{
-			Object: obj,
-			GVK: schema.GroupVersionKind{
-				Group:   "apps",
-				Version: "v1",
-				Kind:    "Deployment",
-			},
-		},
-	}
-}
+// makeDeploymentWithImage is defined in testhelpers_test.go.
 
 // ============================================================
 // Section 1: DetectIngressController — detection from IngressClass
@@ -407,9 +378,12 @@ func TestIngressAnnotations_UnknownController_Fallback(t *testing.T) {
 		t.Fatal("expected at least the generic kubernetes.io/ingress.class annotation for unknown controller")
 	}
 
-	_, ok := annotations["kubernetes.io/ingress.class"]
+	val, ok := annotations["kubernetes.io/ingress.class"]
 	if !ok {
 		t.Error("expected fallback annotation 'kubernetes.io/ingress.class' for unknown controller")
+	}
+	if val == "" {
+		t.Error("expected non-empty value for kubernetes.io/ingress.class fallback")
 	}
 
 	// Must not produce any controller-specific prefixed annotations.

@@ -864,6 +864,18 @@ func makeGroupForEnv(name string, resources ...*types.ProcessedResource) *Servic
 	}
 }
 
+// T2-LR-5: Redis + PVC disambiguation test
+
+func TestDetectWorkloadType_RedisWithPVC_IsNotCache(t *testing.T) {
+	redis := makeResourceWithImage("StatefulSet", "redis", "redis:7")
+	pvc := makeResourceForEnv("PersistentVolumeClaim", "redis-data")
+	group := makeGroupForEnv("redis", redis, pvc)
+	wt := DetectWorkloadType(group)
+	if wt == WorkloadCache {
+		t.Errorf("redis + PVC should NOT be Cache, got %s (expected Database)", wt)
+	}
+}
+
 // HC-3: Nil pointer dereference tests
 
 func TestExtractContainers_NilResource_ReturnsNil(t *testing.T) {

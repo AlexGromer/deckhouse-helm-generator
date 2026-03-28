@@ -22,6 +22,9 @@ func GenerateNamespaceResources(groups []*ServiceGroup, opts NamespaceOpts) map[
 	result := make(map[string]string)
 
 	for _, group := range groups {
+		if group == nil {
+			continue
+		}
 		if opts.ResourceQuota {
 			path := fmt.Sprintf("templates/%s-resourcequota.yaml", group.Name)
 			result[path] = GenerateResourceQuotaTemplate(group)

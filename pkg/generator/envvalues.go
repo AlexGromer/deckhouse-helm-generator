@@ -268,13 +268,15 @@ func DetectWorkloadType(group *ServiceGroup) WorkloadType {
 		return WorkloadWorker
 	}
 
-	// Default.
+	// Default to Web — safest profile (replicas, HPA, standard limits).
 	return WorkloadWeb
 }
 
 // GenerateEnvValuesForWorkload generates environment-specific values files with
 // workload-aware profiles. Returns a map with keys "values-dev.yaml",
 // "values-staging.yaml", and "values-prod.yaml".
+// Note: baseValues is currently unused. Profiles are generated from workload
+// type only. Merging with baseValues is deferred (see HC-11/M-3 history).
 func GenerateEnvValuesForWorkload(baseValues map[string]interface{}, workloadType WorkloadType) map[string][]byte {
 	result := make(map[string][]byte, 3)
 
