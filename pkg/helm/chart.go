@@ -153,8 +153,15 @@ func GenerateChartYAML(meta ChartMetadata) string {
 	return sb.String()
 }
 
-// GenerateNOTES generates the NOTES.txt content.
-func GenerateNOTES(chartName string, services []string) string {
+// NOTESContext provides additional context for dynamic NOTES.txt generation.
+type NOTESContext struct {
+	ServiceTypes []string // Kubernetes Service types present (e.g., "LoadBalancer", "ClusterIP")
+	HasIngress   bool     // Whether the chart includes Ingress resources
+	HasAuth      bool     // Whether the chart includes authentication configuration
+}
+
+// GenerateNOTES generates the NOTES.txt content with context-aware sections.
+func GenerateNOTES(chartName string, services []string, ctx NOTESContext) string {
 	var sb strings.Builder
 
 	sb.WriteString("===================================================================\n")
@@ -170,6 +177,40 @@ func GenerateNOTES(chartName string, services []string) string {
 			sb.WriteString(fmt.Sprintf("  - %s\n", svc))
 		}
 		sb.WriteString("\n")
+	}
+
+	// Dynamic section: LoadBalancer IP retrieval
+	for _, st := range ctx.ServiceTypes {
+		if strings.EqualFold(st, "LoadBalancer") {
+			sb.WriteString("Get the LoadBalancer IP:\n\n")
+			sb.WriteString("  kubectl get svc -l app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }} -o jsonpath='{.items[?(@.spec.type==\"LoadBalancer\")].status.loadBalancer.ingress[0].ip}'\n\n")
+			break
+		}
+	}
+
+	// Dynamic section: Ingress URL
+	if ctx.HasIngress {
+		sb.WriteString("Get the application URL:\n\n")
+		sb.WriteString("  kubectl get ingress -l app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }}\n\n")
+	}
+
+	// Dynamic section: port-forward for ClusterIP (default access method when no LB/Ingress)
+	hasLB := false
+	for _, st := range ctx.ServiceTypes {
+		if strings.EqualFold(st, "LoadBalancer") {
+			hasLB = true
+			break
+		}
+	}
+	if !hasLB && !ctx.HasIngress {
+		sb.WriteString("Access the application via port-forward:\n\n")
+		sb.WriteString(fmt.Sprintf("  kubectl port-forward svc/%s 8080:80 -n {{ .Release.Namespace }}\n\n", chartName))
+	}
+
+	// Dynamic section: Auth configuration notice
+	if ctx.HasAuth {
+		sb.WriteString("Authentication is enabled. Ensure auth secrets are configured:\n\n")
+		sb.WriteString("  kubectl get secret -l app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }}\n\n")
 	}
 
 	sb.WriteString("To customize the installation, edit the values.yaml file and upgrade:\n\n")

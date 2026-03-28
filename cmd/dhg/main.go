@@ -108,6 +108,9 @@ func newGenerateCmd() *cobra.Command {
 		kustomize          bool
 		autoDeps           bool
 		tenantCount        int
+		templateStyle      string
+		includeHooks       bool
+		valuesFlat         bool
 	)
 
 	cmd := &cobra.Command{
@@ -161,6 +164,9 @@ Examples:
 				kustomize:          kustomize,
 				autoDeps:           autoDeps,
 				tenantCount:        tenantCount,
+				templateStyle:      templateStyle,
+				includeHooks:       includeHooks,
+				valuesFlat:         valuesFlat,
 			})
 		},
 	}
@@ -200,6 +206,9 @@ Examples:
 	cmd.Flags().BoolVar(&kustomize, "kustomize", false, "Generate Kustomize layout with base and dev/staging/prod overlays")
 	cmd.Flags().BoolVar(&autoDeps, "auto-deps", false, "Auto-detect infrastructure dependencies (PostgreSQL, Redis, etc.)")
 	cmd.Flags().IntVar(&tenantCount, "tenant-count", 2, "Number of tenant examples to scaffold (default: 2)")
+	cmd.Flags().StringVar(&templateStyle, "template-style", "standard", "Template output style: standard, helm")
+	cmd.Flags().BoolVar(&includeHooks, "hooks", false, "Generate Helm lifecycle hook Job templates (pre-upgrade, post-install, pre-delete)")
+	cmd.Flags().BoolVar(&valuesFlat, "values-flat", false, "Add inline dot-notation path comments to values.yaml for --set reference")
 
 	_ = cmd.MarkFlagRequired("chart-name")
 
@@ -242,6 +251,9 @@ type generateOptions struct {
 	kustomize          bool
 	autoDeps           bool
 	tenantCount        int
+	templateStyle      string
+	includeHooks       bool
+	valuesFlat         bool
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -286,6 +298,14 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	// Validate mutually exclusive flags
 	if opts.monorepo && opts.kustomize {
 		return fmt.Errorf("--monorepo and --kustomize are mutually exclusive")
+	}
+
+	// Validate template style
+	switch opts.templateStyle {
+	case "standard", "helm":
+		// valid
+	default:
+		return fmt.Errorf("unknown template style: %q (must be standard or helm)", opts.templateStyle)
 	}
 
 	// Validate cloud provider
@@ -474,6 +494,9 @@ drain:
 		ExternalFileManager: externalFileManager,
 		EnvValues:           opts.envValues,
 		DeckhouseModule:     opts.deckhouseModule,
+		TemplateStyle:       opts.templateStyle,
+		IncludeHooks:        opts.includeHooks,
+		ValuesFlat:          opts.valuesFlat,
 	}
 
 	charts, err := gen.Generate(ctx, graph, genOpts)

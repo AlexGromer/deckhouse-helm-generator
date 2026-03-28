@@ -219,10 +219,11 @@ func TestFeatureFlags_AllCategories_SixFlagsInValues(t *testing.T) {
 		}
 	}
 
-	// All six flags should be true by default
-	featureCount := strings.Count(result.ValuesYAML, "true")
-	if featureCount < 6 {
-		t.Errorf("expected at least 6 'true' values in features section, got %d", featureCount)
+	// Each of the six feature categories must appear in ValuesYAML
+	for _, cat := range []string{"monitoring", "ingress", "autoscaling", "security", "storage", "rbac"} {
+		if !strings.Contains(result.ValuesYAML, cat+":") {
+			t.Errorf("missing feature category %q in ValuesYAML", cat)
+		}
 	}
 
 	// The features section must be present

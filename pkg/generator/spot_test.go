@@ -234,6 +234,40 @@ func TestSpot_PDB_HighReplicas_MinAvailable50Pct(t *testing.T) {
 	}
 }
 
+func TestSpot_PDB_ZeroReplicas(t *testing.T) {
+	// replicas=0 is invalid; should be clamped to 1, producing minAvailable: 1
+	pdb := GenerateSpotPDB("myapp", 0)
+
+	if pdb == "" {
+		t.Fatal("GenerateSpotPDB must return a non-empty YAML string for replicas=0")
+	}
+
+	if !strings.Contains(pdb, "kind: PodDisruptionBudget") {
+		t.Errorf("expected valid PDB YAML for replicas=0, got:\n%s", pdb)
+	}
+
+	if !strings.Contains(pdb, "minAvailable: 1") {
+		t.Errorf("expected 'minAvailable: 1' for replicas=0 (clamped to 1), got:\n%s", pdb)
+	}
+}
+
+func TestSpot_PDB_NegativeReplicas(t *testing.T) {
+	// replicas=-1 is invalid; should be clamped to 1, producing minAvailable: 1
+	pdb := GenerateSpotPDB("myapp", -1)
+
+	if pdb == "" {
+		t.Fatal("GenerateSpotPDB must return a non-empty YAML string for replicas=-1")
+	}
+
+	if !strings.Contains(pdb, "kind: PodDisruptionBudget") {
+		t.Errorf("expected valid PDB YAML for replicas=-1, got:\n%s", pdb)
+	}
+
+	if !strings.Contains(pdb, "minAvailable: 1") {
+		t.Errorf("expected 'minAvailable: 1' for replicas=-1 (clamped to 1), got:\n%s", pdb)
+	}
+}
+
 // ============================================================
 // Section 4: GenerateSpotValues — values map structure
 // ============================================================

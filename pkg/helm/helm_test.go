@@ -71,7 +71,7 @@ func TestGenerateChartYAML_Full(t *testing.T) {
 }
 
 func TestGenerateNOTES(t *testing.T) {
-	out := GenerateNOTES("myapp", []string{"frontend", "backend"})
+	out := GenerateNOTES("myapp", []string{"frontend", "backend"}, NOTESContext{})
 	for _, want := range []string{"myapp", "frontend", "backend", "kubectl get all"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in NOTES", want)
@@ -80,9 +80,69 @@ func TestGenerateNOTES(t *testing.T) {
 }
 
 func TestGenerateNOTES_NoServices(t *testing.T) {
-	out := GenerateNOTES("myapp", nil)
+	out := GenerateNOTES("myapp", nil, NOTESContext{})
 	if strings.Contains(out, "Installed services") {
 		t.Error("should not show services section when empty")
+	}
+}
+
+func TestGenerateNOTES_WithLoadBalancer(t *testing.T) {
+	out := GenerateNOTES("myapp", []string{"web"}, NOTESContext{
+		ServiceTypes: []string{"LoadBalancer"},
+	})
+	if !strings.Contains(out, "LoadBalancer IP") {
+		t.Error("NOTES should contain LoadBalancer IP retrieval section")
+	}
+	if !strings.Contains(out, "jsonpath") {
+		t.Error("NOTES should contain jsonpath command for LB IP")
+	}
+	// Should NOT have port-forward when LB is present
+	if strings.Contains(out, "port-forward") {
+		t.Error("NOTES should not suggest port-forward when LoadBalancer is available")
+	}
+}
+
+func TestGenerateNOTES_WithIngress(t *testing.T) {
+	out := GenerateNOTES("myapp", []string{"web"}, NOTESContext{
+		HasIngress: true,
+	})
+	if !strings.Contains(out, "application URL") {
+		t.Error("NOTES should contain Ingress URL section")
+	}
+	if !strings.Contains(out, "get ingress") {
+		t.Error("NOTES should contain kubectl get ingress command")
+	}
+	// Should NOT have port-forward when Ingress is present
+	if strings.Contains(out, "port-forward") {
+		t.Error("NOTES should not suggest port-forward when Ingress is available")
+	}
+}
+
+func TestGenerateNOTES_DefaultPortForward(t *testing.T) {
+	out := GenerateNOTES("myapp", []string{"web"}, NOTESContext{
+		ServiceTypes: []string{"ClusterIP"},
+	})
+	if !strings.Contains(out, "port-forward") {
+		t.Error("NOTES should contain port-forward section for ClusterIP services")
+	}
+	if !strings.Contains(out, "svc/myapp") {
+		t.Error("NOTES port-forward should reference the chart service name")
+	}
+	// Should NOT have LB or Ingress sections
+	if strings.Contains(out, "LoadBalancer IP") {
+		t.Error("NOTES should not contain LB section for ClusterIP-only services")
+	}
+}
+
+func TestGenerateNOTES_WithAuth(t *testing.T) {
+	out := GenerateNOTES("myapp", []string{"web"}, NOTESContext{
+		HasAuth: true,
+	})
+	if !strings.Contains(out, "Authentication is enabled") {
+		t.Error("NOTES should contain auth section when HasAuth is true")
+	}
+	if !strings.Contains(out, "get secret") {
+		t.Error("NOTES should contain secret check command when auth is enabled")
 	}
 }
 
@@ -223,6 +283,111 @@ func TestValuesBuilder_Build(t *testing.T) {
 	}
 	if !strings.Contains(out, "services:") {
 		t.Error("Build output should contain services")
+	}
+}
+
+func TestValuesBuilder_BuildFlat(t *testing.T) {
+	b := NewValuesBuilder()
+	b.SetGlobal("imageRegistry", "registry.example.com")
+	b.AddService("web", map[string]interface{}{
+		"replicas": 2,
+		"deployment": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name": "app",
+					"image": map[string]interface{}{
+						"repository": "nginx",
+						"tag":        "1.21",
+					},
+				},
+			},
+		},
+	})
+
+	out, err := b.BuildFlat()
+	if err != nil {
+		t.Fatalf("BuildFlat() error: %v", err)
+	}
+
+	// Should still contain the nested structure.
+	if !strings.Contains(out, "global:") {
+		t.Error("BuildFlat should contain global section")
+	}
+	if !strings.Contains(out, "services:") {
+		t.Error("BuildFlat should contain services section")
+	}
+
+	// Leaf values should have inline dot-notation path comments.
+	if !strings.Contains(out, "# global.imageRegistry") {
+		t.Errorf("BuildFlat should add inline path comment for global.imageRegistry, got:\n%s", out)
+	}
+}
+
+func TestValuesBuilder_BuildFlat_PathComments(t *testing.T) {
+	b := NewValuesBuilder()
+	b.SetValue("image.repository", "nginx")
+	b.SetValue("image.tag", "latest")
+	b.SetValue("service.type", "ClusterIP")
+	b.SetValue("service.port", 8080)
+
+	out, err := b.BuildFlat()
+	if err != nil {
+		t.Fatalf("BuildFlat() error: %v", err)
+	}
+
+	// Check that leaf values get path annotations.
+	if !strings.Contains(out, "# image.repository") {
+		t.Errorf("expected '# image.repository' path comment, got:\n%s", out)
+	}
+	if !strings.Contains(out, "# image.tag") {
+		t.Errorf("expected '# image.tag' path comment, got:\n%s", out)
+	}
+	if !strings.Contains(out, "# service.type") {
+		t.Errorf("expected '# service.type' path comment, got:\n%s", out)
+	}
+	if !strings.Contains(out, "# service.port") {
+		t.Errorf("expected '# service.port' path comment, got:\n%s", out)
+	}
+
+	// Parent keys should NOT have path comments on the same line.
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "image:") && strings.Contains(trimmed, "#") {
+			t.Errorf("parent key 'image:' should not have inline comment, got: %s", line)
+		}
+	}
+}
+
+func TestValuesBuilder_BuildFlat_VsBuild(t *testing.T) {
+	b := NewValuesBuilder()
+	b.SetValue("app.name", "test")
+	b.SetValue("app.version", "1.0")
+
+	nested, err := b.Build()
+	if err != nil {
+		t.Fatalf("Build() error: %v", err)
+	}
+
+	flat, err := b.BuildFlat()
+	if err != nil {
+		t.Fatalf("BuildFlat() error: %v", err)
+	}
+
+	// Both should contain the YAML structure.
+	if !strings.Contains(nested, "app:") {
+		t.Error("Build should contain app key")
+	}
+	if !strings.Contains(flat, "app:") {
+		t.Error("BuildFlat should contain app key")
+	}
+
+	// Only flat should have path comments.
+	if strings.Contains(nested, "# app.name") {
+		t.Error("Build() should NOT have inline path comments")
+	}
+	if !strings.Contains(flat, "# app.name") {
+		t.Error("BuildFlat() should have inline path comments")
 	}
 }
 

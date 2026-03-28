@@ -101,7 +101,7 @@ func (b *ValuesBuilder) MergeValues(values map[string]interface{}) *ValuesBuilde
 	return b
 }
 
-// Build generates the values.yaml content with comments.
+// Build generates the values.yaml content with nested structure and comments.
 func (b *ValuesBuilder) Build() (string, error) {
 	// Add default global values if not present
 	if b.values["global"] == nil {
@@ -120,6 +120,107 @@ func (b *ValuesBuilder) Build() (string, error) {
 	yamlStr = addCommentsToValues(yamlStr)
 
 	return yamlStr, nil
+}
+
+// BuildFlat generates a flat values.yaml where nested keys are represented
+// as dot-notation comments alongside the nested YAML structure.
+// Example output:
+//
+//	image:
+//	  repository: nginx  # image.repository
+//	  tag: latest        # image.tag
+func (b *ValuesBuilder) BuildFlat() (string, error) {
+	// Add default global values if not present
+	if b.values["global"] == nil {
+		b.SetGlobal("imageRegistry", "")
+		b.SetGlobal("imagePullSecrets", []interface{}{})
+	}
+
+	// Convert to YAML
+	yamlBytes, err := yaml.Marshal(b.values)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal values to YAML: %w", err)
+	}
+
+	// Add inline path comments to leaf values
+	yamlStr := addFlatPathComments(string(yamlBytes))
+
+	// Add header comments
+	yamlStr = addCommentsToValues(yamlStr)
+
+	return yamlStr, nil
+}
+
+// addFlatPathComments annotates each leaf value line with its full dot-notation
+// path as an inline YAML comment. Map keys and list items at any depth get
+// a trailing "# path.to.key" comment so users can reference values in
+// --set overrides (e.g., helm install --set image.repository=nginx).
+func addFlatPathComments(yamlStr string) string {
+	lines := strings.Split(yamlStr, "\n")
+	var result []string
+	// pathStack tracks the current key path at each indentation depth.
+	type stackEntry struct {
+		indent int
+		key    string
+	}
+	var pathStack []stackEntry
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			result = append(result, line)
+			continue
+		}
+
+		// Calculate indentation (number of leading spaces).
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+
+		// Pop stack entries that are at the same or deeper indentation.
+		for len(pathStack) > 0 && pathStack[len(pathStack)-1].indent >= indent {
+			pathStack = pathStack[:len(pathStack)-1]
+		}
+
+		// Handle list items (- key: value or - value).
+		if strings.HasPrefix(trimmed, "- ") {
+			result = append(result, line)
+			continue
+		}
+
+		// Parse "key: value" or "key:" (map key).
+		colonIdx := strings.Index(trimmed, ":")
+		if colonIdx == -1 {
+			result = append(result, line)
+			continue
+		}
+
+		key := trimmed[:colonIdx]
+		rest := ""
+		if colonIdx+1 < len(trimmed) {
+			rest = strings.TrimSpace(trimmed[colonIdx+1:])
+		}
+
+		// Push current key onto stack.
+		pathStack = append(pathStack, stackEntry{indent: indent, key: key})
+
+		// Build full dot-notation path.
+		var parts []string
+		for _, entry := range pathStack {
+			parts = append(parts, entry.key)
+		}
+		fullPath := strings.Join(parts, ".")
+
+		// Only annotate leaf values (not map parents or empty values).
+		if rest != "" && !strings.HasSuffix(rest, ":") {
+			// Skip if already has an inline comment.
+			if !strings.Contains(rest, "#") {
+				line = line + "  # " + fullPath
+			}
+		}
+
+		result = append(result, line)
+	}
+
+	return strings.Join(result, "\n")
 }
 
 // BuildMap returns the values as a map.

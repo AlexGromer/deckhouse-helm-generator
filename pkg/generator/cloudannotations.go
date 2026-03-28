@@ -113,8 +113,9 @@ func InjectCloudAnnotations(chart *types.GeneratedChart, config CloudAnnotationC
 	}
 }
 
-// generateCloudValues produces a values map describing the cloud load-balancer configuration.
-// Intended for inclusion in a chart's values.yaml alongside cloud-annotated Service templates.
+// generateCloudValues builds a cloud configuration values map.
+// Currently unused — cloud settings are injected via annotations only.
+// Retained for potential future use in values.yaml cloud section.
 func generateCloudValues(config CloudAnnotationConfig) map[string]interface{} {
 	return map[string]interface{}{
 		"cloud": map[string]interface{}{
