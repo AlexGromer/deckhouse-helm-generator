@@ -593,3 +593,23 @@ func TestNamespaceResources_SkipsDefaultNPWhenAutoNPExists(t *testing.T) {
 		}
 	}
 }
+
+// ── TestGenerateCmd_MonorepoKustomizeConflict ─────────────────────────────────
+
+func TestGenerateCmd_MonorepoKustomizeConflict(t *testing.T) {
+	tmpDir := t.TempDir()
+	_, err := executeCmd(t,
+		"generate",
+		"--file", tmpDir,
+		"--chart-name", "test",
+		"--monorepo",
+		"--kustomize",
+		"--dry-run",
+	)
+	if err == nil {
+		t.Fatal("expected error when both --monorepo and --kustomize are set, got nil")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected error to mention 'mutually exclusive', got: %v", err)
+	}
+}

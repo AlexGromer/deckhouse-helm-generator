@@ -255,7 +255,34 @@ func TestMultiTenant_ValuesStructure(t *testing.T) {
 }
 
 // ============================================================
-// Subtask 10: Preserves existing templates
+// Subtask 10: DNS policy has both UDP and TCP for port 53
+// ============================================================
+
+func TestMultiTenant_DNSPolicy_HasBothProtocols(t *testing.T) {
+	chart := makeBaseChart("myapp")
+	result := GenerateMultiTenantOverlay(chart, 2)
+
+	npContent, ok := result.Templates["templates/tenant-networkpolicies.yaml"]
+	if !ok {
+		t.Fatal("expected tenant-networkpolicies.yaml template")
+	}
+
+	if !strings.Contains(npContent, "protocol: UDP") {
+		t.Error("expected NetworkPolicy to contain 'protocol: UDP' for DNS egress")
+	}
+	if !strings.Contains(npContent, "protocol: TCP") {
+		t.Error("expected NetworkPolicy to contain 'protocol: TCP' for DNS egress")
+	}
+
+	// Verify both port 53 entries exist (UDP and TCP)
+	portCount := strings.Count(npContent, "port: 53")
+	if portCount < 2 {
+		t.Errorf("expected at least 2 'port: 53' entries (UDP+TCP), got %d", portCount)
+	}
+}
+
+// ============================================================
+// Subtask 11: Preserves existing templates
 // ============================================================
 
 func TestMultiTenant_PreservesExistingTemplates(t *testing.T) {

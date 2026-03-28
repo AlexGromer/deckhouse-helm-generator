@@ -63,6 +63,9 @@ var defaultOverlays = []overlaySpec{
 //
 // Returns an error if the chart contains no templates.
 func GenerateKustomizeLayout(chart *types.GeneratedChart) (*KustomizeOutput, error) {
+	if chart == nil {
+		return nil, fmt.Errorf("chart must not be nil")
+	}
 	if len(chart.Templates) == 0 {
 		return nil, fmt.Errorf("no templates")
 	}

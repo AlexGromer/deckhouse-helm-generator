@@ -452,3 +452,32 @@ func TestBuildCrossNamespaceIndex_Deterministic(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================
+// M-13: extractServicePorts accepts string port values
+// ============================================================
+
+func TestExtractServicePorts_AcceptsStringPort(t *testing.T) {
+	r := makeProcessedResource("Service", "web", "default", nil)
+	r.Original.Object.Object["spec"] = map[string]interface{}{
+		"ports": []interface{}{
+			map[string]interface{}{
+				"port":     "8080",
+				"protocol": "TCP",
+			},
+		},
+	}
+
+	group := makeGroup("web", "default", []*types.ProcessedResource{r})
+	ports := extractServicePorts(group)
+
+	if len(ports) != 1 {
+		t.Fatalf("expected 1 port, got %d", len(ports))
+	}
+	if ports[0].Port != 8080 {
+		t.Errorf("expected port 8080, got %d", ports[0].Port)
+	}
+	if ports[0].Protocol != "TCP" {
+		t.Errorf("expected protocol TCP, got %s", ports[0].Protocol)
+	}
+}

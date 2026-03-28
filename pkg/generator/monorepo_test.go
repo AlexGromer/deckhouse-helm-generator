@@ -224,6 +224,30 @@ func TestMonorepo_HelmIgnore_Present(t *testing.T) {
 // Test 8: Empty charts slice returns an error
 // ============================================================
 
+func TestMonorepo_ChartsSliceIsCopy(t *testing.T) {
+	original := []*types.GeneratedChart{
+		makeChart("frontend", map[string]string{
+			"templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: frontend\n",
+		}),
+		makeChart("backend", map[string]string{
+			"templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: backend\n",
+		}),
+	}
+
+	layout, err := GenerateMonorepoLayout(original, "myproject")
+	if err != nil {
+		t.Fatalf("GenerateMonorepoLayout returned unexpected error: %v", err)
+	}
+
+	// Mutate the returned layout's Charts slice.
+	layout.Charts[0] = nil
+
+	// Original slice must be unchanged.
+	if original[0] == nil {
+		t.Error("mutating layout.Charts affected the original slice — Charts must be a defensive copy")
+	}
+}
+
 func TestMonorepo_EmptyCharts_ReturnsError(t *testing.T) {
 	layout, err := GenerateMonorepoLayout([]*types.GeneratedChart{}, "myproject")
 	if err == nil {

@@ -143,7 +143,7 @@ func extractContainers(resource *types.ProcessedResource) []map[string]interface
 }
 
 // DetectWorkloadType infers the workload category from the resources in a ServiceGroup.
-// Detection priority: Batch > Database > Cache > Web > Worker > default(Web).
+// Detection priority: Batch > Database+PVC > Database(image) > Cache > Web > Worker > default(Web).
 func DetectWorkloadType(group *ServiceGroup) WorkloadType {
 	var (
 		hasService     bool

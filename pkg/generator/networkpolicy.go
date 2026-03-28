@@ -3,6 +3,7 @@ package generator
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -101,6 +102,10 @@ func extractServicePorts(group *ServiceGroup) []portInfo {
 				portNum = int(v)
 			case int:
 				portNum = v
+			case string:
+				if n, err := strconv.Atoi(v); err == nil {
+					portNum = n
+				}
 			}
 
 			if portNum > 0 && portNum <= 65535 && !seen[portNum] {

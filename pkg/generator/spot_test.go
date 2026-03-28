@@ -18,7 +18,7 @@ import (
 //  6. TestSpot_PDB_LowReplicas_MinAvailable1    — boundary replicas=1 → PDB YAML contains "minAvailable: 1"
 //  7. TestSpot_PDB_HighReplicas_MinAvailable50Pct — boundary replicas=5 → PDB YAML contains minAvailable: "50%"
 //  8. TestSpot_Values_Structure             — happy   SpotValues has spot.enabled, spot.provider, spot.gracePeriod
-//  9. TestSpot_Values_DefaultGracePeriod    — happy   default config → gracePeriod=15
+//  9. TestSpot_Values_ExplicitGracePeriod   — happy   explicit GracePeriod=15 preserved
 // 10. TestSpot_InjectIntoDeployment_AddsTolerations — integration Deployment → after inject, template contains "tolerations"
 // 11. TestSpot_InjectIntoJob_NoChanges      — integration Job → after inject, template unchanged (no tolerations)
 // 12. TestSpot_NilChart_ReturnsNil          — error   nil chart → returns nil
@@ -274,8 +274,8 @@ func TestSpot_Values_Structure(t *testing.T) {
 	}
 }
 
-func TestSpot_Values_DefaultGracePeriod(t *testing.T) {
-	// SpotConfig zero value should yield gracePeriod=15
+func TestSpot_Values_ExplicitGracePeriod(t *testing.T) {
+	// Explicit GracePeriod=15 should be preserved in values
 	config := SpotConfig{
 		Provider:    SpotProvider(""),
 		GracePeriod: 15,
@@ -677,6 +677,38 @@ spec:
 		if strings.Contains(key, "spot-pdb") {
 			t.Errorf("Job must NOT produce a PDB template, but found key %q", key)
 		}
+	}
+}
+
+// ============================================================
+// M-14: GenerateSpotPDB sanitizes appName
+// ============================================================
+
+func TestSpotPDB_SanitizesAppName(t *testing.T) {
+	pdb := GenerateSpotPDB("my;app\ninjection", 2)
+
+	if pdb == "" {
+		t.Fatal("GenerateSpotPDB must return a non-empty YAML string")
+	}
+
+	// After sanitization, only [a-z0-9-] should remain.
+	// The regex strips ';' and '\n' but keeps valid chars, so result is "myappinjection".
+	if strings.Contains(pdb, ";") {
+		t.Error("PDB output contains ';' — appName not sanitized")
+	}
+
+	// The sanitized name should be "myappinjection" (lowercase, stripped of ; and newline)
+	if !strings.Contains(pdb, "name: myappinjection-pdb") {
+		t.Errorf("expected sanitized name 'myappinjection-pdb' in PDB, got:\n%s", pdb)
+	}
+	if !strings.Contains(pdb, "app: myappinjection") {
+		t.Errorf("expected sanitized label 'app: myappinjection' in PDB, got:\n%s", pdb)
+	}
+
+	// Verify uppercase+special chars are also stripped
+	pdb2 := GenerateSpotPDB("My-App_V2!", 1)
+	if !strings.Contains(pdb2, "name: my-appv2-pdb") {
+		t.Errorf("expected 'my-appv2-pdb' for input 'My-App_V2!', got:\n%s", pdb2)
 	}
 }
 

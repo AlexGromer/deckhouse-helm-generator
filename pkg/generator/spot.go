@@ -85,6 +85,8 @@ func GenerateSpotPDB(appName string, replicas int) string {
 		minAvailable = `minAvailable: "50%"`
 	}
 
+	appName = safeChartName.ReplaceAllString(strings.ToLower(appName), "")
+
 	return fmt.Sprintf(`apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

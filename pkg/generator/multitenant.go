@@ -157,6 +157,8 @@ func generateTenantNetworkPolicyTemplate(chartName string) string {
 	sb.WriteString("      ports:\n")
 	sb.WriteString("        - port: 53\n")
 	sb.WriteString("          protocol: UDP\n")
+	sb.WriteString("        - port: 53\n")
+	sb.WriteString("          protocol: TCP\n")
 	sb.WriteString("{{- end }}\n")
 	return sb.String()
 }

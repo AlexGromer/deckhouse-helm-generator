@@ -227,11 +227,7 @@ func TestAirgap_GenerateImageList_EmptyRefs(t *testing.T) {
 // ============================================================
 
 func TestAirgap_GenerateAirgapValues_RegistryOverride(t *testing.T) {
-	refs := []ImageRef{
-		{Repository: "nginx", Tag: "1.21", FullRef: "nginx:1.21"},
-	}
-
-	values := GenerateAirgapValues(refs, "registry.internal.com")
+	values := GenerateAirgapValues("registry.internal.com")
 
 	global, ok := values["global"].(map[string]interface{})
 	if !ok {
@@ -248,11 +244,7 @@ func TestAirgap_GenerateAirgapValues_RegistryOverride(t *testing.T) {
 }
 
 func TestAirgap_GenerateAirgapValues_ImagePullSecrets(t *testing.T) {
-	refs := []ImageRef{
-		{Repository: "nginx", Tag: "1.21", FullRef: "nginx:1.21"},
-	}
-
-	values := GenerateAirgapValues(refs, "registry.internal.com")
+	values := GenerateAirgapValues("registry.internal.com")
 
 	global, ok := values["global"].(map[string]interface{})
 	if !ok {
