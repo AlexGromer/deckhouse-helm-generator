@@ -16,6 +16,11 @@ const (
 	CloudAWS   CloudProvider = "aws"
 	CloudGCP   CloudProvider = "gcp"
 	CloudAzure CloudProvider = "azure"
+
+	// CloudProviderAWS/GCP/Azure are aliases used by cost estimation.
+	CloudProviderAWS   CloudProvider = "aws"
+	CloudProviderGCP   CloudProvider = "gcp"
+	CloudProviderAzure CloudProvider = "azure"
 )
 
 // CloudAnnotationConfig holds the configuration for cloud-specific annotation generation.
