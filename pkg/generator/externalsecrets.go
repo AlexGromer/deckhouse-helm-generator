@@ -7,204 +7,250 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// SecretFinding represents a detected hardcoded secret in a chart.
-type SecretFinding struct {
-	// Source is the file or section where the secret was found.
-	Source string
-	// Kind is the Kubernetes resource kind (e.g., "Secret") or "values" for values.yaml.
-	Kind string
-	// Key is the specific key that contains a secret value.
-	Key string
-	// Name is the resource name (for template secrets).
-	Name string
+// ESOBackend identifies the external secrets backend type.
+type ESOBackend string
+
+const (
+	ESOBackendAWS   ESOBackend = "aws"
+	ESOBackendVault ESOBackend = "vault"
+	ESOBackendGCP   ESOBackend = "gcp"
+	ESOBackendAzure ESOBackend = "azure"
+)
+
+// ESOOptions configures external secrets operator generation.
+type ESOOptions struct {
+	Backend              ESOBackend
+	SecretStoreRef       string
+	Namespace            string
+	SecretStoreNamespace string
+	Region               string
+	AWSRegion            string
+	VaultAddress         string
+	VaultMount           string
+	VaultRole            string
+	RefreshInterval      string
 }
 
-// secretKeyPatterns are values.yaml key names that typically contain secrets.
-var secretKeyPatterns = []string{"password", "secret", "token", "key"}
+// ESOSecretRef holds a detected secret reference.
+type ESOSecretRef struct {
+	Name      string
+	Namespace string
+	Keys      []string
+}
 
-// DetectHardcodedSecrets scans chart templates and values for hardcoded secrets.
-// It detects:
-//   - kind: Secret resources with stringData or data sections
-//   - values.yaml keys matching sensitive patterns (password, secret, token, key)
-func DetectHardcodedSecrets(chart *types.GeneratedChart) []SecretFinding {
-	var findings []SecretFinding
+// ESOSecret defines an ExternalSecret to be generated.
+type ESOSecret struct {
+	Name            string
+	Namespace       string
+	SecretStoreRef  string
+	RemotePath      string
+	Keys            []string
+	RefreshInterval string
+}
 
-	// Scan templates for Secret resources
-	for path, content := range chart.Templates {
-		if !strings.Contains(content, "kind: Secret") {
-			continue
-		}
-
-		name := extractSecretName(content)
-		if strings.Contains(content, "stringData:") || strings.Contains(content, "data:") {
-			findings = append(findings, SecretFinding{
-				Source: path,
-				Kind:   "Secret",
-				Key:    "stringData/data",
-				Name:   name,
-			})
-		}
+// DetectESOSecrets inspects the resource graph for Secrets that could be managed by ESO.
+// Returns a slice of ESOSecretRef entries, one per detected Secret.
+func DetectESOSecrets(graph *types.ResourceGraph) []ESOSecretRef {
+	var result []ESOSecretRef
+	if graph == nil {
+		return result
 	}
-
-	// Scan values.yaml for sensitive keys
-	findings = append(findings, scanValuesForSecrets(chart.ValuesYAML)...)
-
-	return findings
-}
-
-// scanValuesForSecrets checks values.yaml content for keys matching secret patterns.
-func scanValuesForSecrets(valuesYAML string) []SecretFinding {
-	var findings []SecretFinding
-
-	for _, line := range strings.Split(valuesYAML, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+	for _, r := range graph.Resources {
+		if r.Original.GVK.Kind != "Secret" {
 			continue
 		}
-
-		parts := strings.SplitN(trimmed, ":", 2)
-		if len(parts) != 2 {
-			continue
+		obj := r.Original.Object
+		entry := ESOSecretRef{
+			Name:      obj.GetName(),
+			Namespace: obj.GetNamespace(),
 		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		// Skip empty values and references
-		if value == "" || value == "{}" || value == "[]" || strings.HasPrefix(value, "{{") {
-			continue
-		}
-
-		keyLower := strings.ToLower(key)
-		for _, pattern := range secretKeyPatterns {
-			if strings.Contains(keyLower, pattern) {
-				findings = append(findings, SecretFinding{
-					Source: "values.yaml",
-					Kind:   "values",
-					Key:    key,
-				})
-				break
+		// Collect keys from data field.
+		if data, ok := obj.Object["data"]; ok {
+			if dataMap, ok := data.(map[string]interface{}); ok {
+				for k := range dataMap {
+					entry.Keys = append(entry.Keys, k)
+				}
 			}
 		}
+		result = append(result, entry)
 	}
-
-	return findings
-}
-
-// extractSecretName extracts the metadata.name from a Secret template.
-func extractSecretName(content string) string {
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "name:") {
-			return strings.TrimSpace(strings.TrimPrefix(trimmed, "name:"))
-		}
-	}
-	return "unknown"
-}
-
-// ConvertToExternalSecrets replaces Secret templates with ExternalSecret resources
-// using the external-secrets-operator format.
-// Supported providers: vault, aws, gcp, azure.
-func ConvertToExternalSecrets(chart *types.GeneratedChart, provider string) *types.GeneratedChart {
-	result := &types.GeneratedChart{
-		Name:          chart.Name,
-		ChartYAML:     chart.ChartYAML,
-		ValuesYAML:    chart.ValuesYAML,
-		Helpers:       chart.Helpers,
-		Notes:         chart.Notes,
-		ValuesSchema:  chart.ValuesSchema,
-		ExternalFiles: chart.ExternalFiles,
-		Templates:     make(map[string]string),
-	}
-
-	for path, content := range chart.Templates {
-		if !strings.Contains(content, "kind: Secret") {
-			result.Templates[path] = content
-			continue
-		}
-
-		name := extractSecretName(content)
-		keys := extractSecretKeys(content)
-		esPath := fmt.Sprintf("templates/%s-externalsecret.yaml", name)
-		result.Templates[esPath] = generateExternalSecret(name, provider, keys)
-	}
-
 	return result
 }
 
-// extractSecretKeys extracts data keys from a Secret template.
-func extractSecretKeys(content string) []string {
-	var keys []string
-	inData := false
-
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-
-		if trimmed == "stringData:" || trimmed == "data:" {
-			inData = true
-			continue
-		}
-
-		// End of data section
-		if inData && !strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "\t") && trimmed != "" {
-			inData = false
-			continue
-		}
-
-		if inData && strings.Contains(trimmed, ":") {
-			key := strings.TrimSpace(strings.SplitN(trimmed, ":", 2)[0])
-			if key != "" {
-				keys = append(keys, key)
-			}
-		}
+// GenerateSecretStore generates SecretStore or ClusterSecretStore YAML manifests.
+// Returns a slice of manifest strings.
+func GenerateSecretStore(opts ESOOptions) []string {
+	storeName := opts.SecretStoreRef
+	if storeName == "" {
+		storeName = "default-secret-store"
+	}
+	region := opts.AWSRegion
+	if region == "" {
+		region = opts.Region
+	}
+	if region == "" {
+		region = "us-east-1"
 	}
 
-	return keys
-}
+	refreshInterval := opts.RefreshInterval
+	if refreshInterval == "" {
+		refreshInterval = "1h"
+	}
 
-// providerStoreRef returns the SecretStoreRef kind and name based on provider.
-func providerStoreRef(provider string) (kind, storeName string) {
-	switch provider {
-	case "vault":
-		return "ClusterSecretStore", "vault-backend"
-	case "aws":
-		return "ClusterSecretStore", "aws-secrets-manager"
-	case "gcp":
-		return "ClusterSecretStore", "gcp-secret-manager"
-	case "azure":
-		return "ClusterSecretStore", "azure-key-vault"
+	var providerBlock strings.Builder
+	switch opts.Backend {
+	case ESOBackendAWS:
+		providerBlock.WriteString(fmt.Sprintf("  aws:\n    service: SecretsManager\n    region: %s\n", region))
+	case ESOBackendVault:
+		addr := opts.VaultAddress
+		if addr == "" {
+			addr = "http://vault:8200"
+		}
+		mount := opts.VaultMount
+		if mount == "" {
+			mount = "secret"
+		}
+		role := opts.VaultRole
+		if role == "" {
+			role = "eso-role"
+		}
+		providerBlock.WriteString(fmt.Sprintf(
+			"  vault:\n    server: %s\n    path: %s\n    version: v2\n    auth:\n      kubernetes:\n        mountPath: kubernetes\n        role: %s\n",
+			addr, mount, role))
+	case ESOBackendGCP:
+		providerBlock.WriteString("  gcpsm:\n    projectID: my-project\n")
+	case ESOBackendAzure:
+		providerBlock.WriteString("  azurekv:\n    vaultUrl: https://my-vault.vault.azure.net\n")
 	default:
-		return "ClusterSecretStore", provider + "-backend"
+		providerBlock.WriteString("  # unsupported backend\n")
 	}
-}
 
-// generateExternalSecret creates an ExternalSecret YAML template for the given provider.
-func generateExternalSecret(name, provider string, keys []string) string {
-	storeKind, storeName := providerStoreRef(provider)
+	ns := opts.SecretStoreNamespace
+	if ns == "" {
+		ns = opts.Namespace
+	}
+	isCluster := ns == ""
+	kind := "SecretStore"
+	if isCluster {
+		kind = "ClusterSecretStore"
+	}
 
 	var sb strings.Builder
 	sb.WriteString("apiVersion: external-secrets.io/v1beta1\n")
-	sb.WriteString("kind: ExternalSecret\n")
+	sb.WriteString(fmt.Sprintf("kind: %s\n", kind))
 	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: %s\n", name))
-	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
-	sb.WriteString("spec:\n")
-	sb.WriteString("  refreshInterval: 1h\n")
-	sb.WriteString("  secretStoreRef:\n")
-	sb.WriteString(fmt.Sprintf("    kind: %s\n", storeKind))
-	sb.WriteString(fmt.Sprintf("    name: %s\n", storeName))
-	sb.WriteString("  target:\n")
-	sb.WriteString(fmt.Sprintf("    name: %s\n", name))
-	sb.WriteString("    creationPolicy: Owner\n")
+	sb.WriteString(fmt.Sprintf("  name: %s\n", storeName))
+	if !isCluster {
+		sb.WriteString(fmt.Sprintf("  namespace: %s\n", ns))
+	}
+	sb.WriteString(fmt.Sprintf("  refreshInterval: %s\n", refreshInterval))
+	sb.WriteString("spec:\n  provider:\n")
+	sb.WriteString(providerBlock.String())
 
-	if len(keys) > 0 {
-		sb.WriteString("  data:\n")
-		for _, key := range keys {
-			sb.WriteString(fmt.Sprintf("    - secretKey: %s\n", key))
-			sb.WriteString("      remoteRef:\n")
-			sb.WriteString(fmt.Sprintf("        key: %s/%s\n", name, key))
+	return []string{sb.String()}
+}
+
+// GenerateExternalSecrets generates ExternalSecret manifests for the given secrets.
+func GenerateExternalSecrets(secrets []ESOSecret, opts ESOOptions) []string {
+	var results []string
+	storeRef := opts.SecretStoreRef
+	if storeRef == "" {
+		storeRef = "default-secret-store"
+	}
+	refreshInterval := opts.RefreshInterval
+	if refreshInterval == "" {
+		refreshInterval = "1h"
+	}
+	for _, secret := range secrets {
+		ref := secret.SecretStoreRef
+		if ref == "" {
+			ref = storeRef
 		}
+		ri := secret.RefreshInterval
+		if ri == "" {
+			ri = refreshInterval
+		}
+		var sb strings.Builder
+		sb.WriteString("apiVersion: external-secrets.io/v1beta1\n")
+		sb.WriteString("kind: ExternalSecret\n")
+		sb.WriteString("metadata:\n")
+		sb.WriteString(fmt.Sprintf("  name: %s\n", secret.Name))
+		if secret.Namespace != "" {
+			sb.WriteString(fmt.Sprintf("  namespace: %s\n", secret.Namespace))
+		}
+		sb.WriteString("spec:\n")
+		sb.WriteString(fmt.Sprintf("  refreshInterval: %s\n", ri))
+		sb.WriteString("  secretStoreRef:\n")
+		sb.WriteString(fmt.Sprintf("    name: %s\n", ref))
+		sb.WriteString("    kind: SecretStore\n")
+		sb.WriteString("  target:\n")
+		sb.WriteString(fmt.Sprintf("    name: %s\n", secret.Name))
+		if len(secret.Keys) > 0 {
+			sb.WriteString("  data:\n")
+			remotePath := secret.RemotePath
+			if remotePath == "" {
+				remotePath = secret.Name
+			}
+			for _, k := range secret.Keys {
+				sb.WriteString(fmt.Sprintf("  - secretKey: %s\n", k))
+				sb.WriteString("    remoteRef:\n")
+				sb.WriteString(fmt.Sprintf("      key: %s/%s\n", remotePath, k))
+			}
+		}
+		results = append(results, sb.String())
+	}
+	return results
+}
+
+// BuildESOValuesFragment returns a Helm values map fragment for ESO configuration.
+func BuildESOValuesFragment(secrets []ESOSecret, opts ESOOptions) map[string]interface{} {
+	secretNames := make([]string, 0, len(secrets))
+	for _, s := range secrets {
+		secretNames = append(secretNames, s.Name)
+	}
+	ri := opts.RefreshInterval
+	if ri == "" {
+		ri = "1h"
+	}
+	return map[string]interface{}{
+		"externalSecrets": map[string]interface{}{
+			"enabled":         true,
+			"backend":         string(opts.Backend),
+			"secretStoreRef":  opts.SecretStoreRef,
+			"namespace":       opts.Namespace,
+			"refreshInterval": ri,
+			"secrets":         secretNames,
+		},
+	}
+}
+
+// InjectESO injects ExternalSecret manifests derived from a resource graph into a chart.
+func InjectESO(chart *types.GeneratedChart, graph *types.ResourceGraph, opts ESOOptions) (*types.GeneratedChart, int) {
+	if chart == nil {
+		return nil, 0
+	}
+	result := copyChartTemplatesWithExternalFiles(chart)
+	if graph == nil {
+		return result, 0
 	}
 
-	return sb.String()
+	// Detect secrets from graph.
+	refs := DetectESOSecrets(graph)
+	secrets := make([]ESOSecret, 0, len(refs))
+	for _, ref := range refs {
+		secrets = append(secrets, ESOSecret{
+			Name:      ref.Name,
+			Namespace: ref.Namespace,
+			Keys:      ref.Keys,
+		})
+	}
+
+	manifests := GenerateExternalSecrets(secrets, opts)
+	count := 0
+	for i, manifest := range manifests {
+		path := fmt.Sprintf("templates/external-secret-%d.yaml", i)
+		result.Templates[path] = manifest
+		count++
+	}
+	return result, count
 }

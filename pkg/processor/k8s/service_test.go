@@ -15,8 +15,9 @@ import (
 // Test helpers for Service processor
 // ============================================================
 
-// makeServiceObj creates an unstructured Service for testing.
-func makeServiceObj(name, namespace string, labels, annotations map[string]interface{}, spec map[string]interface{}) *unstructured.Unstructured {
+// makeServiceResource creates an unstructured Service for testing.
+// Note: makeServiceObj with (name, namespace, ports) signature is defined in prometheusannotations_test.go.
+func makeServiceResource(name, namespace string, labels, annotations map[string]interface{}, spec map[string]interface{}) *unstructured.Unstructured {
 	metadata := map[string]interface{}{
 		"name":      name,
 		"namespace": namespace,
@@ -64,7 +65,7 @@ func TestProcessService_ExtractsType(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "ClusterIP",
@@ -85,7 +86,7 @@ func TestProcessService_ExtractsType(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "NodePort",
@@ -107,7 +108,7 @@ func TestProcessService_ExtractsType(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "LoadBalancer",
@@ -128,7 +129,7 @@ func TestProcessService_ExtractsType(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type":         "ExternalName",
@@ -146,7 +147,7 @@ func TestProcessService_ExtractsType(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"ports": []interface{}{
@@ -173,7 +174,7 @@ func TestProcessService_ExtractsPorts(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "ClusterIP",
@@ -208,7 +209,7 @@ func TestProcessService_ExtractsPorts(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "ClusterIP",
@@ -249,7 +250,7 @@ func TestProcessService_ExtractsPorts(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "ClusterIP",
@@ -274,7 +275,7 @@ func TestProcessService_ExtractsPorts(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "NodePort",
@@ -306,7 +307,7 @@ func TestProcessService_ExtractsSelector(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "ClusterIP",
@@ -337,7 +338,7 @@ func TestProcessService_ExtractsSelector(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "ClusterIP",
@@ -364,7 +365,7 @@ func TestProcessService_ExtractsSelector(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "production",
+		obj := makeServiceResource("my-svc", "production",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "ClusterIP",
@@ -397,7 +398,7 @@ func TestProcessService_ExtractsSessionAffinity(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type":            "ClusterIP",
@@ -419,7 +420,7 @@ func TestProcessService_ExtractsSessionAffinity(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type":            "ClusterIP",
@@ -441,7 +442,7 @@ func TestProcessService_ExtractsSessionAffinity(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			makeBasicServiceSpec())
 
@@ -464,7 +465,7 @@ func TestProcessService_ExtractsLoadBalancer(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type":           "LoadBalancer",
@@ -487,7 +488,7 @@ func TestProcessService_ExtractsLoadBalancer(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "LoadBalancer",
@@ -527,7 +528,7 @@ func TestProcessService_ExtractsAnnotations(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"},
 			map[string]interface{}{
 				"service.beta.kubernetes.io/aws-load-balancer-type":            "nlb",
@@ -564,7 +565,7 @@ func TestProcessService_ExtractsAnnotations(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			makeBasicServiceSpec())
 
@@ -587,7 +588,7 @@ func TestProcessService_ExtractsExternalTrafficPolicy(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type":                  "LoadBalancer",
@@ -610,7 +611,7 @@ func TestProcessService_ExtractsExternalTrafficPolicy(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type":                  "NodePort",
@@ -634,7 +635,7 @@ func TestProcessService_ExtractsExternalTrafficPolicy(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			makeBasicServiceSpec())
 
@@ -656,7 +657,7 @@ func TestProcessService_ExtractsHealthCheckNodePort(t *testing.T) {
 	proc := NewServiceProcessor()
 	ctx := newTestProcessorContext()
 
-	obj := makeServiceObj("my-svc", "default",
+	obj := makeServiceResource("my-svc", "default",
 		map[string]interface{}{"app": "myapp"}, nil,
 		map[string]interface{}{
 			"type":                  "LoadBalancer",
@@ -685,7 +686,7 @@ func TestProcessService_EdgeCases(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type":      "ClusterIP",
@@ -712,7 +713,7 @@ func TestProcessService_EdgeCases(t *testing.T) {
 		ctx := newTestProcessorContext()
 
 		// Service without selectors (for manual Endpoints)
-		obj := makeServiceObj("external-svc", "default",
+		obj := makeServiceResource("external-svc", "default",
 			map[string]interface{}{"app": "external"}, nil,
 			map[string]interface{}{
 				"type": "ClusterIP",
@@ -755,7 +756,7 @@ func TestProcessService_EdgeCases(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{})
 
@@ -770,7 +771,7 @@ func TestProcessService_EdgeCases(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type": "ClusterIP",
@@ -804,7 +805,7 @@ func TestProcessService_EdgeCases(t *testing.T) {
 		proc := NewServiceProcessor()
 		ctx := newTestProcessorContext()
 
-		obj := makeServiceObj("my-svc", "default",
+		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"}, nil,
 			map[string]interface{}{
 				"type":      "ClusterIP",
@@ -832,7 +833,7 @@ func TestProcessService_ResultMetadata(t *testing.T) {
 	proc := NewServiceProcessor()
 	ctx := newTestProcessorContext()
 
-	obj := makeServiceObj("my-app-service", "production",
+	obj := makeServiceResource("my-app-service", "production",
 		map[string]interface{}{"app": "my-app"}, nil,
 		makeBasicServiceSpec())
 
@@ -851,7 +852,7 @@ func TestProcessService_GeneratesTemplate(t *testing.T) {
 	proc := NewServiceProcessor()
 	ctx := processor.Context{ChartName: "myapp"}
 
-	obj := makeServiceObj("my-svc", "default",
+	obj := makeServiceResource("my-svc", "default",
 		map[string]interface{}{"app": "myapp"}, nil,
 		makeBasicServiceSpec())
 
