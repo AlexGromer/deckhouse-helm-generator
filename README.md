@@ -18,6 +18,11 @@ CLI-инструмент для генерации Helm charts из ресурс
 - 🌐 **Modern K8s**: Gateway API (HTTPRoute, Gateway), KEDA (ScaledObject, TriggerAuthentication), cert-manager (Certificate, ClusterIssuer), Argo Rollouts
 - 🎨 **4 режима вывода**: Universal (один chart), Separate (chart на сервис), Library (DRY-шаблоны), Umbrella (родительский chart + subcharts)
 - 🌍 **Environment-specific values**: автогенерация `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml` с профилями для каждой среды
+- 💰 **Smart Analysis**: оценка стоимости ресурсов, right-sizing рекомендации, best practices для PersistentVolumes, compliance-as-code, policy-as-code, progressive delivery анализ
+- 🔧 **Advanced Templating**: Kustomize post-renderer интеграция, scaffold для Kubernetes Operators
+- 🔐 **Secret Management**: External Secrets Operator (ESO), Sealed Secrets, Vault CSI Provider, Vault Agent Injector, Reloader, SOPS-шифрование
+- 🕸️ **Service Mesh**: Istio (traffic management, canary, AuthorizationPolicy, multi-cluster, egress), Linkerd интеграция
+- 📡 **Observability**: OpenTelemetry auto-instrumentation, Prometheus annotations, alerting rules, distributed tracing, SLO alerting (Sloth), recording rules
 
 ## Установка
 
@@ -278,7 +283,7 @@ dhg generate -f ./full-stack --chart-name webapp \
               └───────────────────────┘
 ```
 
-## Поддерживаемые ресурсы (45+ процессоров)
+## Поддерживаемые ресурсы (47+ процессоров, ~75 генераторов)
 
 ### Стандартные Kubernetes (22 процессора)
 
@@ -331,6 +336,11 @@ dhg generate -f ./full-stack --chart-name webapp \
 
 - ✅ **Rollout** (`argoproj.io/v1alpha1`): стратегии canary/blueGreen
 - ✅ **Canary** (`flagger.app/v1beta1`): progressive delivery с Flagger
+
+### Service Mesh (2 процессора)
+
+- ✅ **IstioSidecar** (`networking.istio.io/v1`): управление sidecar injection, egress/ingress хостами, outboundTrafficPolicy
+- ✅ **PrometheusAnnotations**: автоматическая инъекция scrape-аннотаций (`prometheus.io/scrape`, `port`, `path`) в Pod templates
 
 ## Интеграция с Deckhouse
 
@@ -401,6 +411,43 @@ dhg generate -f ./gateway-manifests --chart-name webapp -o ./webapp-chart
 
 - **ExternalDNS**: аннотация `external-dns.alpha.kubernetes.io/hostname` на Service/Ingress → metadata
 - **TopologySpreadConstraints**: автоизвлечение из pod spec Deployment
+
+### Service Mesh (Istio / Linkerd)
+
+Генерация сетевых политик service mesh:
+
+```bash
+dhg generate -f ./manifests --chart-name webapp -o ./webapp-chart
+```
+
+- **VirtualService / DestinationRule** → traffic splitting, retries, timeouts, circuit breaker
+- **Canary (Istio)** → progressive traffic shift (10% → 50% → 100%) с автоматическим rollback
+- **AuthorizationPolicy** → `ALLOW`/`DENY` правила на уровне L7 по JWT, namespace, source principal
+- **Multi-cluster** → ServiceEntry + WorkloadEntry для cross-cluster service discovery
+- **Egress** → EgressGateway + ServiceEntry для управления исходящим трафиком
+- **Linkerd** → аннотации `linkerd.io/inject`, ServiceProfile, TrafficSplit
+
+### Secret Management
+
+Безопасное управление секретами без хранения в Git:
+
+- **ExternalSecretsOperator (ESO)** → ExternalSecret + SecretStore / ClusterSecretStore (AWS, GCP, Vault и др.)
+- **Sealed Secrets** → SealedSecret (`bitnami.com/sealed-secrets`) с публичным ключом шифрования
+- **Vault CSI Provider** → SecretProviderClass (`secrets-store.csi.x-k8s.io/v1`) с монтированием в volume
+- **Vault Agent Injector** → аннотации `vault.hashicorp.com/agent-inject-secret-*` в pod template
+- **Reloader** → аннотации `reloader.stakater.com/auto` для rolling restart при смене ConfigMap/Secret
+- **SOPS** → `.sops.yaml` + шифрованные Secret манифесты с возможностью декриптования через age/GPG/KMS
+
+### Observability
+
+Автоматическая инструментация и мониторинг:
+
+- **OpenTelemetry** → OTelCollector, Instrumentation CR (`opentelemetry.io/v1alpha1`), auto-instrumentation аннотации
+- **Prometheus Annotations** → автоинъекция `prometheus.io/scrape: "true"`, `prometheus.io/port`, `prometheus.io/path` в pod template
+- **Alerting Rules** → PrometheusRule с группами `alert:` правил, шаблонизация thresholds через values
+- **Distributed Tracing** → Jaeger / Zipkin / Tempo интеграция через OTEL Collector pipeline
+- **SLO Alerting** → Sloth (`sloth.dev/v1`) PrometheusServiceLevel с burn-rate alerts (page / ticket)
+- **Recording Rules** → PrometheusRule с группами `record:` для вычисленных метрик и ratio-функций
 
 ## Обнаружение связей
 
@@ -602,8 +649,8 @@ make build-all
 ├── pkg/
 │   ├── extractor/        # Извлечение ресурсов
 │   ├── analyzer/         # Анализ связей
-│   ├── processor/        # Обработка ресурсов (45+ процессоров)
-│   │   └── k8s/          # K8s + Deckhouse + Monitoring + Gateway + KEDA + cert-manager + Argo
+│   ├── processor/        # Обработка ресурсов (47+ процессоров)
+│   │   └── k8s/          # K8s + Deckhouse + Monitoring + Gateway + KEDA + cert-manager + Argo + Istio + Prometheus
 │   ├── generator/        # Генерация charts
 │   ├── helm/             # Утилиты Helm
 │   └── types/            # Общие типы
@@ -660,20 +707,21 @@ func RegisterAll(r *processor.Registry) {
 ## Дорожная карта
 
 ### Выполнено
-- **Phase 1**: Core pipeline, 45+ процессоров, pattern detectors, CLI (`validate`, `diff`)
+- **Phase 1**: Core pipeline, 47+ процессоров, pattern detectors, CLI (`validate`, `diff`)
 - **Phase 2**: 12 архитектурных генераторов (3 tier'а: infrastructure, detection, advanced)
 - **Phase 2.5**: 8 генераторов безопасности (PSS, RBAC, resource limits, image security, TLS, audit policy, admission policy, supply chain)
 - **Phase 3**: Deckhouse CRD процессоры (InstanceClass, GRPCRoute, TLSRoute, Canary), module scaffold, compatibility
 - **Phase 4**: Cluster Extractor (client-go), GitOps Extractor (go-git, ArgoCD/Flux), Multi-Source Merge (dedup, conflict resolution)
-- **Phase 5** (partial): Auto-Fix Engine (`dhg fix`), Generic CRD processing, DOT Graph (`dhg graph`), Migration (`dhg migrate`)
+- **Phase 5.1–5.4**: Auto-Fix Engine (`dhg fix`), Generic CRD processing, DOT Graph (`dhg graph`), Migration (`dhg migrate`)
+- **Phase 5.5 Smart Analysis** ✅: Cost estimation, right-sizing, PV best practices, compliance-as-code, policy-as-code, progressive delivery
+- **Phase 5.6 Advanced Templating** ✅: Kustomize post-renderer, Operator scaffold
+- **Phase 5.7 Secret Management** ✅: External Secrets Operator (ESO), Sealed Secrets, Vault CSI Provider, Vault Agent Injector, Reloader, SOPS
+- **Phase 5.8 Service Mesh** ✅: Istio (traffic management, canary, AuthorizationPolicy, multi-cluster, egress), Linkerd
+- **Phase 5.9 Observability** ✅: OpenTelemetry auto-instrumentation, Prometheus annotations, alerting rules, distributed tracing, SLO alerting (Sloth), recording rules
 
 ### Запланировано
 | Направление | Описание | Статус |
 |-------------|----------|--------|
-| Smart Analysis | Cost estimation, right-sizing, compliance-as-code, progressive delivery | Планируется |
-| Secret Management | External Secrets Operator, Sealed Secrets, Vault CSI/Agent, SOPS | Планируется |
-| Service Mesh | Istio (VirtualService, DestinationRule, AuthorizationPolicy), Linkerd | Планируется |
-| Observability | OpenTelemetry auto-instrumentation, SLO-based alerting (Sloth), Grafana dashboards | Планируется |
 | Performance | Parallel processing (goroutines), memory optimization, benchmarks | Планируется |
 | Операторы БД | CloudNativePG, Percona, Redis Enterprise, ClickHouse | Исследование |
 | AI/ML Workloads | Kubeflow, KServe, GPU scheduling, distributed training | Исследование |
