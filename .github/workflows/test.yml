@@ -73,7 +73,7 @@ jobs:
       run: go mod download
 
     - name: Install Helm
-      uses: azure/setup-helm@v4
+      uses: azure/setup-helm@v5
       with:
         version: 'v3.16.0'
 
@@ -109,7 +109,7 @@ jobs:
       run: go mod download
 
     - name: Install Helm
-      uses: azure/setup-helm@v4
+      uses: azure/setup-helm@v5
       with:
         version: 'v3.16.0'
 
