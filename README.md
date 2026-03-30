@@ -686,6 +686,12 @@ my-module/
 | Phase 5.8 | Service Mesh: Istio (traffic, canary, AuthzPolicy, multi-cluster, egress), Linkerd | ✅ 100% |
 | Phase 5.9 | Observability: OpenTelemetry, Prometheus annotations, SLO (Sloth), distributed tracing, recording rules | ✅ 100% |
 | Phase 5.10 | Cloud-Native: Workload Identity, GPU/TPU, Windows, Velero, Flux postBuild | ✅ 100% |
+| Phase 6.0 | Validation: Kubeconform, Pluto, Conftest (Rego), K8s version matrix, CI pipeline templates, chart-testing | ✅ 100% |
+| Phase 6.1 | Supply Chain Security: SLSA provenance, OCI annotations, cosign signing, Syft SBOM | ✅ 100% |
+| Phase 6.2 | Performance: параллельная обработка (worker pool), оптимизация памяти (sync.Pool), streaming YAML | ✅ 100% |
+| Phase 6.3 | Distribution: DEB/RPM/APK (nfpm), multi-arch Docker, OCI registry, Homebrew | ✅ 100% |
+| Phase 6.4 | Documentation: ADR (50 записей), Developer Guide, User Guide | ✅ 100% |
+| Phase 6.5 | Plugin System: внешние процессоры (JSON protocol), .dhg.yaml конфиг, template overrides | ✅ 100% |
 
 ### Планируется (Phase 7–13)
 
