@@ -66,6 +66,17 @@ dockers:
     goos: linux
     goarch: amd64
 
+docker_manifests:
+  - name_template: "ghcr.io/alexgromer/dhg:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/alexgromer/dhg:{{ .Version }}"
+  - name_template: "ghcr.io/alexgromer/dhg:latest"
+    image_templates:
+      - "ghcr.io/alexgromer/dhg:latest"
+
+# OCI artifact push (helm push)
+# Usage: helm push chart.tgz oci://ghcr.io/alexgromer/charts
+
 brews:
   - repository:
       owner: AlexGromer
@@ -80,9 +91,44 @@ brews:
     install: |
       bin.install "dhg"
 
+nfpms:
+  - id: dhg
+    package_name: dhg
+    vendor: AlexGromer
+    homepage: "https://github.com/AlexGromer/deckhouse-helm-generator"
+    maintainer: "Aleksey Pape <alexei.pape@yandex.ru>"
+    description: "CLI tool for generating Helm charts from Kubernetes/Deckhouse resources"
+    license: "Apache-2.0"
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    contents:
+      - src: ./LICENSE
+        dst: /usr/share/doc/dhg/LICENSE
+
 release:
   github:
     owner: AlexGromer
     name: deckhouse-helm-generator
   draft: false
   prerelease: auto
+
+signs:
+  - cmd: cosign
+    env:
+      - COSIGN_EXPERIMENTAL=1
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+    artifacts: checksum
+    output: true
+
+sboms:
+  - artifacts: archive
+    cmd: syft
+    args: ["${artifact}", "--output", "spdx-json=${document}"]

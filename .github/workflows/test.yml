@@ -275,3 +275,20 @@ jobs:
         name: dhg-binary
         path: bin/dhg
         retention-days: 7
+
+  # ── Job 8: Benchmarks ─────────────────────────────────────────────
+  benchmarks:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Run benchmarks
+        run: go test -bench=. -benchmem -count=3 ./tests/integration/ -timeout 300s | tee benchmark-results.txt
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.txt
