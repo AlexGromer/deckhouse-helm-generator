@@ -1,27 +1,27 @@
-# Developer Guide — DHG
+# Руководство разработчика — DHG
 
-> **Type:** How-To
-> **Audience:** intermediate Go developers contributing to DHG
-> **Last updated:** 2026-03-30
-> **Related:** [ARCHITECTURE.md](../ARCHITECTURE.md), [ADR.md](ADR.md)
+> **Тип:** How-To
+> **Аудитория:** Go-разработчики среднего уровня, участвующие в разработке DHG
+> **Последнее обновление:** 2026-03-30
+> **Связанные документы:** [ARCHITECTURE.md](../ARCHITECTURE.md), [ADR.md](ADR.md)
 
-## Overview
+## Обзор
 
-This guide explains how to set up a development environment and how to extend DHG by adding new resource processors, relationship detectors, and chart generators. All three extension points follow a plugin-registry pattern (ADR-003) — you create a struct that implements an interface and register it; the pipeline picks it up automatically.
+Это руководство объясняет, как настроить среду разработки и как расширить DHG, добавив новые process-обработчики ресурсов, детекторы связей и генераторы chart. Все три точки расширения следуют паттерну plugin-registry (ADR-003) — вы создаёте struct, реализующий интерфейс, и регистрируете его; пайплайн подхватывает его автоматически.
 
 ---
 
-## 1. Prerequisites
+## 1. Предварительные требования
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| Go | 1.26+ | Build and test |
-| Make | any | Build targets (`make build`, `make test`) |
+| Инструмент | Версия | Назначение |
+|-----------|--------|-----------|
+| Go | 1.26+ | Сборка и тестирование |
+| Make | любая | Build targets (`make build`, `make test`) |
 | golangci-lint | v1.62+ | Lint (`make lint`) |
-| Helm | 3.x | Integration and e2e tests |
-| git | any | Source control |
+| Helm | 3.x | Integration и e2e тесты |
+| git | любая | Контроль версий |
 
-Install Go 1.26:
+Установка Go 1.26:
 
 ```bash
 # Linux AMD64
@@ -30,84 +30,84 @@ sudo tar -C /usr/local -xzf go1.26.linux-amd64.tar.gz
 export PATH=$PATH:/usr/local/go/bin
 ```
 
-Install golangci-lint:
+Установка golangci-lint:
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
   | sh -s -- -b $(go env GOPATH)/bin
 ```
 
-Clone and build:
+Клонирование и сборка:
 
 ```bash
 git clone https://github.com/AlexGromer/deckhouse-helm-generator.git
 cd deckhouse-helm-generator
 make build
-# Binary: ./bin/dhg
+# Бинарный файл: ./bin/dhg
 ```
 
 ---
 
-## 2. Project Structure
+## 2. Структура проекта
 
 ```
 deckhouse-helm-generator/
 ├── cmd/dhg/
-│   ├── main.go              # CLI (Cobra root + all subcommands), pipeline orchestration
-│   └── main_test.go         # CLI integration tests
+│   ├── main.go              # CLI (Cobra root + все subcommands), оркестрация пайплайна
+│   └── main_test.go         # Интеграционные тесты CLI
 ├── pkg/
-│   ├── analyzer/            # Pattern detection, relationship graph, DOT generation
-│   │   ├── analyzer.go      # Core Analyzer, Analyze() entry point
-│   │   ├── graph.go         # GenerateDOTGraph(), circular dependency detection
-│   │   ├── detector/        # Relationship detectors (label, reference, annotation, volume, deckhouse)
-│   │   └── pattern/         # Pattern checkers (11), pattern detectors (6), Recommender, Formatter
-│   ├── extractor/           # Resource extraction from YAML files, cluster, gitops
-│   │   ├── extractor.go     # Extractor interface + file implementation
-│   │   ├── cluster.go       # Cluster extractor (client-go dynamic client)
+│   ├── analyzer/            # Обнаружение паттернов, граф связей, генерация DOT
+│   │   ├── analyzer.go      # Ядро Analyzer, точка входа Analyze()
+│   │   ├── graph.go         # GenerateDOTGraph(), обнаружение циклических зависимостей
+│   │   ├── detector/        # Детекторы связей (label, reference, annotation, volume, deckhouse)
+│   │   └── pattern/         # Проверки паттернов (11), детекторы паттернов (6), Recommender, Formatter
+│   ├── extractor/           # Извлечение ресурсов из YAML-файлов, cluster, gitops
+│   │   ├── extractor.go     # Интерфейс Extractor + файловая реализация
+│   │   ├── cluster.go       # Cluster extractor (динамический client клиент-go)
 │   │   ├── gitops.go        # GitOps extractor (go-git)
-│   │   └── merger.go        # Multi-source deduplication and conflict resolution
-│   ├── generator/           # Helm chart generation (70+ generator files)
-│   │   ├── generator.go     # Generator interface, DefaultRegistry(), Options
-│   │   ├── universal.go     # Universal (single chart) mode
-│   │   ├── separate.go      # Separate (chart per service) mode
-│   │   ├── library.go       # Library chart mode
-│   │   ├── umbrella.go      # Umbrella chart mode
-│   │   └── ...              # 60+ phase-specific generators
-│   ├── processor/           # Processor interface and registry
-│   │   ├── processor.go     # Processor interface, Context, Result, BaseProcessor
-│   │   ├── registry.go      # Registry — GVK-based routing
-│   │   └── k8s/             # 50 per-resource-type processors
-│   ├── helm/                # Chart.yaml and values.yaml data models
-│   └── types/               # Shared types (ExtractedResource, ProcessedResource, GeneratedChart, etc.)
+│   │   └── merger.go        # Дедупликация из нескольких источников и разрешение конфликтов
+│   ├── generator/           # Генерация Helm chart (70+ файлов генераторов)
+│   │   ├── generator.go     # Интерфейс Generator, DefaultRegistry(), Options
+│   │   ├── universal.go     # Режим Universal (единый chart)
+│   │   ├── separate.go      # Режим Separate (chart для каждого сервиса)
+│   │   ├── library.go       # Режим Library chart
+│   │   ├── umbrella.go      # Режим Umbrella chart
+│   │   └── ...              # 60+ phase-специфичных генераторов
+│   ├── processor/           # Интерфейс Processor и registry
+│   │   ├── processor.go     # Интерфейс Processor, Context, Result, BaseProcessor
+│   │   ├── registry.go      # Registry — маршрутизация на основе GVK
+│   │   └── k8s/             # 50 процессоров по типам ресурсов
+│   ├── helm/                # Модели данных Chart.yaml и values.yaml
+│   └── types/               # Общие типы (ExtractedResource, ProcessedResource, GeneratedChart и др.)
 ├── tests/
-│   ├── integration/         # Full pipeline tests with real YAML fixtures
-│   └── e2e/                 # End-to-end tests (generate + helm lint)
+│   ├── integration/         # Полные тесты пайплайна с реальными YAML-fixtures
+│   └── e2e/                 # End-to-end тесты (generate + helm lint)
 ├── Makefile
 ├── .goreleaser.yml
 └── .golangci.yml
 ```
 
-### Pipeline stages (from `cmd/dhg/main.go`)
+### Этапы пайплайна (из `cmd/dhg/main.go`)
 
 ```
 [1] Extract   → extractor.Extract()     → []ExtractedResource
 [2] Process   → processor.Process()     → []ProcessedResource
 [3] Analyze   → analyzer.Analyze()      → ResourceGraph
 [4] Generate  → generator.Generate()    → []GeneratedChart
-[4b..4j]      → Phase 2 post-processors (copy-on-write)
-[4k..4t]      → Phase 2.5 security post-processors
+[4b..4j]      → Post-processor'ы Phase 2 (copy-on-write)
+[4k..4t]      → Security post-processor'ы Phase 2.5
 [5] Write     → generator.WriteChart()  → filesystem
 ```
 
 ---
 
-## 3. Adding a New K8s Resource Processor
+## 3. Добавление нового процессора K8s-ресурсов
 
-A processor converts one `*unstructured.Unstructured` object into a Helm template and a `values.yaml` fragment.
+Процессор преобразует один объект `*unstructured.Unstructured` в Helm-шаблон и фрагмент `values.yaml`.
 
-### 3.1 Create the processor file
+### 3.1 Создайте файл процессора
 
-Create `pkg/processor/k8s/mykind.go`:
+Создайте `pkg/processor/k8s/mykind.go`:
 
 ```go
 package k8s
@@ -185,20 +185,20 @@ spec:
 }
 ```
 
-### 3.2 Register the processor
+### 3.2 Зарегистрируйте процессор
 
-Open `pkg/processor/k8s/registry.go` and add one line to `RegisterAll()`:
+Откройте `pkg/processor/k8s/registry.go` и добавьте одну строку в `RegisterAll()`:
 
 ```go
 func RegisterAll(r *processor.Registry) {
-    // ... existing registrations ...
-    r.Register(NewMyKindProcessor())   // add this line
+    // ... существующие регистрации ...
+    r.Register(NewMyKindProcessor())   // добавьте эту строку
 }
 ```
 
-### 3.3 Write tests
+### 3.3 Напишите тесты
 
-Create `pkg/processor/k8s/mykind_test.go`. Use the same pattern as other `_test.go` files in the package — construct an `*unstructured.Unstructured`, call `Process()`, and assert on `TemplatePath`, `Values`, and `TemplateContent`:
+Создайте `pkg/processor/k8s/mykind_test.go`. Используйте тот же паттерн, что и в других `_test.go` файлах пакета — создайте `*unstructured.Unstructured`, вызовите `Process()` и проверьте `TemplatePath`, `Values` и `TemplateContent`:
 
 ```go
 package k8s
@@ -249,13 +249,13 @@ func TestMyKindProcessor_Process(t *testing.T) {
 }
 ```
 
-### 3.4 Verify
+### 3.4 Проверьте
 
 ```bash
 go test ./pkg/processor/k8s/... -run TestMyKind -v
 ```
 
-Expected output:
+Ожидаемый вывод:
 
 ```
 --- PASS: TestMyKindProcessor_Process (0.00s)
@@ -264,13 +264,13 @@ PASS
 
 ---
 
-## 4. Adding a New Relationship Detector
+## 4. Добавление нового детектора связей
 
-Detectors run during stage 3 (Analyze). They scan `[]ProcessedResource` and emit `Relationship` structs into the `ResourceGraph`. Use them to model connections like Service → Deployment or Certificate → Ingress.
+Детекторы запускаются на этапе 3 (Analyze). Они сканируют `[]ProcessedResource` и добавляют структуры `Relationship` в `ResourceGraph`. Используйте их для моделирования связей типа Service → Deployment или Certificate → Ingress.
 
-### 4.1 Create the detector file
+### 4.1 Создайте файл детектора
 
-Create `pkg/analyzer/detector/mydetector.go`:
+Создайте `pkg/analyzer/detector/mydetector.go`:
 
 ```go
 package detector
@@ -312,54 +312,54 @@ func (d *MyDetector) Detect(resources []*types.ProcessedResource, graph *analyze
 }
 ```
 
-### 4.2 Register the detector
+### 4.2 Зарегистрируйте детектор
 
-Open `pkg/analyzer/detector/registry.go` and add your detector to `RegisterAll()`:
+Откройте `pkg/analyzer/detector/registry.go` и добавьте ваш детектор в `RegisterAll()`:
 
 ```go
 func RegisterAll(a *analyzer.Analyzer) {
-    // ... existing detectors ...
+    // ... существующие детекторы ...
     a.RegisterDetector(&MyDetector{})
 }
 ```
 
-### 4.3 Write tests
+### 4.3 Напишите тесты
 
 ```go
 package detector
 
 import (
     "testing"
-    // ... imports
+    // ... импорты
 )
 
 func TestMyDetector_Detect(t *testing.T) {
-    // build two ProcessedResources (MyKind + Deployment, same service name)
-    // call Detect()
-    // assert graph.Relationships has one entry with the correct Type
+    // создайте два ProcessedResource (MyKind + Deployment с одинаковым именем сервиса)
+    // вызовите Detect()
+    // проверьте, что graph.Relationships содержит одну запись с правильным Type
 }
 ```
 
 ---
 
-## 5. Adding a New Generator
+## 5. Добавление нового генератора
 
-Generators run after the Analyze stage as post-processors. They receive a `*GeneratedChart` and return a new one (copy-on-write — ADR-008). Use them to add new template files or values entries.
+Генераторы запускаются после этапа Analyze как post-processor'ы. Они получают `*GeneratedChart` и возвращают новый (copy-on-write — ADR-008). Используйте их для добавления новых файлов шаблонов или записей в values.
 
-### 5.1 Understand the copy-on-write contract
+### 5.1 Понять контракт copy-on-write
 
-Every generator that modifies a `GeneratedChart` **must**:
+Каждый генератор, модифицирующий `GeneratedChart`, **обязан**:
 
-1. Create a new `map[string]string` for `Templates`.
-2. Copy all entries from `chart.Templates` into the new map.
-3. Add or modify entries in the new map.
-4. Return a new `*types.GeneratedChart` with the new map.
+1. Создать новый `map[string]string` для `Templates`.
+2. Скопировать все записи из `chart.Templates` в новую map.
+3. Добавить или изменить записи в новой map.
+4. Вернуть новый `*types.GeneratedChart` с новой map.
 
-Do not modify `chart.Templates` in place.
+Не изменяйте `chart.Templates` напрямую.
 
-### 5.2 Create the generator file
+### 5.2 Создайте файл генератора
 
-Create `pkg/generator/myfeature.go`:
+Создайте `pkg/generator/myfeature.go`:
 
 ```go
 package generator
@@ -417,9 +417,9 @@ data:
 }
 ```
 
-### 5.3 Wire the generator into the pipeline
+### 5.3 Подключите генератор к пайплайну
 
-Open `cmd/dhg/main.go`. In `runGenerate()`, add a flag variable at the top of `newGenerateCmd()`:
+Откройте `cmd/dhg/main.go`. В `runGenerate()` добавьте переменную флага в начало `newGenerateCmd()`:
 
 ```go
 var myFeature bool
@@ -427,7 +427,7 @@ var myFeature bool
 cmd.Flags().BoolVar(&myFeature, "my-feature", false, "Generate MyFeature ConfigMap")
 ```
 
-Then apply the generator after the base chart is generated (following the existing Phase 2 post-processor pattern):
+Затем примените генератор после генерации базового chart (следуя существующему паттерну Phase 2 post-processor):
 
 ```go
 if opts.myFeature {
@@ -438,9 +438,9 @@ if opts.myFeature {
 }
 ```
 
-### 5.4 Write tests
+### 5.4 Напишите тесты
 
-Create `pkg/generator/myfeature_test.go`:
+Создайте `pkg/generator/myfeature_test.go`:
 
 ```go
 package generator
@@ -487,45 +487,45 @@ func TestInjectMyFeature_Disabled_ReturnsOriginal(t *testing.T) {
 
 ---
 
-## 6. Running Tests
+## 6. Запуск тестов
 
-### Unit tests
+### Юнит-тесты
 
 ```bash
-# All packages
+# Все пакеты
 make test
 
-# Single package
+# Отдельный пакет
 go test ./pkg/processor/k8s/... -v
 
-# Single test
+# Отдельный тест
 go test ./pkg/generator/... -run TestInjectMyFeature -v
 ```
 
-### With coverage
+### С покрытием
 
 ```bash
 make coverage
-# Opens coverage report; project gate is 70%, current baseline is 86%+
+# Открывает отчёт о покрытии; минимальный порог проекта — 70%, текущий уровень — 86%+
 ```
 
-### Integration tests
+### Интеграционные тесты
 
 ```bash
 go test ./tests/integration/... -v -timeout 60s
 ```
 
-Integration tests use real YAML fixtures in `tests/integration/testdata/`. They run the full pipeline and assert on generated chart structure. Helm must be installed.
+Интеграционные тесты используют реальные YAML-fixtures в `tests/integration/testdata/`. Они запускают полный пайплайн и проверяют структуру сгенерированного chart. Helm должен быть установлен.
 
-### End-to-end tests
+### End-to-end тесты
 
 ```bash
 go test ./tests/e2e/... -v -timeout 120s
 ```
 
-E2E tests generate a chart and then run `helm lint` and `helm template` against it. Helm must be on `$PATH`.
+E2E тесты генерируют chart и затем запускают `helm lint` и `helm template`. Helm должен быть в `$PATH`.
 
-### Benchmarks
+### Бенчмарки
 
 ```bash
 go test ./pkg/... -bench=. -benchtime=5s
@@ -535,80 +535,80 @@ go test ./pkg/... -bench=. -benchtime=5s
 
 ```bash
 make lint
-# Equivalent to: golangci-lint run ./...
+# Эквивалентно: golangci-lint run ./...
 ```
 
-The linter config is in `.golangci.yml`. The CI pipeline runs lint with `continue-on-error: true` — lint failures do not block merges, but should be addressed.
+Конфигурация линтера находится в `.golangci.yml`. CI-пайплайн запускает lint с `continue-on-error: true` — ошибки lint не блокируют слияние, но должны устраняться.
 
 ---
 
-## 7. CI/CD Pipeline Overview
+## 7. Обзор CI/CD пайплайна
 
-All CI runs on GitHub Actions. The workflow files are in `.github/workflows/`.
+Весь CI работает на GitHub Actions. Файлы workflow находятся в `.github/workflows/`.
 
-| Workflow | File | Trigger | Stages |
-|----------|------|---------|--------|
-| Test | `test.yml` | push, PR | Unit (Go 1.25+1.26 matrix), Integration, E2E, Lint, Security, Coverage |
-| Release | `release.yml` | tag push (`v*`) | GoReleaser: build, Docker, Homebrew |
-| CodeQL | `codeql.yml` | push, schedule | Static analysis |
-| Auto-approve | `auto-approve.yml` | PR | Auto-approve owner PRs via GitHub App bot |
+| Workflow | Файл | Триггер | Этапы |
+|----------|------|---------|-------|
+| Test | `test.yml` | push, PR | Unit (матрица Go 1.25+1.26), Integration, E2E, Lint, Security, Coverage |
+| Release | `release.yml` | push тега (`v*`) | GoReleaser: сборка, Docker, Homebrew |
+| CodeQL | `codeql.yml` | push, расписание | Статический анализ |
+| Auto-approve | `auto-approve.yml` | PR | Авто-approve PR от владельца через GitHub App bot |
 
-### Branch protection rules
+### Правила защиты веток
 
-PRs to `main` must pass:
+PR в `main` должны пройти:
 
 - `Unit Tests (Go 1.26)`
 - `Lint Code`
 - `Security Scan`
 - `Build Binary`
 
-### Coverage gate
+### Порог покрытия
 
-The coverage merge step in `test.yml` combines all coverage profiles and enforces a **70% minimum**. The current project-wide coverage is 86%+. New code should maintain this baseline.
+Шаг объединения покрытия в `test.yml` объединяет все профили покрытия и применяет **минимальный порог 70%**. Текущее покрытие по всему проекту составляет 86%+. Новый код должен поддерживать этот уровень.
 
 ---
 
-## 8. Release Process
+## 8. Процесс релиза
 
-Releases are fully automated via GoReleaser once a version tag is pushed.
+Релизы полностью автоматизированы через GoReleaser при push тега версии.
 
-### Create a release
+### Создание релиза
 
 ```bash
-# Ensure main is clean and tests pass
+# Убедитесь, что main чист и тесты проходят
 git checkout main
 git pull origin main
 make test
 
-# Tag the release
+# Тегируйте релиз
 git tag -a v0.8.0 -m "Release v0.8.0"
 git push origin v0.8.0
 ```
 
-GoReleaser then:
-1. Builds binaries for Linux (amd64, arm64), macOS (amd64, arm64), Windows (amd64).
-2. Creates a GitHub Release with checksums and a changelog.
-3. Pushes a multi-arch Docker image to `ghcr.io/alexgromer/dhg:v0.8.0` and `:latest`.
-4. Updates the Homebrew tap formula at `AlexGromer/homebrew-tap`.
+GoReleaser затем:
+1. Собирает бинарные файлы для Linux (amd64, arm64), macOS (amd64, arm64), Windows (amd64).
+2. Создаёт GitHub Release с checksums и changelog.
+3. Публикует multi-arch Docker образ в `ghcr.io/alexgromer/dhg:v0.8.0` и `:latest`.
+4. Обновляет формулу Homebrew tap в `AlexGromer/homebrew-tap`.
 
-### Verify a release
+### Проверка релиза
 
 ```bash
-# Check the GitHub Release page
+# Проверить страницу GitHub Release
 gh release view v0.8.0
 
-# Pull and test the Docker image
+# Получить и протестировать Docker образ
 docker pull ghcr.io/alexgromer/dhg:v0.8.0
 docker run --rm ghcr.io/alexgromer/dhg:v0.8.0 version
 ```
 
-### Goreleaser config
+### Конфигурация Goreleaser
 
-The full build config is in `.goreleaser.yml`. Key sections: `builds` (Go build flags, CGO disabled), `archives` (tar.gz + zip), `dockers` (multi-arch manifest), `brews` (Homebrew formula).
+Полная конфигурация сборки находится в `.goreleaser.yml`. Ключевые секции: `builds` (флаги Go build, CGO отключён), `archives` (tar.gz + zip), `dockers` (multi-arch manifest), `brews` (формула Homebrew).
 
 ---
 
-## Reference: Processor Interface
+## Справочник: интерфейс Processor
 
 ```go
 // pkg/processor/processor.go
