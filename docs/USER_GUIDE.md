@@ -1,25 +1,25 @@
-# User Guide — DHG (Deckhouse Helm Generator)
+# Руководство пользователя — DHG (Deckhouse Helm Generator)
 
-> **Type:** Tutorial + Reference
-> **Audience:** developers and platform engineers using DHG to generate Helm charts
-> **Last updated:** 2026-03-30
-> **Related:** [DEVELOPER.md](DEVELOPER.md), [ADR.md](ADR.md)
+> **Тип:** Руководство + Справочник
+> **Аудитория:** разработчики и platform engineers, использующие DHG для генерации Helm chart
+> **Последнее обновление:** 2026-03-30
+> **Связанные документы:** [DEVELOPER.md](DEVELOPER.md), [ADR.md](ADR.md)
 
-## Overview
+## Обзор
 
-DHG is a CLI tool that generates production-ready Helm charts from Kubernetes YAML manifests. It extracts your resources, detects relationships between them, groups them into services, and writes a complete chart — including `values.yaml`, templates, `_helpers.tpl`, and optional extras like environment overlays, security policies, and Deckhouse module scaffolding.
+DHG — это CLI-инструмент, генерирующий production-ready Helm chart из Kubernetes YAML-манифестов. Он извлекает ваши ресурсы, обнаруживает связи между ними, группирует их в сервисы и создаёт полный chart — включая `values.yaml`, templates, `_helpers.tpl` и дополнительные компоненты: environment overlays, security policies и scaffold для Deckhouse modules.
 
 ---
 
-## 1. Installation
+## 1. Установка
 
-### Homebrew (macOS and Linux)
+### Homebrew (macOS и Linux)
 
 ```bash
 brew install AlexGromer/tap/dhg
 ```
 
-### Binary release (Linux)
+### Готовый бинарный файл (Linux)
 
 ```bash
 VERSION=$(curl -s https://api.github.com/repos/AlexGromer/deckhouse-helm-generator/releases/latest \
@@ -36,7 +36,7 @@ tar xzf "dhg_${VERSION#v}_linux_arm64.tar.gz"
 sudo mv dhg /usr/local/bin/
 ```
 
-### Binary release (macOS)
+### Готовый бинарный файл (macOS)
 
 ```bash
 VERSION=$(curl -s https://api.github.com/repos/AlexGromer/deckhouse-helm-generator/releases/latest \
@@ -64,13 +64,13 @@ go install github.com/AlexGromer/deckhouse-helm-generator/cmd/dhg@latest
 ```bash
 docker pull ghcr.io/alexgromer/dhg:latest
 
-# Run against files in the current directory
+# Запуск с файлами из текущей директории
 docker run --rm -v $(pwd):/work \
   ghcr.io/alexgromer/dhg:latest \
   generate -f /work/manifests -o /work/chart --chart-name myapp
 ```
 
-### Build from source
+### Сборка из исходного кода
 
 ```bash
 git clone https://github.com/AlexGromer/deckhouse-helm-generator.git
@@ -79,7 +79,7 @@ make build
 sudo cp bin/dhg /usr/local/bin/
 ```
 
-### Verify
+### Проверка
 
 ```bash
 dhg version
@@ -88,15 +88,15 @@ dhg version
 
 ---
 
-## 2. Quick Start
+## 2. Быстрый старт
 
-**Time to complete:** ~5 minutes
+**Время выполнения:** ~5 минут
 
-**Prerequisites:** `dhg` installed, a directory of Kubernetes YAML manifests
+**Предварительные требования:** установленный `dhg`, директория с Kubernetes YAML-манифестами
 
-### Step 1: Prepare your manifests
+### Шаг 1: Подготовьте манифесты
 
-Place your Kubernetes YAML files in a directory:
+Разместите Kubernetes YAML-файлы в директории:
 
 ```
 manifests/
@@ -106,13 +106,13 @@ manifests/
   configmap.yaml
 ```
 
-### Step 2: Generate the chart
+### Шаг 2: Сгенерируйте chart
 
 ```bash
 dhg generate -f ./manifests -o ./my-chart --chart-name myapp
 ```
 
-Expected output:
+Ожидаемый вывод:
 
 ```
 [1/5] Extracting resources from source...
@@ -127,7 +127,7 @@ To install the chart, run:
   helm install my-release ./my-chart/myapp
 ```
 
-### Step 3: Inspect the result
+### Шаг 3: Проверьте результат
 
 ```
 my-chart/
@@ -143,140 +143,140 @@ my-chart/
         └── myapp-configmap.yaml
 ```
 
-### Step 4: Install with Helm
+### Шаг 4: Установите с помощью Helm
 
 ```bash
 helm install my-release ./my-chart/myapp
-# or with custom values
+# или с кастомными values
 helm install my-release ./my-chart/myapp --set myapp.deployment.replicas=3
 ```
 
 ---
 
-## 3. CLI Reference
+## 3. Справочник по CLI
 
-### Global commands
+### Глобальные команды
 
-| Command | Description |
-|---------|-------------|
-| `dhg generate` | Generate a Helm chart from Kubernetes resources |
-| `dhg analyze` | Analyze resources and print architecture recommendations |
-| `dhg validate` | Validate Helm chart structure and template syntax |
-| `dhg diff` | Show differences between two chart directories |
-| `dhg fix` | Auto-fix manifests with security best practices |
-| `dhg migrate` | Detect drift and generate migration plan |
-| `dhg version` | Print version information |
+| Команда | Описание |
+|---------|----------|
+| `dhg generate` | Генерировать Helm chart из Kubernetes-ресурсов |
+| `dhg analyze` | Анализировать ресурсы и выдать архитектурные рекомендации |
+| `dhg validate` | Проверить структуру Helm chart и синтаксис шаблонов |
+| `dhg diff` | Показать различия между двумя директориями chart |
+| `dhg fix` | Автоматически исправить манифесты с учётом security best practices |
+| `dhg migrate` | Обнаружить расхождения и сформировать план миграции |
+| `dhg version` | Вывести информацию о версии |
 
 ---
 
 ### `dhg generate`
 
-Generate a Helm chart from Kubernetes resource files.
+Генерирует Helm chart из файлов Kubernetes-ресурсов.
 
 ```
 dhg generate [flags]
 ```
 
-**Required flags:**
+**Обязательные флаги:**
 
-| Flag | Description |
-|------|-------------|
-| `-f, --file strings` | Path(s) to YAML files or directories |
-| `--chart-name string` | Name of the chart |
+| Флаг | Описание |
+|------|----------|
+| `-f, --file strings` | Путь(и) к YAML-файлам или директориям |
+| `--chart-name string` | Имя chart |
 
-**Core flags:**
+**Основные флаги:**
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-o, --output string` | `./chart` | Output directory |
-| `--chart-version string` | `0.1.0` | Helm chart version |
-| `--app-version string` | `1.0.0` | Application version |
-| `--mode string` | `universal` | Output mode: `universal`, `separate`, `library`, `umbrella` |
-| `-r, --recursive` | `true` | Recursively scan directories |
-| `-v, --verbose` | `false` | Verbose output |
-| `--dry-run` | `false` | Print chart to stdout, do not write to disk |
+| Флаг | По умолчанию | Описание |
+|------|-------------|----------|
+| `-o, --output string` | `./chart` | Выходная директория |
+| `--chart-version string` | `0.1.0` | Версия Helm chart |
+| `--app-version string` | `1.0.0` | Версия приложения |
+| `--mode string` | `universal` | Режим вывода: `universal`, `separate`, `library`, `umbrella` |
+| `-r, --recursive` | `true` | Рекурсивный обход директорий |
+| `-v, --verbose` | `false` | Подробный вывод |
+| `--dry-run` | `false` | Вывести chart в stdout, не записывать на диск |
 
-**Filtering flags:**
+**Флаги фильтрации:**
 
-| Flag | Description |
-|------|-------------|
-| `-n, --namespace string` | Filter resources by namespace |
-| `--namespaces strings` | Filter by multiple namespaces |
-| `-l, --selector string` | Label selector filter (e.g., `app=myapp`) |
-| `--include-kinds strings` | Include only these resource kinds |
-| `--exclude-kinds strings` | Exclude these resource kinds |
+| Флаг | Описание |
+|------|----------|
+| `-n, --namespace string` | Фильтровать ресурсы по namespace |
+| `--namespaces strings` | Фильтр по нескольким namespace |
+| `-l, --selector string` | Фильтр по label selector (например, `app=myapp`) |
+| `--include-kinds strings` | Включить только указанные типы ресурсов |
+| `--exclude-kinds strings` | Исключить указанные типы ресурсов |
 
-**Output flags:**
+**Флаги вывода:**
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--include-tests` | `false` | Generate helm-unittest test templates |
-| `--include-readme` | `true` | Generate README.md |
-| `--include-schema` | `false` | Generate `values.schema.json` |
-| `--template-style string` | `standard` | Template output style: `standard` or `helm` |
-| `--values-flat` | `false` | Add dot-notation path comments to values.yaml for `--set` reference |
+| Флаг | По умолчанию | Описание |
+|------|-------------|----------|
+| `--include-tests` | `false` | Генерировать шаблоны тестов для helm-unittest |
+| `--include-readme` | `true` | Генерировать README.md |
+| `--include-schema` | `false` | Генерировать `values.schema.json` |
+| `--template-style string` | `standard` | Стиль вывода шаблонов: `standard` или `helm` |
+| `--values-flat` | `false` | Добавить комментарии с dot-notation путями в values.yaml для использования с `--set` |
 
-**Environment and infrastructure flags:**
+**Флаги окружения и инфраструктуры:**
 
-| Flag | Description |
-|------|-------------|
-| `--env-values` | Generate `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml` |
-| `--namespace-resources` | Generate ResourceQuota, LimitRange, NetworkPolicy |
-| `--feature-flags` | Inject feature flag guards (monitoring, ingress, autoscaling, security, storage, rbac) |
-| `--cloud-provider string` | Cloud provider for Service annotations: `aws`, `gcp`, `azure` |
-| `--cloud-internal` | Use internal load balancer (default: internet-facing) |
-| `--detect-ingress` | Auto-detect ingress controller; inject controller-specific annotations |
-| `--airgap-registry string` | Generate air-gap artifacts targeting this registry |
-| `--auto-deps` | Auto-detect infrastructure dependencies (PostgreSQL, Redis, etc.) |
+| Флаг | Описание |
+|------|----------|
+| `--env-values` | Генерировать `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml` |
+| `--namespace-resources` | Генерировать ResourceQuota, LimitRange, NetworkPolicy |
+| `--feature-flags` | Добавить feature flag guards (monitoring, ingress, autoscaling, security, storage, rbac) |
+| `--cloud-provider string` | Провайдер облака для аннотаций Service: `aws`, `gcp`, `azure` |
+| `--cloud-internal` | Использовать internal load balancer (по умолчанию: internet-facing) |
+| `--detect-ingress` | Автоматически определить ingress controller и добавить соответствующие аннотации |
+| `--airgap-registry string` | Генерировать air-gap артефакты с указанием целевого registry |
+| `--auto-deps` | Автоматически обнаружить инфраструктурные зависимости (PostgreSQL, Redis и др.) |
 
-**Topology flags:**
+**Топологические флаги:**
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--monorepo` | `false` | Generate monorepo layout (Makefile, .helmignore, ct.yaml) |
-| `--kustomize` | `false` | Generate Kustomize layout with base and dev/staging/prod overlays |
-| `--post-renderer` | `false` | Generate Kustomize overlays compatible with Flux CD `postBuild` |
-| `--multi-tenant` | `false` | Generate multi-tenant overlay with per-tenant isolation |
-| `--tenant-count int` | `2` | Number of tenant examples to scaffold |
-| `--spot` | `false` | Inject spot/preemptible instance tolerations and PDB |
-| `--spot-grace-period int` | `15` | Grace period (seconds) for spot instance preStop hook |
+| Флаг | По умолчанию | Описание |
+|------|-------------|----------|
+| `--monorepo` | `false` | Генерировать monorepo-структуру (Makefile, .helmignore, ct.yaml) |
+| `--kustomize` | `false` | Генерировать Kustomize-структуру с base и overlays для dev/staging/prod |
+| `--post-renderer` | `false` | Генерировать Kustomize overlays, совместимые с Flux CD `postBuild` |
+| `--multi-tenant` | `false` | Генерировать multi-tenant overlay с изоляцией на уровне tenant |
+| `--tenant-count int` | `2` | Количество примеров tenant для scaffold |
+| `--spot` | `false` | Добавить tolerations и PDB для spot/preemptible инстансов |
+| `--spot-grace-period int` | `15` | Время ожидания (секунды) для preStop hook при освобождении spot-инстанса |
 
-**Deckhouse flags:**
+**Флаги Deckhouse:**
 
-| Flag | Description |
-|------|-------------|
-| `--deckhouse-module` | Generate Deckhouse module scaffold (helm_lib, openapi/, images/, hooks/) |
-| `--hooks` | Generate Helm lifecycle hook Job templates (pre-upgrade, post-install, pre-delete) |
+| Флаг | Описание |
+|------|----------|
+| `--deckhouse-module` | Генерировать scaffold Deckhouse module (helm_lib, openapi/, images/, hooks/) |
+| `--hooks` | Генерировать шаблоны Helm lifecycle hook Job (pre-upgrade, post-install, pre-delete) |
 
-> Note: `--monorepo` and `--kustomize` are mutually exclusive.
+> Примечание: `--monorepo` и `--kustomize` взаимоисключающие флаги.
 
 ---
 
 ### `dhg analyze`
 
-Analyze resources for architecture patterns, best practices, and service grouping recommendations.
+Анализирует ресурсы на предмет архитектурных паттернов, best practices и рекомендаций по группировке сервисов.
 
 ```
 dhg analyze -f ./manifests [flags]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-f, --file strings` | required | Path(s) to YAML files or directories |
-| `--output-format string` | `text` | Output format: `text`, `json`, `markdown` |
-| `-o, --output string` | stdout | Output file |
-| `--summary` | `false` | Show only the summary section |
-| `--color` | `true` | Enable colored output |
-| `-r, --recursive` | `true` | Recursively scan directories |
-| `-n, --namespace string` | | Filter by namespace |
+| Флаг | По умолчанию | Описание |
+|------|-------------|----------|
+| `-f, --file strings` | обязательный | Путь(и) к YAML-файлам или директориям |
+| `--output-format string` | `text` | Формат вывода: `text`, `json`, `markdown` |
+| `-o, --output string` | stdout | Выходной файл |
+| `--summary` | `false` | Показать только раздел сводки |
+| `--color` | `true` | Включить цветной вывод |
+| `-r, --recursive` | `true` | Рекурсивный обход директорий |
+| `-n, --namespace string` | | Фильтр по namespace |
 
-**Example:**
+**Примеры:**
 
 ```bash
-# Print recommendations to stdout
+# Вывести рекомендации в stdout
 dhg analyze -f ./manifests
 
-# Export as Markdown report
+# Экспортировать как Markdown-отчёт
 dhg analyze -f ./manifests --output-format markdown -o analysis.md
 ```
 
@@ -284,29 +284,29 @@ dhg analyze -f ./manifests --output-format markdown -o analysis.md
 
 ### `dhg validate`
 
-Validate an existing Helm chart for structural issues and template syntax errors.
+Проверяет существующий Helm chart на структурные проблемы и синтаксические ошибки в шаблонах.
 
 ```
 dhg validate -f ./chart/myapp [flags]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-f, --file strings` | `.` | Path(s) to chart directories |
-| `-v, --verbose` | `false` | Verbose output |
+| Флаг | По умолчанию | Описание |
+|------|-------------|----------|
+| `-f, --file strings` | `.` | Путь(и) к директориям chart |
+| `-v, --verbose` | `false` | Подробный вывод |
 
-Checks performed:
-- `Chart.yaml` presence and required fields (`apiVersion`, `name`, `version`)
-- `values.yaml` presence and valid YAML
-- Template syntax: balanced `{{ }}` delimiters
+Выполняемые проверки:
+- Наличие `Chart.yaml` и обязательных полей (`apiVersion`, `name`, `version`)
+- Наличие `values.yaml` и корректность YAML
+- Синтаксис шаблонов: сбалансированные разделители `{{ }}`
 
-**Example:**
+**Пример:**
 
 ```bash
 dhg validate -f ./chart/myapp -v
 ```
 
-Expected output on a valid chart:
+Ожидаемый вывод для корректного chart:
 
 ```
 Validating chart at: ./chart/myapp
@@ -322,55 +322,55 @@ Validation complete: 0 error(s), 0 warning(s)
 
 ### `dhg diff`
 
-Show differences between two chart directories.
+Показывает различия между двумя директориями chart.
 
 ```
 dhg diff <dir1> <dir2> [flags]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--color` | `true` | Enable colored output |
+| Флаг | По умолчанию | Описание |
+|------|-------------|----------|
+| `--color` | `true` | Включить цветной вывод |
 
-**Example:**
+**Пример:**
 
 ```bash
-# Compare chart before and after regeneration
+# Сравнить chart до и после регенерации
 dhg diff ./chart-v1 ./chart-v2
 ```
 
-Output shows:
-- Files present in one directory but not the other
-- Line-by-line diffs for changed files
+Вывод включает:
+- Файлы, присутствующие только в одной директории
+- Построчные различия для изменённых файлов
 
 ---
 
 ### `dhg fix`
 
-Auto-fix Kubernetes manifests by injecting security best practices.
+Автоматически исправляет Kubernetes-манифесты, добавляя security best practices.
 
 ```
 dhg fix -f ./manifests -o ./fixed [flags]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-f, --file strings` | required | Path(s) to YAML files or directories |
-| `-o, --output string` | `./fixed` | Output directory for fixed manifests |
-| `--chart-name string` | `fixed-chart` | Name of the output chart |
-| `--workload-type string` | `web` | Resource profile: `web`, `worker`, `database`, `batch`, `cache` |
-| `-r, --recursive` | `true` | Recursively scan |
-| `-v, --verbose` | `false` | Verbose output |
+| Флаг | По умолчанию | Описание |
+|------|-------------|----------|
+| `-f, --file strings` | обязательный | Путь(и) к YAML-файлам или директориям |
+| `-o, --output string` | `./fixed` | Выходная директория для исправленных манифестов |
+| `--chart-name string` | `fixed-chart` | Имя выходного chart |
+| `--workload-type string` | `web` | Профиль ресурсов: `web`, `worker`, `database`, `batch`, `cache` |
+| `-r, --recursive` | `true` | Рекурсивный обход |
+| `-v, --verbose` | `false` | Подробный вывод |
 
-Fixes applied:
+Применяемые исправления:
 - `SecurityContext` (`runAsNonRoot`, `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`)
-- Resource requests and limits (sized by `--workload-type`)
-- Liveness, readiness, and startup probes
+- Resource requests и limits (подбираются по `--workload-type`)
+- Liveness, readiness и startup probes
 - PodDisruptionBudgets
 - PSS Restricted compliance labels
-- Graceful shutdown `preStop` hooks
+- Graceful shutdown через `preStop` hook
 
-**Example:**
+**Пример:**
 
 ```bash
 dhg fix -f ./manifests -o ./fixed --workload-type web -v
@@ -380,41 +380,41 @@ dhg fix -f ./manifests -o ./fixed --workload-type web -v
 
 ### `dhg migrate`
 
-Compare an existing chart against manifests and produce a drift report and migration plan.
+Сравнивает существующий chart с манифестами и создаёт отчёт о расхождениях и план миграции.
 
 ```
 dhg migrate --from ./existing-chart -f ./manifests --chart-name myapp [flags]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--from string` | required | Path to the existing chart directory |
-| `-f, --source strings` | required | Path(s) to source manifest files |
-| `--chart-name string` | required | Chart name |
-| `--chart-version string` | `0.1.0` | Chart version for the generated comparison chart |
-| `--mode string` | `universal` | Output mode |
-| `-v, --verbose` | `false` | Verbose output |
+| Флаг | По умолчанию | Описание |
+|------|-------------|----------|
+| `--from string` | обязательный | Путь к существующей директории chart |
+| `-f, --source strings` | обязательный | Путь(и) к исходным файлам манифестов |
+| `--chart-name string` | обязательный | Имя chart |
+| `--chart-version string` | `0.1.0` | Версия chart для генерируемого сравнительного chart |
+| `--mode string` | `universal` | Режим вывода |
+| `-v, --verbose` | `false` | Подробный вывод |
 
-**Example:**
+**Пример:**
 
 ```bash
 dhg migrate --from ./chart/myapp -f ./manifests --chart-name myapp -v
 ```
 
-Output:
-- Drift summary (added templates, removed templates, changed values)
-- Step-by-step migration plan
-- `_migrate.tpl` values migration template (when values keys have changed)
+Вывод:
+- Сводка расхождений (добавленные templates, удалённые templates, изменённые values)
+- Пошаговый план миграции
+- Шаблон миграции values `_migrate.tpl` (при изменении ключей values)
 
 ---
 
-## 4. Output Modes
+## 4. Режимы вывода
 
-DHG supports four output modes, selected with `--mode`.
+DHG поддерживает четыре режима вывода, задаваемых флагом `--mode`.
 
-### universal (default)
+### universal (по умолчанию)
 
-All resources go into a single Helm chart. Best for simple applications or when you want one `helm install` command.
+Все ресурсы помещаются в один Helm chart. Подходит для простых приложений или когда нужна единственная команда `helm install`.
 
 ```bash
 dhg generate -f ./manifests -o ./chart --chart-name myapp --mode universal
@@ -433,7 +433,7 @@ chart/
 
 ### separate
 
-A separate chart per detected service. Best for microservices that are deployed independently.
+Отдельный chart для каждого обнаруженного сервиса. Подходит для микросервисов, которые деплоятся независимо.
 
 ```bash
 dhg generate -f ./manifests -o ./charts --chart-name myapp --mode separate
@@ -453,7 +453,7 @@ charts/
 
 ### library
 
-A single library chart with shared templates, plus a thin wrapper chart per service. Best for organizations that enforce DRY templates across many services.
+Один library chart с общими шаблонами и тонкий wrapper chart для каждого сервиса. Подходит для организаций, применяющих DRY-шаблоны для множества сервисов.
 
 ```bash
 dhg generate -f ./manifests -o ./charts --chart-name myapp --mode library
@@ -461,7 +461,7 @@ dhg generate -f ./manifests -o ./charts --chart-name myapp --mode library
 
 ### umbrella
 
-A parent chart that lists each service as a subchart dependency. Best for deploying all services together while keeping their configurations separate.
+Родительский chart, в котором каждый сервис подключён как зависимость-subchart. Подходит для одновременного деплоя всех сервисов с раздельными конфигурациями.
 
 ```bash
 dhg generate -f ./manifests -o ./charts --chart-name myapp --mode umbrella
@@ -469,9 +469,9 @@ dhg generate -f ./manifests -o ./charts --chart-name myapp --mode umbrella
 
 ```
 charts/
-└── myapp/             # parent (umbrella) chart
-    ├── Chart.yaml     # lists frontend + backend as dependencies
-    ├── values.yaml    # global values
+└── myapp/             # родительский (umbrella) chart
+    ├── Chart.yaml     # перечисляет frontend + backend как зависимости
+    ├── values.yaml    # глобальные values
     └── charts/
         ├── frontend/
         └── backend/
@@ -479,25 +479,25 @@ charts/
 
 ---
 
-## 5. Environment Overlays (`--env-values`)
+## 5. Environment overlays (`--env-values`)
 
-Generate environment-specific `values-*.yaml` files alongside the main `values.yaml`:
+Генерирует environment-специфичные файлы `values-*.yaml` в дополнение к основному `values.yaml`:
 
 ```bash
 dhg generate -f ./manifests -o ./chart --chart-name myapp --env-values
 ```
 
-DHG detects the workload type (web, worker, database, etc.) and generates profiles accordingly:
+DHG определяет тип workload (web, worker, database и т.д.) и генерирует профили соответственно:
 
 ```
 chart/myapp/
-├── values.yaml            # base values
-├── values-dev.yaml        # reduced replicas, relaxed resource limits
-├── values-staging.yaml    # production-like, lower scale
-└── values-prod.yaml       # full replicas, tight resource limits, HPA enabled
+├── values.yaml            # базовые values
+├── values-dev.yaml        # уменьшенные replicas, смягчённые resource limits
+├── values-staging.yaml    # production-подобное окружение, меньший масштаб
+└── values-prod.yaml       # полные replicas, жёсткие resource limits, HPA включён
 ```
 
-Install with an environment overlay:
+Установка с environment overlay:
 
 ```bash
 helm install myapp ./chart/myapp -f ./chart/myapp/values-prod.yaml
@@ -505,19 +505,19 @@ helm install myapp ./chart/myapp -f ./chart/myapp/values-prod.yaml
 
 ---
 
-## 6. Security Features (`--security-mode` and friends)
+## 6. Функции безопасности (`--security-mode` и другие)
 
 ### Pod Security Standards
 
-DHG can inject PSS labels onto namespaces and pods during generation:
+DHG может добавлять PSS-метки к namespace и pod во время генерации:
 
 ```bash
-# Enforce PSS baseline on all resources
+# Применить PSS baseline ко всем ресурсам
 dhg generate -f ./manifests -o ./chart --chart-name myapp
-# PSS labels are generated by the pss.go post-processor; enable via --deckhouse-module or in Phase 2.5 defaults
+# PSS-метки генерируются post-processor'ом pss.go; активируются через --deckhouse-module или в настройках Phase 2.5 по умолчанию
 ```
 
-Use `dhg fix` to retrofit existing manifests:
+Для доработки существующих манифестов используйте `dhg fix`:
 
 ```bash
 dhg fix -f ./manifests -o ./fixed --workload-type web
@@ -525,95 +525,95 @@ dhg fix -f ./manifests -o ./fixed --workload-type web
 
 ### Resource limits
 
-The `dhg fix` command injects CPU and memory requests/limits sized to the workload type:
+Команда `dhg fix` добавляет CPU и memory requests/limits, подобранные по типу workload:
 
-| `--workload-type` | CPU request | Memory request | Use case |
-|-------------------|-------------|----------------|----------|
-| `web` | 100m | 128Mi | Stateless HTTP services |
-| `worker` | 500m | 256Mi | Background job processors |
-| `database` | 1000m | 512Mi | Stateful data stores |
-| `batch` | 200m | 128Mi | One-shot Job workloads |
-| `cache` | 100m | 256Mi | In-memory caches (Redis, Memcached) |
+| `--workload-type` | CPU request | Memory request | Сценарий использования |
+|-------------------|-------------|----------------|------------------------|
+| `web` | 100m | 128Mi | Stateless HTTP-сервисы |
+| `worker` | 500m | 256Mi | Фоновые обработчики задач |
+| `database` | 1000m | 512Mi | Stateful хранилища данных |
+| `batch` | 200m | 128Mi | Одноразовые Job-нагрузки |
+| `cache` | 100m | 256Mi | In-memory кэши (Redis, Memcached) |
 
-### RBAC scaffolding
+### RBAC scaffold
 
 ```bash
-# RBAC templates are generated automatically when ServiceAccount resources are present
-# For explicit RBAC generation, the Phase 2.5 rbac.go post-processor runs during generate
+# RBAC-шаблоны генерируются автоматически при наличии ресурсов ServiceAccount
+# Для явной генерации RBAC post-processor rbac.go запускается во время generate
 dhg generate -f ./manifests -o ./chart --chart-name myapp
 ```
 
-### Air-gapped environments
+### Air-gapped окружения
 
 ```bash
 dhg generate -f ./manifests -o ./chart --chart-name myapp \
   --airgap-registry registry.internal.example.com/mirror
 ```
 
-This generates alongside the chart:
-- `images.txt` — list of all container images referenced in templates
-- `mirror-images.sh` — script to pull and push images to your registry
-- `values-airgap.yaml` — values override pointing all images to the mirror registry
+В дополнение к chart генерируется:
+- `images.txt` — список всех container images, упомянутых в шаблонах
+- `mirror-images.sh` — скрипт для pull и push образов в ваш registry
+- `values-airgap.yaml` — переопределение values, указывающее все образы на mirror registry
 
 ---
 
-## 7. Secret Strategies (`--secret-strategy`)
+## 7. Стратегии управления секретами (`--secret-strategy`)
 
-> Note: `--secret-strategy` is introduced in Phase 5.7. Verify it is available in your installed version with `dhg generate --help`.
+> Примечание: `--secret-strategy` введён в Phase 5.7. Проверьте наличие в вашей версии командой `dhg generate --help`.
 
-DHG supports four mutually exclusive secret management strategies (ADR-042):
+DHG поддерживает четыре взаимоисключающие стратегии управления секретами (ADR-042):
 
-| Strategy | Flag value | Provider |
-|----------|-----------|---------|
+| Стратегия | Значение флага | Провайдер |
+|-----------|---------------|-----------|
 | External Secrets Operator | `eso` | ESO `ExternalSecret` CRs |
 | Sealed Secrets | `sealed` | Bitnami `SealedSecret` CRs |
 | Vault CSI Provider | `vault-csi` | `SecretProviderClass` CRs |
-| SOPS / Helm Secrets | `sops` | Encrypted values files |
+| SOPS / Helm Secrets | `sops` | Зашифрованные values-файлы |
 
 ```bash
-# Generate chart with ESO-managed secrets
+# Генерировать chart с секретами, управляемыми ESO
 dhg generate -f ./manifests -o ./chart --chart-name myapp --secret-strategy eso
 
-# Generate chart with Sealed Secrets
+# Генерировать chart с Sealed Secrets
 dhg generate -f ./manifests -o ./chart --chart-name myapp --secret-strategy sealed
 ```
 
-When a secret strategy is specified, DHG replaces plain `Secret` template resources with the corresponding provider CRs, and adds an annotation-based `Reloader` integration to restart pods when secrets rotate.
+При указании стратегии секретов DHG заменяет обычные шаблоны `Secret` на соответствующие provider CRs и добавляет интеграцию с `Reloader` на основе аннотаций для перезапуска pod при ротации секретов.
 
 ---
 
-## 8. Deckhouse Module Generation (`--deckhouse-module`)
+## 8. Генерация Deckhouse Module (`--deckhouse-module`)
 
-Generate a Deckhouse-compatible module scaffold instead of a plain Helm chart:
+Генерирует scaffold, совместимый с Deckhouse module, вместо обычного Helm chart:
 
 ```bash
 dhg generate -f ./manifests -o ./module --chart-name my-module --deckhouse-module
 ```
 
-This adds:
+Добавляемая структура:
 
 ```
 module/my-module/
-├── Chart.yaml          # with helm_lib dependency
+├── Chart.yaml          # с зависимостью helm_lib
 ├── values.yaml
 ├── openapi/
-│   └── config-values.yaml   # OpenAPI schema for ModuleConfig validation
+│   └── config-values.yaml   # OpenAPI схема для валидации ModuleConfig
 ├── images/
-│   └── .gitkeep             # placeholder for image build contexts
+│   └── .gitkeep             # placeholder для image build contexts
 ├── hooks/
-│   └── .gitkeep             # placeholder for shell hooks
+│   └── .gitkeep             # placeholder для shell hooks
 └── templates/
     ├── _helpers.tpl
     └── ...
 ```
 
-The `openapi/config-values.yaml` schema is generated from the `values.yaml` structure and is compatible with Deckhouse's `ModuleConfig` CRD validation.
+Схема `openapi/config-values.yaml` генерируется из структуры `values.yaml` и совместима с валидацией CRD `ModuleConfig` в Deckhouse.
 
 ---
 
-## 9. Examples
+## 9. Примеры
 
-### Basic: single-service application
+### Базовый: односервисное приложение
 
 ```bash
 dhg generate -f ./manifests/nginx -o ./chart --chart-name nginx-app
@@ -621,22 +621,22 @@ helm lint ./chart/nginx-app
 helm install nginx ./chart/nginx-app
 ```
 
-### Multi-service application with separate charts
+### Многосервисное приложение с раздельными chart
 
 ```bash
 dhg generate -f ./manifests -o ./charts --chart-name shop --mode separate -v
-# Inspect detected services
+# Просмотреть обнаруженные сервисы
 ls ./charts/
 # frontend  backend  postgres  redis
 
-# Deploy all services
+# Задеплоить все сервисы
 for dir in ./charts/*/; do
   name=$(basename "$dir")
   helm install "$name" "$dir"
 done
 ```
 
-### With security and environment overlays
+### С security и environment overlays
 
 ```bash
 dhg generate -f ./manifests \
@@ -648,13 +648,13 @@ dhg generate -f ./manifests \
   --include-schema \
   --include-tests
 
-# Install for production
+# Установить для production
 helm install myapp ./chart/myapp \
   -f ./chart/myapp/values-prod.yaml \
   --namespace production
 ```
 
-### With cloud provider annotations (AWS)
+### С аннотациями облачного провайдера (AWS)
 
 ```bash
 dhg generate -f ./manifests \
@@ -663,10 +663,10 @@ dhg generate -f ./manifests \
   --cloud-provider aws \
   --detect-ingress
 
-# Services get AWS NLB annotations; Ingress gets nginx/alb controller annotations
+# Services получают аннотации AWS NLB; Ingress получает аннотации nginx/alb controller
 ```
 
-### Spot instance workload
+### Workload на spot-инстансах
 
 ```bash
 dhg generate -f ./manifests \
@@ -677,7 +677,7 @@ dhg generate -f ./manifests \
   --cloud-provider gcp
 ```
 
-### Deckhouse module with secrets
+### Deckhouse module с секретами
 
 ```bash
 dhg generate -f ./manifests \
@@ -688,40 +688,40 @@ dhg generate -f ./manifests \
   --env-values
 ```
 
-### Analyze before generating
+### Анализ перед генерацией
 
 ```bash
-# First understand what you have
+# Сначала разберитесь, что у вас есть
 dhg analyze -f ./manifests --output-format markdown -o analysis.md
 cat analysis.md
 
-# Then generate based on recommendations
+# Затем генерируйте на основе рекомендаций
 dhg generate -f ./manifests -o ./chart --chart-name myapp
 ```
 
-### Fix then generate
+### Исправление, затем генерация
 
 ```bash
-# Fix security issues in manifests first
+# Сначала исправьте проблемы безопасности в манифестах
 dhg fix -f ./manifests -o ./fixed --workload-type web -v
 
-# Generate from the fixed manifests
+# Генерировать из исправленных манифестов
 dhg generate -f ./fixed -o ./chart --chart-name myapp
 
-# Validate the result
+# Проверить результат
 dhg validate -f ./chart/myapp -v
 ```
 
 ---
 
-## Troubleshooting
+## Устранение неполадок
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `no resources extracted` | `-f` path does not exist or contains no YAML | Verify path: `ls ./manifests/*.yaml` |
-| `invalid mode: umbrella` | Typo in `--mode` value | Must be one of: `universal`, `separate`, `library`, `umbrella` |
-| `--monorepo and --kustomize are mutually exclusive` | Both flags specified | Use one or the other |
-| `unknown cloud provider: "eks"` | `--cloud-provider` value not recognized | Must be `aws`, `gcp`, or `azure` |
-| Templates have unbalanced `{{ }}` | Manually edited template with syntax error | Run `dhg validate -f ./chart/myapp` to identify the file |
-| `no extractor available for source type: cluster` | `--source cluster` used before Phase 4 is complete | Use `--source file` (default) |
-| Docker permission error | `$(pwd)` resolves incorrectly on Windows | Use absolute paths: `-v /c/Users/you/project:/work` |
+| Симптом | Причина | Решение |
+|---------|---------|---------|
+| `no resources extracted` | Путь в `-f` не существует или не содержит YAML | Проверьте путь: `ls ./manifests/*.yaml` |
+| `invalid mode: umbrella` | Опечатка в значении `--mode` | Допустимые значения: `universal`, `separate`, `library`, `umbrella` |
+| `--monorepo and --kustomize are mutually exclusive` | Указаны оба флага | Используйте один из них |
+| `unknown cloud provider: "eks"` | Значение `--cloud-provider` не распознано | Допустимые значения: `aws`, `gcp`, `azure` |
+| Несбалансированные `{{ }}` в шаблонах | Шаблон вручную отредактирован с синтаксической ошибкой | Запустите `dhg validate -f ./chart/myapp` для определения файла |
+| `no extractor available for source type: cluster` | `--source cluster` используется до завершения Phase 4 | Используйте `--source file` (по умолчанию) |
+| Ошибка прав доступа Docker | `$(pwd)` некорректно разрешается в Windows | Используйте абсолютные пути: `-v /c/Users/you/project:/work` |
