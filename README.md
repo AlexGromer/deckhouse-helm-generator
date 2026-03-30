@@ -23,6 +23,7 @@ CLI-инструмент для генерации Helm charts из ресурс
 - 🔐 **Secret Management**: External Secrets Operator (ESO), Sealed Secrets, Vault CSI Provider, Vault Agent Injector, Reloader, SOPS-шифрование
 - 🕸️ **Service Mesh**: Istio (traffic management, canary, AuthorizationPolicy, multi-cluster, egress), Linkerd интеграция
 - 📡 **Observability**: OpenTelemetry auto-instrumentation, Prometheus annotations, alerting rules, distributed tracing, SLO alerting (Sloth), recording rules
+- ☁️ **Cloud-Native Patterns**: Workload Identity (IRSA/GKE WI/Azure WI), GPU/TPU detection, Windows containers, Velero backup
 
 ## Установка
 
@@ -283,7 +284,7 @@ dhg generate -f ./full-stack --chart-name webapp \
               └───────────────────────┘
 ```
 
-## Поддерживаемые ресурсы (47+ процессоров, ~75 генераторов)
+## Поддерживаемые ресурсы (50+ процессоров, ~77 генераторов)
 
 ### Стандартные Kubernetes (22 процессора)
 
@@ -649,7 +650,7 @@ make build-all
 ├── pkg/
 │   ├── extractor/        # Извлечение ресурсов
 │   ├── analyzer/         # Анализ связей
-│   ├── processor/        # Обработка ресурсов (47+ процессоров)
+│   ├── processor/        # Обработка ресурсов (50+ процессоров)
 │   │   └── k8s/          # K8s + Deckhouse + Monitoring + Gateway + KEDA + cert-manager + Argo + Istio + Prometheus
 │   ├── generator/        # Генерация charts
 │   ├── helm/             # Утилиты Helm
@@ -707,7 +708,7 @@ func RegisterAll(r *processor.Registry) {
 ## Дорожная карта
 
 ### Выполнено
-- **Phase 1**: Core pipeline, 47+ процессоров, pattern detectors, CLI (`validate`, `diff`)
+- **Phase 1**: Core pipeline, 50+ процессоров, pattern detectors, CLI (`validate`, `diff`)
 - **Phase 2**: 12 архитектурных генераторов (3 tier'а: infrastructure, detection, advanced)
 - **Phase 2.5**: 8 генераторов безопасности (PSS, RBAC, resource limits, image security, TLS, audit policy, admission policy, supply chain)
 - **Phase 3**: Deckhouse CRD процессоры (InstanceClass, GRPCRoute, TLSRoute, Canary), module scaffold, compatibility
@@ -718,6 +719,7 @@ func RegisterAll(r *processor.Registry) {
 - **Phase 5.7 Secret Management** ✅: External Secrets Operator (ESO), Sealed Secrets, Vault CSI Provider, Vault Agent Injector, Reloader, SOPS
 - **Phase 5.8 Service Mesh** ✅: Istio (traffic management, canary, AuthorizationPolicy, multi-cluster, egress), Linkerd
 - **Phase 5.9 Observability** ✅: OpenTelemetry auto-instrumentation, Prometheus annotations, alerting rules, distributed tracing, SLO alerting (Sloth), recording rules
+- **Phase 5.10 Cloud-Native Patterns** ✅: Workload Identity (IRSA/GKE WI/Azure WI), GPU/TPU detection, Windows containers, Velero backup, Flux postBuild (+2715 LOC, 2221 тестов)
 
 ### Запланировано
 | Направление | Описание | Статус |
