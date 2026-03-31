@@ -55,21 +55,20 @@ changelog:
       - "^Merge pull request"
 
 dockers_v2:
-  - image_templates:
-      - "ghcr.io/alexgromer/dhg:{{ .Version }}"
-      - "ghcr.io/alexgromer/dhg:latest"
+  - images:
+      - "ghcr.io/alexgromer/dhg"
+    tags:
+      - "{{ .Version }}"
+      - latest
     dockerfile: Dockerfile.goreleaser
-    build_flag_templates:
-      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.source=https://github.com/AlexGromer/deckhouse-helm-generator"
-      - "--label=org.opencontainers.image.created={{ .Date }}"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-    goos: linux
-    goarch: amd64
-    manifests:
-      - "ghcr.io/alexgromer/dhg:{{ .Version }}"
-      - "ghcr.io/alexgromer/dhg:latest"
+    labels:
+      "org.opencontainers.image.title": "{{ .ProjectName }}"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.source": "https://github.com/AlexGromer/deckhouse-helm-generator"
+      "org.opencontainers.image.created": "{{ .Date }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+    platforms:
+      - linux/amd64
 
 # OCI artifact push (helm push)
 # Usage: helm push chart.tgz oci://ghcr.io/alexgromer/charts
@@ -79,14 +78,11 @@ homebrew_casks:
       owner: AlexGromer
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Formula
     homepage: "https://github.com/AlexGromer/deckhouse-helm-generator"
     description: "CLI tool for generating Helm charts from Kubernetes/Deckhouse resources"
     license: "Apache-2.0"
-    test: |
-      system "#{bin}/dhg", "version"
-    install: |
-      bin.install "dhg"
+    binaries:
+      - dhg
 
 nfpms:
   - id: dhg
