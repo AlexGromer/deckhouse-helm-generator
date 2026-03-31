@@ -1,7 +1,9 @@
 FROM alpine:3.23
 
+ARG TARGETPLATFORM
+
 RUN apk --no-cache add ca-certificates
 
-COPY dhg /usr/local/bin/dhg
+COPY ${TARGETPLATFORM}/dhg /usr/local/bin/dhg
 
 ENTRYPOINT ["dhg"]
