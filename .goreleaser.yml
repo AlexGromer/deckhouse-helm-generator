@@ -24,11 +24,13 @@ builds:
       - -X main.buildTime={{.Date}}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 
 checksum:
   name_template: "checksums.txt"
@@ -52,7 +54,7 @@ changelog:
     exclude:
       - "^Merge pull request"
 
-dockers:
+dockers_v2:
   - image_templates:
       - "ghcr.io/alexgromer/dhg:{{ .Version }}"
       - "ghcr.io/alexgromer/dhg:latest"
@@ -65,19 +67,14 @@ dockers:
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     goos: linux
     goarch: amd64
-
-docker_manifests:
-  - name_template: "ghcr.io/alexgromer/dhg:{{ .Version }}"
-    image_templates:
+    manifests:
       - "ghcr.io/alexgromer/dhg:{{ .Version }}"
-  - name_template: "ghcr.io/alexgromer/dhg:latest"
-    image_templates:
       - "ghcr.io/alexgromer/dhg:latest"
 
 # OCI artifact push (helm push)
 # Usage: helm push chart.tgz oci://ghcr.io/alexgromer/charts
 
-brews:
+homebrew_casks:
   - repository:
       owner: AlexGromer
       name: homebrew-tap
