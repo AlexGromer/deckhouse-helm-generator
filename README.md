@@ -693,17 +693,18 @@ my-module/
 | Phase 6.4 | Documentation: ADR (50 записей), Developer Guide, User Guide | ✅ 100% |
 | Phase 6.5 | Plugin System: внешние процессоры (JSON protocol), .dhg.yaml конфиг, template overrides | ✅ 100% |
 
-### Планируется (Phase 7–13)
+### Планируется (Phase 7–14)
 
 | Фаза | Направление | Описание |
 |------|-------------|----------|
-| Phase 7 | Performance | Параллельная обработка (goroutines), memory optimization, benchmarks |
-| Phase 8 | Database Operators | CloudNativePG, Percona, Redis Enterprise, ClickHouse |
-| Phase 9 | AI/ML Workloads | Kubeflow, KServe, GPU scheduling, distributed training |
-| Phase 10 | Multi-Cluster | Federation, fleet management, cross-cluster networking |
-| Phase 11 | IDE Integration | LSP server, VS Code extension, schema autocomplete |
-| Phase 12 | SaaS / Web UI | Веб-интерфейс для генерации и визуализации charts |
-| Phase 13 | Plugin Registry | Реестр пользовательских процессоров и шаблонов |
+| Phase 7 | Production Operations | Backup/Restore (Velero), Multi-Tenancy, Capacity Planning, Cost Optimization, GitOps, DR, Compliance, Monitoring |
+| Phase 8 | Developer Experience | IDE/LSP, Pre-Commit, Testing Framework, Docs Automation, Inner Loop, K8s Operator, Platform Engineering |
+| Phase 9 | AI/ML Workloads | Kubeflow, KServe, GPU scheduling (MIG), Ray, MLOps, distributed training, model serving |
+| Phase 10 | Database Operators | CloudNativePG, Percona MySQL, Redis Enterprise, MongoDB, Cassandra, ClickHouse, OpenSearch |
+| Phase 11 | Advanced Scheduling | Topology Spread, Priority/Preemption, Affinity/Anti-Affinity, Taints, Volcano/Kueue |
+| Phase 12 | Data Management & CSI | Volume Snapshots, StorageClass auto-selection, Encryption at Rest, Velero protection |
+| Phase 13 | Edge Computing | K3s/MicroK8s/KubeEdge detection, ARM/multi-arch, Air-Gapped, IoT device integration |
+| Phase 14 | Plugin Registry | Реестр процессоров и шаблонов: `dhg plugin install/publish/search`, template packs |
 
 ---
 
