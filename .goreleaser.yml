@@ -61,6 +61,7 @@ dockers_v2:
       - "{{ .Version }}"
       - latest
     dockerfile: Dockerfile.goreleaser
+    sbom: false
     labels:
       "org.opencontainers.image.title": "{{ .ProjectName }}"
       "org.opencontainers.image.version": "{{ .Version }}"
