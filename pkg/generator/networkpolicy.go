@@ -280,10 +280,10 @@ func generateNetworkPolicy(chartName, name string, podSelector map[string]interf
 	sb.WriteString("apiVersion: networking.k8s.io/v1\n")
 	sb.WriteString("kind: NetworkPolicy\n")
 	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-%s-netpol\n", chartName, name))
+	fmt.Fprintf(&sb, "  name: {{ include \"%s.fullname\" . }}-%s-netpol\n", chartName, name)
 	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
 	sb.WriteString("  labels:\n")
-	sb.WriteString(fmt.Sprintf("    {{- include \"%s.labels\" . | nindent 4 }}\n", chartName))
+	fmt.Fprintf(&sb, "    {{- include \"%s.labels\" . | nindent 4 }}\n", chartName)
 	sb.WriteString("spec:\n")
 	sb.WriteString("  podSelector:\n")
 	for _, l := range selectorYAML(podSelector, 4) {
@@ -300,8 +300,8 @@ func generateNetworkPolicy(chartName, name string, podSelector map[string]interf
 		sb.WriteString("        - podSelector: {}\n")
 		sb.WriteString("      ports:\n")
 		for _, p := range ingressPorts {
-			sb.WriteString(fmt.Sprintf("        - port: %d\n", p.Port))
-			sb.WriteString(fmt.Sprintf("          protocol: %s\n", p.Protocol))
+			fmt.Fprintf(&sb, "        - port: %d\n", p.Port)
+			fmt.Fprintf(&sb, "          protocol: %s\n", p.Protocol)
 		}
 	} else {
 		sb.WriteString("    - from:\n")
@@ -313,7 +313,7 @@ func generateNetworkPolicy(chartName, name string, podSelector map[string]interf
 		sb.WriteString("    - from:\n")
 		sb.WriteString("        - namespaceSelector:\n")
 		sb.WriteString("            matchLabels:\n")
-		sb.WriteString(fmt.Sprintf("              kubernetes.io/metadata.name: %s\n", ns))
+		fmt.Fprintf(&sb, "              kubernetes.io/metadata.name: %s\n", ns)
 	}
 
 	// Egress rules
@@ -336,8 +336,8 @@ func generateNetworkPolicy(chartName, name string, podSelector map[string]interf
 		sb.WriteString("    # Detected service dependencies\n")
 		sb.WriteString("    - ports:\n")
 		for _, p := range egressPorts {
-			sb.WriteString(fmt.Sprintf("        - port: %d\n", p.Port))
-			sb.WriteString(fmt.Sprintf("          protocol: %s\n", p.Protocol))
+			fmt.Fprintf(&sb, "        - port: %d\n", p.Port)
+			fmt.Fprintf(&sb, "          protocol: %s\n", p.Protocol)
 		}
 	}
 

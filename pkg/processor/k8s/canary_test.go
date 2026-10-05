@@ -44,9 +44,9 @@ func TestFlaggerCanary_Extraction(t *testing.T) {
 		},
 		"progressDeadlineSeconds": int64(60),
 		"analysis": map[string]interface{}{
-			"interval":  "30s",
-			"threshold": int64(5),
-			"maxWeight": int64(50),
+			"interval":   "30s",
+			"threshold":  int64(5),
+			"maxWeight":  int64(50),
 			"stepWeight": int64(10),
 			"metrics": []interface{}{
 				map[string]interface{}{

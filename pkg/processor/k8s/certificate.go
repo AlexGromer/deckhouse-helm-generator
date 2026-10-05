@@ -29,7 +29,7 @@ func NewCertificateProcessor() *CertificateProcessor {
 // Process processes a Certificate resource.
 func (p *CertificateProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
 	if obj == nil {
-		return nil, errors.New("Certificate object is nil")
+		return nil, errors.New("nil Certificate object")
 	}
 
 	serviceName := processor.ServiceNameFromResource(obj)

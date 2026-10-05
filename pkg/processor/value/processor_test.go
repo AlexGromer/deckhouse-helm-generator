@@ -109,11 +109,11 @@ func TestProcess(t *testing.T) {
 			expectedExternalPath: "files/config_json.json",
 		},
 		{
-			name:                 "Base64 JSON",
-			key:                  "data.base64",
-			value:                base64.StdEncoding.EncodeToString([]byte(`{"key": "value"}`)),
-			expectedType:         DataTypeBase64JSON,
-			expectExternalize:    false,
+			name:              "Base64 JSON",
+			key:               "data.base64",
+			value:             base64.StdEncoding.EncodeToString([]byte(`{"key": "value"}`)),
+			expectedType:      DataTypeBase64JSON,
+			expectExternalize: false,
 		},
 	}
 

@@ -85,7 +85,7 @@ func GenerateDOTGraph(graph *types.ResourceGraph) string {
 			label += fmt.Sprintf("\\n(%s)", key.Namespace)
 		}
 
-		b.WriteString(fmt.Sprintf("  %q [label=%q, fillcolor=%q];\n", nodeID, label, color))
+		fmt.Fprintf(&b, "  %q [label=%q, fillcolor=%q];\n", nodeID, label, color)
 	}
 
 	b.WriteString("\n")
@@ -109,7 +109,7 @@ func GenerateDOTGraph(graph *types.ResourceGraph) string {
 		}
 
 		edgeLabel := string(rel.Type)
-		b.WriteString(fmt.Sprintf("  %q -> %q [label=%q, style=%s];\n", fromID, toID, edgeLabel, style))
+		fmt.Fprintf(&b, "  %q -> %q [label=%q, style=%s];\n", fromID, toID, edgeLabel, style)
 	}
 
 	b.WriteString("}\n")

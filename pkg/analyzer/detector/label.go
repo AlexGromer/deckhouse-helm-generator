@@ -104,9 +104,9 @@ func (d *LabelSelectorDetector) detectServiceToWorkload(resource *types.Processe
 		// Check if selector matches pod labels
 		if labelSelector.Matches(labels.Set(podLabels)) {
 			relationships = append(relationships, types.Relationship{
-				From: resource.Original.ResourceKey(),
-				To:   key,
-				Type: types.RelationLabelSelector,
+				From:  resource.Original.ResourceKey(),
+				To:    key,
+				Type:  types.RelationLabelSelector,
 				Field: "spec.selector",
 				Details: map[string]string{
 					"selector": labelSelector.String(),
@@ -156,9 +156,9 @@ func (d *LabelSelectorDetector) detectServiceMonitorToService(resource *types.Pr
 
 		if labelSelector.Matches(labels.Set(serviceLabels)) {
 			relationships = append(relationships, types.Relationship{
-				From: resource.Original.ResourceKey(),
-				To:   key,
-				Type: types.RelationServiceMonitor,
+				From:  resource.Original.ResourceKey(),
+				To:    key,
+				Type:  types.RelationServiceMonitor,
 				Field: "spec.selector",
 				Details: map[string]string{
 					"selector": labelSelector.String(),

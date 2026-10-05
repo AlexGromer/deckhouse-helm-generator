@@ -77,23 +77,23 @@ func generateTestForTemplate(templatePath, content string) string {
 	var sb strings.Builder
 
 	// Suite header
-	sb.WriteString(fmt.Sprintf("suite: test %s\n", nameWithoutExt))
+	fmt.Fprintf(&sb, "suite: test %s\n", nameWithoutExt)
 	sb.WriteString("templates:\n")
-	sb.WriteString(fmt.Sprintf("  - %s\n", templatePath))
+	fmt.Fprintf(&sb, "  - %s\n", templatePath)
 	sb.WriteString("tests:\n")
 
 	// Basic render test
 	sb.WriteString("  - it: should render\n")
 	sb.WriteString("    asserts:\n")
 	sb.WriteString("      - isKind:\n")
-	sb.WriteString(fmt.Sprintf("          of: %s\n", kind))
+	fmt.Fprintf(&sb, "          of: %s\n", kind)
 
 	// Check for feature flag guard
 	featureFlag := extractFeatureFlag(content)
 	if featureFlag != "" {
 		sb.WriteString("  - it: should not render when disabled\n")
 		sb.WriteString("    set:\n")
-		sb.WriteString(fmt.Sprintf("      %s: false\n", featureFlag))
+		fmt.Fprintf(&sb, "      %s: false\n", featureFlag)
 		sb.WriteString("    asserts:\n")
 		sb.WriteString("      - hasDocuments:\n")
 		sb.WriteString("          count: 0\n")

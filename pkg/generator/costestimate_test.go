@@ -426,7 +426,7 @@ func TestCostEstimate_EmptyRegion_UsesDefault(t *testing.T) {
 	if report == nil {
 		t.Fatal("GenerateCostEstimate must not return nil when Region is empty")
 	}
-	if string(report.Region) == "" {
+	if report.Region == "" {
 		t.Error("expected report.Region to be non-empty (implementation must apply default region)")
 	}
 }

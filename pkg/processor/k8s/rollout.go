@@ -29,7 +29,7 @@ func NewRolloutProcessor() *RolloutProcessor {
 // Process processes a Rollout resource.
 func (p *RolloutProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
 	if obj == nil {
-		return nil, errors.New("Rollout object is nil")
+		return nil, errors.New("nil Rollout object")
 	}
 
 	serviceName := processor.ServiceNameFromResource(obj)

@@ -193,9 +193,10 @@ func (r *Recommender) generateBestPracticesSection(result *AnalysisResult) Repor
 				}
 
 				level := "warning"
-				if severity == SeverityCritical {
+				switch severity {
+				case SeverityCritical:
 					level = "error"
-				} else if severity == SeverityError {
+				case SeverityError:
 					level = "warning"
 				}
 

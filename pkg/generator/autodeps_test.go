@@ -198,7 +198,7 @@ func TestAutoDeps_RabbitMQAndPostgres(t *testing.T) {
 func TestAutoDeps_NoSignals_EmptyList(t *testing.T) {
 	resources := []*types.ProcessedResource{
 		makeDeploymentWithEnv("myapp", "default", map[string]string{
-			"APP_ENV":  "production",
+			"APP_ENV":   "production",
 			"LOG_LEVEL": "info",
 		}),
 	}

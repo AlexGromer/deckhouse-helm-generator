@@ -166,7 +166,6 @@ func wrapTemplateWithFeatureFlag(templateContent string, category FeatureCategor
 	return fmt.Sprintf("{{- if .Values.features.%s }}\n%s\n{{- end }}", category, templateContent)
 }
 
-
 // mergeFeatureValues parses existingYAML, adds or updates the `features:` key
 // with values from config (restricted to usedCategories), and returns the
 // re-marshalled YAML string.

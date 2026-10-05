@@ -30,7 +30,6 @@ func (b *ValuesBuilder) SetGlobal(key string, value interface{}) *ValuesBuilder 
 	return b
 }
 
-
 // SetValue sets a value at a given path (dot-notation).
 func (b *ValuesBuilder) SetValue(path string, value interface{}) *ValuesBuilder {
 	parts := strings.Split(path, ".")
@@ -79,7 +78,6 @@ func (b *ValuesBuilder) GetValue(path string) (interface{}, bool) {
 
 	return nil, false
 }
-
 
 // Build generates the values.yaml content with nested structure and comments.
 func (b *ValuesBuilder) Build() (string, error) {
@@ -248,8 +246,6 @@ func addCommentsToValues(yaml string) string {
 
 	return sb.String()
 }
-
-
 
 // InferValuesSchema derives a values.schema.json (JSON Schema draft-07, the
 // draft every Helm 3 release understands) from a chart's default values.

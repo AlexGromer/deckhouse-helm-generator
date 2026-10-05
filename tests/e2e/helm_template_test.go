@@ -373,7 +373,7 @@ func TestTemplate_RenderingPerformance(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		h.WriteInput(
 			strings.Replace("deploy-N.yaml", "N", strings.Repeat("a", i+1), 1),
-			strings.Replace(`
+			strings.ReplaceAll(`
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -395,7 +395,7 @@ spec:
           image: perfN:1.0
           ports:
             - containerPort: 8080
-`, "perfN", "perf"+strings.Repeat("a", i+1), -1),
+`, "perfN", "perf"+strings.Repeat("a", i+1)),
 		)
 	}
 

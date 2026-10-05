@@ -23,20 +23,20 @@ func (c *DeckhouseCompatChecker) Category() string {
 
 // deprecatedDeckhouseFields maps Kind to deprecated field paths (valid before 1.57).
 var deprecatedDeckhouseFields = map[string][]string{
-	"IngressNginxController": {"spec.inlet"},
+	"IngressNginxController":   {"spec.inlet"},
 	"ClusterAuthorizationRule": {"spec.accessLevel"},
-	"ModuleConfig": {"spec.version"},
+	"ModuleConfig":             {"spec.version"},
 }
 
 // validDeckhouseAPIVersions maps Kind to the expected apiVersion for Deckhouse 1.57+.
 var validDeckhouseAPIVersions = map[string]string{
-	"ModuleConfig":           "deckhouse.io/v1alpha1",
-	"IngressNginxController": "deckhouse.io/v1",
+	"ModuleConfig":             "deckhouse.io/v1alpha1",
+	"IngressNginxController":   "deckhouse.io/v1",
 	"ClusterAuthorizationRule": "deckhouse.io/v1",
-	"NodeGroup":              "deckhouse.io/v1",
-	"DexAuthenticator":       "deckhouse.io/v1",
-	"User":                   "deckhouse.io/v1",
-	"Group":                  "deckhouse.io/v1",
+	"NodeGroup":                "deckhouse.io/v1",
+	"DexAuthenticator":         "deckhouse.io/v1",
+	"User":                     "deckhouse.io/v1",
+	"Group":                    "deckhouse.io/v1",
 }
 
 // deckhouseKinds is the set of Deckhouse CRD kinds we check.

@@ -210,10 +210,6 @@ func WithTemplateValues(path string) TemplateOption {
 	return func(c *templateConfig) { c.valuesFile = path }
 }
 
-
-
-
-
 type installConfig struct {
 	valuesFile      string
 	namespace       string
@@ -226,19 +222,15 @@ type installConfig struct {
 // InstallOption configures an install invocation.
 type InstallOption func(*installConfig)
 
-
 // WithInstallNamespace specifies the namespace.
 func WithInstallNamespace(ns string) InstallOption {
 	return func(c *installConfig) { c.namespace = ns }
 }
 
-
-
 // WithInstallDebug enables debug output.
 func WithInstallDebug() InstallOption {
 	return func(c *installConfig) { c.debug = true }
 }
-
 
 // ============================================================
 // Helm binary discovery
@@ -266,7 +258,6 @@ func findHelmBinary() string {
 
 	return ""
 }
-
 
 // WriteValuesFile writes a values override YAML file to a temporary location.
 func WriteValuesFile(t *testing.T, dir, content string) string {

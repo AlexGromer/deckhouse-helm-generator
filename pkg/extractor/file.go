@@ -347,4 +347,3 @@ func isCommentOnly(doc []byte) bool {
 	}
 	return true
 }
-

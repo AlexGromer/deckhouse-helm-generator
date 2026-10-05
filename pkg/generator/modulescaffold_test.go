@@ -9,8 +9,8 @@ import (
 
 func makeTestChart(name string) *types.GeneratedChart {
 	return &types.GeneratedChart{
-		Name:      name,
-		ChartYAML: "apiVersion: v2\nname: " + name + "\nversion: 0.1.0\n",
+		Name:       name,
+		ChartYAML:  "apiVersion: v2\nname: " + name + "\nversion: 0.1.0\n",
 		ValuesYAML: "# Default values\nglobal: {}\n",
 		Templates: map[string]string{
 			"templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\n",

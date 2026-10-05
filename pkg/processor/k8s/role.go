@@ -29,7 +29,7 @@ func NewRoleProcessor() *RoleProcessor {
 // Process processes a Role resource.
 func (p *RoleProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
 	if obj == nil {
-		return nil, errors.New("Role object is nil")
+		return nil, errors.New("nil Role object")
 	}
 
 	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))

@@ -58,11 +58,12 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 	// reference ConfigMaps and Secrets through env/envFrom (checked below).
 	var volumes []interface{}
 
-	if kind == "CronJob" {
+	switch kind {
+	case "CronJob":
 		volumes, _, _ = unstructured.NestedSlice(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "volumes")
-	} else if kind == "Pod" {
+	case "Pod":
 		volumes, _, _ = unstructured.NestedSlice(obj.Object, "spec", "volumes")
-	} else {
+	default:
 		volumes, _, _ = unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "volumes")
 	}
 
@@ -228,11 +229,12 @@ func (d *VolumeMountDetector) detectEnvFromReferences(resource *types.ProcessedR
 	var containers []interface{}
 	var found bool
 
-	if kind == "CronJob" {
+	switch kind {
+	case "CronJob":
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "containers")
-	} else if kind == "Pod" {
+	case "Pod":
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "containers")
-	} else {
+	default:
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
 	}
 
@@ -320,11 +322,12 @@ func (d *VolumeMountDetector) detectEnvValueFromReferences(resource *types.Proce
 	var containers []interface{}
 	var found bool
 
-	if kind == "CronJob" {
+	switch kind {
+	case "CronJob":
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "containers")
-	} else if kind == "Pod" {
+	case "Pod":
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "containers")
-	} else {
+	default:
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
 	}
 

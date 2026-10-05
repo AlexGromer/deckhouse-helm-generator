@@ -303,7 +303,6 @@ func TestCloudAnnotations_InjectIntoChart_IngressGetsALBAnnotations(t *testing.T
 // Section 6: generateCloudValues — values map structure
 // ============================================================
 
-
 // ============================================================
 // Section 7: InjectCloudAnnotations — multi-service and nil
 // ============================================================

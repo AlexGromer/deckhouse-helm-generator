@@ -73,7 +73,7 @@ func GenerateMultiTenantOverlay(chart *types.GeneratedChart, tenantCount int) *t
 
 func generateTenantNamespaceTemplate(chartName string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("{{- /* Tenant Namespaces for %s */ -}}\n", chartName))
+	fmt.Fprintf(&sb, "{{- /* Tenant Namespaces for %s */ -}}\n", chartName)
 	sb.WriteString("{{- range .Values.tenants }}\n")
 	sb.WriteString("---\n")
 	sb.WriteString("apiVersion: v1\n")
@@ -82,14 +82,14 @@ func generateTenantNamespaceTemplate(chartName string) string {
 	sb.WriteString("  name: {{ .namespace }}\n")
 	sb.WriteString("  labels:\n")
 	sb.WriteString("    tenant: {{ .name }}\n")
-	sb.WriteString(fmt.Sprintf("    app.kubernetes.io/managed-by: %s\n", chartName))
+	fmt.Fprintf(&sb, "    app.kubernetes.io/managed-by: %s\n", chartName)
 	sb.WriteString("{{- end }}\n")
 	return sb.String()
 }
 
 func generateTenantResourceQuotaTemplate(chartName string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("{{- /* Tenant ResourceQuotas for %s */ -}}\n", chartName))
+	fmt.Fprintf(&sb, "{{- /* Tenant ResourceQuotas for %s */ -}}\n", chartName)
 	sb.WriteString("{{- range .Values.tenants }}\n")
 	sb.WriteString("---\n")
 	sb.WriteString("apiVersion: v1\n")
@@ -109,7 +109,7 @@ func generateTenantResourceQuotaTemplate(chartName string) string {
 
 func generateTenantLimitRangeTemplate(chartName string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("{{- /* Tenant LimitRanges for %s */ -}}\n", chartName))
+	fmt.Fprintf(&sb, "{{- /* Tenant LimitRanges for %s */ -}}\n", chartName)
 	sb.WriteString("{{- range .Values.tenants }}\n")
 	sb.WriteString("---\n")
 	sb.WriteString("apiVersion: v1\n")
@@ -132,7 +132,7 @@ func generateTenantLimitRangeTemplate(chartName string) string {
 
 func generateTenantNetworkPolicyTemplate(chartName string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("{{- /* Tenant NetworkPolicies for %s — deny cross-tenant traffic */ -}}\n", chartName))
+	fmt.Fprintf(&sb, "{{- /* Tenant NetworkPolicies for %s — deny cross-tenant traffic */ -}}\n", chartName)
 	sb.WriteString("{{- range .Values.tenants }}\n")
 	sb.WriteString("---\n")
 	sb.WriteString("apiVersion: networking.k8s.io/v1\n")

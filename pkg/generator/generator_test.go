@@ -344,7 +344,7 @@ func TestValidateChart_EmptyChartYAML(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty Chart.yaml")
 	}
-	if !strings.Contains(err.Error(), "Chart.yaml is empty") {
+	if !strings.Contains(err.Error(), "empty Chart.yaml") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -755,9 +755,9 @@ func TestInferType(t *testing.T) {
 		{"int64", int64(42), "integer"},
 		{"float32", float32(3.14), "number"},
 		{"float64", 3.14, "number"},
-		{"nil", nil, "string"},                   // default
-		{"slice", []string{"a"}, "string"},       // default
-		{"map", map[string]string{}, "string"},   // default
+		{"nil", nil, "string"},                 // default
+		{"slice", []string{"a"}, "string"},     // default
+		{"map", map[string]string{}, "string"}, // default
 	}
 
 	for _, tt := range tests {

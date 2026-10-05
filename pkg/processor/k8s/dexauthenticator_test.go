@@ -59,8 +59,8 @@ func TestDexAuthenticatorProcessor_SendAuthorizationHeader(t *testing.T) {
 	ctx := newTestProcessorContext()
 
 	obj := makeDexAuthenticatorObj("app-dex", "default", map[string]interface{}{
-		"applicationDomain":        "app.example.com",
-		"sendAuthorizationHeader":  true,
+		"applicationDomain":       "app.example.com",
+		"sendAuthorizationHeader": true,
 	})
 
 	result, err := proc.Process(ctx, obj)

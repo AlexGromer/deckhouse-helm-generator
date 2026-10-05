@@ -141,7 +141,6 @@ func hasIssue(issues []RightSizingIssue, target RightSizingIssue) bool {
 	return false
 }
 
-
 // containerQuantities returns resources.<field> of a container as strings.
 // Numeric quantities (e.g. `cpu: 2` in YAML) are converted to strings.
 func containerQuantities(c map[string]interface{}, field string) map[string]string {

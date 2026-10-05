@@ -57,7 +57,7 @@ func TestProcessSecret_ExtractsOpaqueData(t *testing.T) {
 		map[string]interface{}{"app": "myapp"}, nil,
 		map[string]interface{}{
 			"data": map[string]interface{}{
-				"username": "YWRtaW4=",          // "admin" in base64
+				"username": "YWRtaW4=",         // "admin" in base64
 				"password": "cGFzc3dvcmQxMjM=", // "password123" in base64
 			},
 		})
@@ -283,7 +283,7 @@ func TestProcessSecret_DataWithValueProcessor(t *testing.T) {
 		map[string]interface{}{"app": "myapp"}, nil,
 		map[string]interface{}{
 			"data": map[string]interface{}{
-				"username": "YWRtaW4=",          // "admin" base64
+				"username": "YWRtaW4=",         // "admin" base64
 				"password": "cGFzc3dvcmQxMjM=", // "password123" base64
 			},
 		})

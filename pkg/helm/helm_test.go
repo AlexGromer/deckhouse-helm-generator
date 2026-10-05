@@ -149,8 +149,8 @@ func TestGenerateNOTES_WithAuth(t *testing.T) {
 
 func TestGenerateREADME(t *testing.T) {
 	out := GenerateREADME(ChartMetadata{Name: "myapp"}, map[string]interface{}{
-		"services": map[string]interface{}{"web": map[string]interface{}{"enabled": true, "deployment": map[string]interface{}{"replicas": 2}}},
-		"global":   map[string]interface{}{"imagePullSecrets": []interface{}{}},
+		"services":  map[string]interface{}{"web": map[string]interface{}{"enabled": true, "deployment": map[string]interface{}{"replicas": 2}}},
+		"global":    map[string]interface{}{"imagePullSecrets": []interface{}{}},
 		"podLabels": map[string]interface{}{"app.kubernetes.io/name": "web"},
 	})
 	for _, want := range []string{"# myapp", "helm install", "helm uninstall",
@@ -191,7 +191,6 @@ func TestGenerateHelmIgnore(t *testing.T) {
 	}
 }
 
-
 // ── ValuesBuilder ─────────────────────────────────────────────────────────────
 
 func TestNewValuesBuilder(t *testing.T) {
@@ -216,7 +215,6 @@ func TestValuesBuilder_SetGlobal(t *testing.T) {
 	}
 }
 
-
 func TestValuesBuilder_SetValue(t *testing.T) {
 	b := NewValuesBuilder()
 	b.SetValue("a.b.c", "deep")
@@ -234,9 +232,6 @@ func TestValuesBuilder_GetValue_NotFound(t *testing.T) {
 		t.Error("GetValue should return false for missing path")
 	}
 }
-
-
-
 
 func TestValuesBuilder_BuildFlat_PathComments(t *testing.T) {
 	b := NewValuesBuilder()
@@ -305,8 +300,6 @@ func TestValuesBuilder_BuildFlat_VsBuild(t *testing.T) {
 		t.Error("BuildFlat() should have inline path comments")
 	}
 }
-
-
 
 func TestInferValuesSchema(t *testing.T) {
 	out := InferValuesSchema(map[string]interface{}{

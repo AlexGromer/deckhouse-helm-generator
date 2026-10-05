@@ -32,7 +32,7 @@ func NewJobProcessor() *JobProcessor {
 // Process processes a Job resource.
 func (p *JobProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
 	if obj == nil {
-		return nil, errors.New("Job object is nil")
+		return nil, errors.New("nil Job object")
 	}
 
 	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))

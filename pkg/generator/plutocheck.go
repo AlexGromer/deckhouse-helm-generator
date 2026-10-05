@@ -96,19 +96,19 @@ func CheckDeprecatedAPIs(chart *types.GeneratedChart, opts PlutoCheckOptions) *P
 	// Build report
 	var reportSb strings.Builder
 	if hasDeprecations {
-		reportSb.WriteString(fmt.Sprintf("Found %d deprecated API(s):\n\n", len(deprecations)))
+		fmt.Fprintf(&reportSb, "Found %d deprecated API(s):\n\n", len(deprecations))
 		for _, d := range deprecations {
-			reportSb.WriteString(fmt.Sprintf("  [DEPRECATED] %s/%s in %s\n", d.APIVersion, d.Kind, d.TemplatePath))
+			fmt.Fprintf(&reportSb, "  [DEPRECATED] %s/%s in %s\n", d.APIVersion, d.Kind, d.TemplatePath)
 			if d.ReplacementAPI != "" {
-				reportSb.WriteString(fmt.Sprintf("    Replacement: %s\n", d.ReplacementAPI))
+				fmt.Fprintf(&reportSb, "    Replacement: %s\n", d.ReplacementAPI)
 			}
 			if d.DeprecatedIn != "" {
-				reportSb.WriteString(fmt.Sprintf("    Deprecated in: v%s\n", d.DeprecatedIn))
+				fmt.Fprintf(&reportSb, "    Deprecated in: v%s\n", d.DeprecatedIn)
 			}
 			if d.RemovedIn != "" {
-				reportSb.WriteString(fmt.Sprintf("    Removed in: v%s\n", d.RemovedIn))
+				fmt.Fprintf(&reportSb, "    Removed in: v%s\n", d.RemovedIn)
 			}
-			reportSb.WriteString(fmt.Sprintf("    Message: %s\n", d.Message))
+			fmt.Fprintf(&reportSb, "    Message: %s\n", d.Message)
 			reportSb.WriteString("\n")
 		}
 	} else {
@@ -122,7 +122,7 @@ func CheckDeprecatedAPIs(chart *types.GeneratedChart, opts PlutoCheckOptions) *P
 			if r.deprecated {
 				status = "DEPRECATED"
 			}
-			reportSb.WriteString(fmt.Sprintf("  [%s] %s/%s in %s\n", status, r.apiVersion, r.kind, r.path))
+			fmt.Fprintf(&reportSb, "  [%s] %s/%s in %s\n", status, r.apiVersion, r.kind, r.path)
 		}
 	}
 

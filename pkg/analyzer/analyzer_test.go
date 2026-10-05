@@ -37,7 +37,7 @@ type stubDetector struct {
 func (d *stubDetector) Detect(_ context.Context, _ *types.ProcessedResource, _ map[types.ResourceKey]*types.ProcessedResource) []types.Relationship {
 	return d.results
 }
-func (d *stubDetector) Name() string { return d.name }
+func (d *stubDetector) Name() string  { return d.name }
 func (d *stubDetector) Priority() int { return d.priority }
 
 // ── NewDefaultAnalyzer ───────────────────────────────────────────────────────

@@ -119,10 +119,6 @@ func InjectCloudAnnotations(chart *types.GeneratedChart, config CloudAnnotationC
 	}
 }
 
-
-// annotationsLineRegex matches an existing "  annotations:" line.
-var annotationsLineRegex = regexp.MustCompile(`(?m)^  annotations:\s*$`)
-
 // valuesAnnotationsBlock is the metadata.annotations block dhg processors emit:
 // annotations come from the resource's values.
 var valuesAnnotationsBlock = regexp.MustCompile(

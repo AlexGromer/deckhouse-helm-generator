@@ -7,7 +7,6 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-
 func makeChartWithNoSecurityContext() *types.GeneratedChart {
 	return &types.GeneratedChart{
 		Name: "test-chart",
@@ -34,9 +33,6 @@ spec:
 		},
 	}
 }
-
-
-
 
 func TestPSS_InjectDefaults(t *testing.T) {
 	chart := makeChartWithNoSecurityContext()

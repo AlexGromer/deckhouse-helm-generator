@@ -544,4 +544,3 @@ spec:
 		t.Fatalf("expected 2 charts from library mode (library+wrapper), got %d", len(output.Charts))
 	}
 }
-

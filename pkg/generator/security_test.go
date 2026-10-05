@@ -12,8 +12,8 @@ func TestWriteChart_PathTraversal(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	chart := &types.GeneratedChart{
-		Name:      "test-chart",
-		ChartYAML: "apiVersion: v2\nname: test-chart\nversion: 0.1.0\n",
+		Name:       "test-chart",
+		ChartYAML:  "apiVersion: v2\nname: test-chart\nversion: 0.1.0\n",
 		ValuesYAML: "{}",
 		Templates:  map[string]string{},
 		ExternalFiles: []types.ExternalFileInfo{
@@ -41,8 +41,8 @@ func TestWriteChart_ValidExternalFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	chart := &types.GeneratedChart{
-		Name:      "test-chart",
-		ChartYAML: "apiVersion: v2\nname: test-chart\nversion: 0.1.0\n",
+		Name:       "test-chart",
+		ChartYAML:  "apiVersion: v2\nname: test-chart\nversion: 0.1.0\n",
 		ValuesYAML: "{}",
 		Templates:  map[string]string{},
 		ExternalFiles: []types.ExternalFileInfo{

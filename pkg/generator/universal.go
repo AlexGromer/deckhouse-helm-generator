@@ -325,7 +325,7 @@ func ValidateChart(chart *types.GeneratedChart) error {
 		return fmt.Errorf("chart name is empty")
 	}
 	if chart.ChartYAML == "" {
-		return fmt.Errorf("Chart.yaml is empty")
+		return fmt.Errorf("empty Chart.yaml")
 	}
 	if chart.ValuesYAML == "" {
 		return fmt.Errorf("values.yaml is empty")

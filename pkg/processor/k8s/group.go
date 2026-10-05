@@ -29,7 +29,7 @@ func NewGroupProcessor() *GroupProcessor {
 // Process processes a Group resource.
 func (p *GroupProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
 	if obj == nil {
-		return nil, errors.New("Group object is nil")
+		return nil, errors.New("nil Group object")
 	}
 
 	name := obj.GetName()

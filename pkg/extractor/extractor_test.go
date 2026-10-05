@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
@@ -533,9 +532,6 @@ func TestIsCommentOnly(t *testing.T) {
 
 // ── ParseGVK ─────────────────────────────────────────────────────────────────
 
-
-
-
 // ── ClusterExtractor stub ────────────────────────────────────────────────────
 
 func TestClusterExtractor_Source(t *testing.T) {
@@ -860,24 +856,11 @@ func TestFileExtractor_Extract_MultiplePaths(t *testing.T) {
 	}
 }
 
-
-
 // ── Merger / ResourceDeduplicator ───────────────────────────────────────────
-
-
-
-
-
-
-
-
 
 // ── SourcePriority ──────────────────────────────────────────────────────────
 
-
 // ── ConflictStrategy validation ─────────────────────────────────────────────
-
-
 
 // ── DefaultRegistry with GitOps ─────────────────────────────────────────────
 

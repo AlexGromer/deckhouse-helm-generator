@@ -74,9 +74,9 @@ func (d *AnnotationDetector) detectCertManagerReferences(resource *types.Process
 
 		if _, exists := allResources[targetKey]; exists {
 			relationships = append(relationships, types.Relationship{
-				From: resource.Original.ResourceKey(),
-				To:   targetKey,
-				Type: types.RelationAnnotation,
+				From:  resource.Original.ResourceKey(),
+				To:    targetKey,
+				Type:  types.RelationAnnotation,
 				Field: "metadata.annotations[cert-manager.io/cluster-issuer]",
 				Details: map[string]string{
 					"clusterIssuer": clusterIssuer,
@@ -96,9 +96,9 @@ func (d *AnnotationDetector) detectCertManagerReferences(resource *types.Process
 
 		if _, exists := allResources[targetKey]; exists {
 			relationships = append(relationships, types.Relationship{
-				From: resource.Original.ResourceKey(),
-				To:   targetKey,
-				Type: types.RelationAnnotation,
+				From:  resource.Original.ResourceKey(),
+				To:    targetKey,
+				Type:  types.RelationAnnotation,
 				Field: "metadata.annotations[cert-manager.io/issuer]",
 				Details: map[string]string{
 					"issuer":     issuer,
@@ -156,9 +156,9 @@ func (d *AnnotationDetector) detectDeckhouseReferences(resource *types.Processed
 			for targetKey := range allResources {
 				if targetKey.GVK.Kind == "IngressNginxController" {
 					relationships = append(relationships, types.Relationship{
-						From: resource.Original.ResourceKey(),
-						To:   targetKey,
-						Type: types.RelationDeckhouse,
+						From:  resource.Original.ResourceKey(),
+						To:    targetKey,
+						Type:  types.RelationDeckhouse,
 						Field: "metadata.annotations[" + key + "]",
 						Details: map[string]string{
 							"annotation":      key,
@@ -178,9 +178,9 @@ func (d *AnnotationDetector) detectDeckhouseReferences(resource *types.Processed
 				for targetKey := range allResources {
 					if targetKey.GVK.Kind == "DexAuthenticator" && targetKey.Namespace == namespace {
 						relationships = append(relationships, types.Relationship{
-							From: resource.Original.ResourceKey(),
-							To:   targetKey,
-							Type: types.RelationDeckhouse,
+							From:  resource.Original.ResourceKey(),
+							To:    targetKey,
+							Type:  types.RelationDeckhouse,
 							Field: "metadata.annotations[" + key + "]",
 							Details: map[string]string{
 								"annotation":      key,

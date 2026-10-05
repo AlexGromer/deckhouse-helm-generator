@@ -40,7 +40,6 @@ type E2ETestHarness struct {
 	// HelmClient is the Helm CLI wrapper.
 	Helm *HelmClient
 
-
 	// Chart is the generated chart metadata.
 	Chart *types.GeneratedChart
 }
@@ -297,7 +296,6 @@ func (h *E2ETestHarness) ChartPath(parts ...string) string {
 	return filepath.Join(args...)
 }
 
-
 // startMockAPIServer starts a minimal HTTP server emulating a K8s API server.
 // It responds to /version, /api, /apis, and common resource discovery paths.
 // This satisfies Helm v3.20+ IsReachable() and resource mapping checks for
@@ -430,4 +428,3 @@ users:
 
 	return server, kubeconfigPath
 }
-

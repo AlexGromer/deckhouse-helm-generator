@@ -443,14 +443,12 @@ func TestAnalyzeDecomposition_HighCoupling(t *testing.T) {
 }
 
 func TestAnalyzeDecomposition_ManyGroups(t *testing.T) {
-	var resources []*types.ProcessedResource
 	graph := types.NewResourceGraph()
 
 	// Create 6 isolated groups
 	for i := 0; i < 6; i++ {
 		name := strings.Repeat(string(rune('a'+i)), 1) + "-svc"
 		r := makeTestResource("Deployment", name, "default", name)
-		resources = append(resources, r)
 		graph.AddResource(r)
 		graph.AddGroup(&types.ResourceGroup{
 			Name:      name,

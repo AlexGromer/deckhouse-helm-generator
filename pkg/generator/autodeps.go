@@ -166,11 +166,11 @@ func InjectDependencies(chart *types.GeneratedChart, deps []helm.Dependency) *ty
 
 	var entries strings.Builder
 	for _, d := range deps {
-		entries.WriteString(fmt.Sprintf("  - name: %s\n", d.Name))
-		entries.WriteString(fmt.Sprintf("    version: %q\n", d.Version))
-		entries.WriteString(fmt.Sprintf("    repository: %s\n", d.Repository))
+		fmt.Fprintf(&entries, "  - name: %s\n", d.Name)
+		fmt.Fprintf(&entries, "    version: %q\n", d.Version)
+		fmt.Fprintf(&entries, "    repository: %s\n", d.Repository)
 		if d.Condition != "" {
-			entries.WriteString(fmt.Sprintf("    condition: %s\n", d.Condition))
+			fmt.Fprintf(&entries, "    condition: %s\n", d.Condition)
 		}
 	}
 	if i := strings.Index(out.ChartYAML, "\ndependencies:\n"); i >= 0 {

@@ -253,14 +253,14 @@ func (d *SidecarDetector) Name() string {
 
 // sidecarSignature maps container name/image substrings to sidecar type.
 var sidecarSignatures = map[string]string{
-	"envoy":                "service mesh",
-	"istio-proxy":          "service mesh",
-	"fluent-bit":           "logging",
-	"fluentd":              "logging",
-	"filebeat":             "logging",
-	"vault-agent":          "secrets",
-	"datadog-agent":        "monitoring",
-	"prometheus-exporter":  "monitoring",
+	"envoy":               "service mesh",
+	"istio-proxy":         "service mesh",
+	"fluent-bit":          "logging",
+	"fluentd":             "logging",
+	"filebeat":            "logging",
+	"vault-agent":         "secrets",
+	"datadog-agent":       "monitoring",
+	"prometheus-exporter": "monitoring",
 }
 
 func (d *SidecarDetector) Detect(graph *types.ResourceGraph) []ArchitecturePattern {

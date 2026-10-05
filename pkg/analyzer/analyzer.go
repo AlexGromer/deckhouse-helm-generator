@@ -176,4 +176,3 @@ func (a *DefaultAnalyzer) findRelatedService(key types.ResourceKey, graph *types
 
 	return ""
 }
-

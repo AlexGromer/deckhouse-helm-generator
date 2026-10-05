@@ -30,7 +30,7 @@ func NewFlaggerCanaryProcessor() *FlaggerCanaryProcessor {
 // Process processes a Flagger Canary resource.
 func (p *FlaggerCanaryProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
 	if obj == nil {
-		return nil, errors.New("Canary object is nil")
+		return nil, errors.New("nil Canary object")
 	}
 
 	serviceName := processor.ServiceNameFromResource(obj)

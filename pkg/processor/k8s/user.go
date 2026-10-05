@@ -29,7 +29,7 @@ func NewUserProcessor() *UserProcessor {
 // Process processes a User resource.
 func (p *UserProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
 	if obj == nil {
-		return nil, errors.New("User object is nil")
+		return nil, errors.New("nil User object")
 	}
 
 	name := obj.GetName()

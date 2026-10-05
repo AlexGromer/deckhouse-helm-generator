@@ -29,7 +29,7 @@ func NewGatewayProcessor() *GatewayProcessor {
 // Process processes a Gateway resource.
 func (p *GatewayProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
 	if obj == nil {
-		return nil, errors.New("Gateway object is nil")
+		return nil, errors.New("nil Gateway object")
 	}
 
 	serviceName := processor.ServiceNameFromResource(obj)

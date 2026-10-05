@@ -197,7 +197,6 @@ func ExtractField(t *testing.T, obj *unstructured.Unstructured, fields ...string
 	return value
 }
 
-
 // CreateTempDir creates a temporary directory for test artifacts
 func CreateTempDir(t *testing.T, pattern string) string {
 	t.Helper()

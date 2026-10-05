@@ -66,7 +66,6 @@ func asList(v interface{}) []interface{} {
 	return l
 }
 
-
 // applyReloaderFeature implements the `reloader` feature. By default only
 // workloads that reference a ConfigMap or Secret are annotated; the
 // all-workloads parameter annotates every Deployment/StatefulSet/DaemonSet.

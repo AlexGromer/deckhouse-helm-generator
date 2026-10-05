@@ -110,9 +110,9 @@ func (d *NameReferenceDetector) detectIngressToService(resource *types.Processed
 
 			if _, exists := allResources[targetKey]; exists {
 				relationships = append(relationships, types.Relationship{
-					From: resource.Original.ResourceKey(),
-					To:   targetKey,
-					Type: types.RelationNameReference,
+					From:  resource.Original.ResourceKey(),
+					To:    targetKey,
+					Type:  types.RelationNameReference,
 					Field: "spec.rules[].http.paths[].backend.service.name",
 					Details: map[string]string{
 						"serviceName": serviceName,
@@ -144,9 +144,9 @@ func (d *NameReferenceDetector) detectIngressToService(resource *types.Processed
 
 			if _, exists := allResources[targetKey]; exists {
 				relationships = append(relationships, types.Relationship{
-					From: resource.Original.ResourceKey(),
-					To:   targetKey,
-					Type: types.RelationNameReference,
+					From:  resource.Original.ResourceKey(),
+					To:    targetKey,
+					Type:  types.RelationNameReference,
 					Field: "spec.tls[].secretName",
 					Details: map[string]string{
 						"secretName": secretName,
@@ -179,9 +179,9 @@ func (d *NameReferenceDetector) detectStatefulSetToService(resource *types.Proce
 
 	if _, exists := allResources[targetKey]; exists {
 		relationships = append(relationships, types.Relationship{
-			From: resource.Original.ResourceKey(),
-			To:   targetKey,
-			Type: types.RelationNameReference,
+			From:  resource.Original.ResourceKey(),
+			To:    targetKey,
+			Type:  types.RelationNameReference,
 			Field: "spec.serviceName",
 			Details: map[string]string{
 				"serviceName": serviceName,
@@ -205,9 +205,10 @@ func (d *NameReferenceDetector) detectRoleBindingReferences(resource *types.Proc
 
 	if roleRefName != "" {
 		var targetGVK schema.GroupVersionKind
-		if roleRefKind == "Role" {
+		switch roleRefKind {
+		case "Role":
 			targetGVK = schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "Role"}
-		} else if roleRefKind == "ClusterRole" {
+		case "ClusterRole":
 			targetGVK = schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}
 		}
 
@@ -223,9 +224,9 @@ func (d *NameReferenceDetector) detectRoleBindingReferences(resource *types.Proc
 
 			if _, exists := allResources[targetKey]; exists {
 				relationships = append(relationships, types.Relationship{
-					From: resource.Original.ResourceKey(),
-					To:   targetKey,
-					Type: types.RelationRoleBinding,
+					From:  resource.Original.ResourceKey(),
+					To:    targetKey,
+					Type:  types.RelationRoleBinding,
 					Field: "roleRef",
 					Details: map[string]string{
 						"roleKind": roleRefKind,
@@ -262,9 +263,9 @@ func (d *NameReferenceDetector) detectRoleBindingReferences(resource *types.Proc
 
 				if _, exists := allResources[targetKey]; exists {
 					relationships = append(relationships, types.Relationship{
-						From: resource.Original.ResourceKey(),
-						To:   targetKey,
-						Type: types.RelationRoleBinding,
+						From:  resource.Original.ResourceKey(),
+						To:    targetKey,
+						Type:  types.RelationRoleBinding,
 						Field: "subjects[]",
 						Details: map[string]string{
 							"subjectKind": kind,
@@ -310,11 +311,12 @@ func (d *NameReferenceDetector) detectServiceAccountReferences(resource *types.P
 	var saName string
 	var found bool
 
-	if kind == "CronJob" {
+	switch kind {
+	case "CronJob":
 		saName, found, _ = unstructured.NestedString(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "serviceAccountName")
-	} else if kind == "Pod" {
+	case "Pod":
 		saName, found, _ = unstructured.NestedString(obj.Object, "spec", "serviceAccountName")
-	} else {
+	default:
 		saName, found, _ = unstructured.NestedString(obj.Object, "spec", "template", "spec", "serviceAccountName")
 	}
 
@@ -330,9 +332,9 @@ func (d *NameReferenceDetector) detectServiceAccountReferences(resource *types.P
 
 	if _, exists := allResources[targetKey]; exists {
 		relationships = append(relationships, types.Relationship{
-			From: resource.Original.ResourceKey(),
-			To:   targetKey,
-			Type: types.RelationServiceAccount,
+			From:  resource.Original.ResourceKey(),
+			To:    targetKey,
+			Type:  types.RelationServiceAccount,
 			Field: "spec.template.spec.serviceAccountName",
 			Details: map[string]string{
 				"serviceAccountName": saName,
@@ -367,11 +369,12 @@ func (d *NameReferenceDetector) detectImagePullSecretReferences(resource *types.
 	var secrets []interface{}
 	var found bool
 
-	if kind == "CronJob" {
+	switch kind {
+	case "CronJob":
 		secrets, found, _ = unstructured.NestedSlice(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "imagePullSecrets")
-	} else if kind == "Pod" {
+	case "Pod":
 		secrets, found, _ = unstructured.NestedSlice(obj.Object, "spec", "imagePullSecrets")
-	} else {
+	default:
 		secrets, found, _ = unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "imagePullSecrets")
 	}
 
@@ -398,9 +401,9 @@ func (d *NameReferenceDetector) detectImagePullSecretReferences(resource *types.
 
 		if _, exists := allResources[targetKey]; exists {
 			relationships = append(relationships, types.Relationship{
-				From: resource.Original.ResourceKey(),
-				To:   targetKey,
-				Type: types.RelationImagePullSecret,
+				From:  resource.Original.ResourceKey(),
+				To:    targetKey,
+				Type:  types.RelationImagePullSecret,
 				Field: "spec.template.spec.imagePullSecrets",
 				Details: map[string]string{
 					"secretName": secretName,

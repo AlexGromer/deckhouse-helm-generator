@@ -156,10 +156,10 @@ func DetectWorkloadType(group *ServiceGroup) WorkloadType {
 	)
 
 	// Flags for image/env-based heuristics.
-	hasCacheImage    := false
-	hasDBImage       := false
-	hasWebPort       := false
-	hasAMQPKafkaEnv  := false
+	hasCacheImage := false
+	hasDBImage := false
+	hasWebPort := false
+	hasAMQPKafkaEnv := false
 
 	for _, res := range group.Resources {
 		if res == nil || res.Original == nil {

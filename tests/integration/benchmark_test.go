@@ -132,9 +132,9 @@ func setupBenchmarkDir(b *testing.B, n int) string {
 		files := map[string]string{
 			fmt.Sprintf("deployment-%d.yaml", i): generateDeploymentYAML(i),
 			fmt.Sprintf("service-%d.yaml", i):    generateServiceYAML(i),
-			fmt.Sprintf("configmap-%d.yaml", i):   generateConfigMapYAML(i),
-			fmt.Sprintf("secret-%d.yaml", i):      generateSecretYAML(i),
-			fmt.Sprintf("ingress-%d.yaml", i):     generateIngressYAML(i),
+			fmt.Sprintf("configmap-%d.yaml", i):  generateConfigMapYAML(i),
+			fmt.Sprintf("secret-%d.yaml", i):     generateSecretYAML(i),
+			fmt.Sprintf("ingress-%d.yaml", i):    generateIngressYAML(i),
 		}
 		for name, content := range files {
 			path := filepath.Join(dir, name)
