@@ -486,6 +486,17 @@ func newClusterClient(kubeconfigPath, contextName string) (*clusterClient, error
 	}
 
 	user := kc.findUser(kctx.Context.User)
+	if user != nil && user.User.AuthProvider != nil {
+		return nil, fmt.Errorf("user %q uses auth-provider, which kubectl no longer supports; configure an exec plugin (e.g. kubelogin for OIDC)", user.Name)
+	}
+
+	var execCred *execCredentialStatus
+	if user != nil && user.User.Exec != nil {
+		execCred, err = runExecPlugin(user.User.Exec, filepath.Dir(kubeconfigPath), cluster.Cluster)
+		if err != nil {
+			return nil, fmt.Errorf("credential plugin of user %q: %w", user.Name, err)
+		}
+	}
 
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -538,6 +549,13 @@ func newClusterClient(kubeconfigPath, contextName string) (*clusterClient, error
 			tlsConfig.Certificates = []tls.Certificate{cert}
 		}
 	}
+	if execCred != nil && execCred.ClientCertificateData != "" {
+		cert, err := tls.X509KeyPair([]byte(execCred.ClientCertificateData), []byte(execCred.ClientKeyData))
+		if err != nil {
+			return nil, fmt.Errorf("cannot use client certificate from credential plugin: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
 
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
@@ -552,9 +570,23 @@ func newClusterClient(kubeconfigPath, contextName string) (*clusterClient, error
 		headers:    make(http.Header),
 	}
 
-	// Set bearer token.
-	if user != nil && user.User.Token != "" {
-		cc.headers.Set("Authorization", "Bearer "+user.User.Token)
+	// Set bearer token: a credential plugin wins over a static token.
+	token := ""
+	if user != nil {
+		token = user.User.Token
+		if token == "" && user.User.TokenFile != "" {
+			data, err := os.ReadFile(user.User.TokenFile)
+			if err != nil {
+				return nil, fmt.Errorf("cannot read token file: %w", err)
+			}
+			token = strings.TrimSpace(string(data))
+		}
+	}
+	if execCred != nil && execCred.Token != "" {
+		token = execCred.Token
+	}
+	if token != "" {
+		cc.headers.Set("Authorization", "Bearer "+token)
 	}
 
 	return cc, nil
@@ -868,10 +900,16 @@ type kubeconfigUser struct {
 
 type kubeconfigUserDetail struct {
 	Token                 string `json:"token,omitempty"`
+	TokenFile             string `json:"tokenFile,omitempty"`
 	ClientCertificate     string `json:"client-certificate,omitempty"`
 	ClientCertificateData string `json:"client-certificate-data,omitempty"`
 	ClientKey             string `json:"client-key,omitempty"`
 	ClientKeyData         string `json:"client-key-data,omitempty"`
+	// Exec runs a credential plugin (kubelogin for OIDC, cloud CLIs).
+	Exec *execConfig `json:"exec,omitempty"`
+	// AuthProvider is the legacy in-tree plugin mechanism, removed from
+	// kubectl; it is detected only to fail with a clear message.
+	AuthProvider map[string]interface{} `json:"auth-provider,omitempty"`
 }
 
 func parseKubeconfig(path string) (*kubeconfigFile, error) {

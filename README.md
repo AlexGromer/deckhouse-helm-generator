@@ -240,7 +240,7 @@ DHG_REQUIRE_HELM=1 go test ./tests/golden/   # без helm набор пропу
 
 ## Ограничения
 
-- **Аутентификация в кластере** только через CA/client-cert/bearer token из kubeconfig. Exec-плагины (OIDC через kubelogin/Dex, cloud CLI) пока не поддерживаются.
+- **Аутентификация в кластере**: client-cert, `token`/`tokenFile` и exec-плагины kubeconfig (`client.authentication.k8s.io/v1`, `v1beta1`: kubelogin для OIDC/Dex, облачные CLI). Устаревший `auth-provider` не поддержан (как и в kubectl). Токен plugin'а запрашивается один раз на запуск.
 - **Один namespace на релиз.** Объекты рендерятся в namespace релиза; исключение — одноимённые объекты из разных namespace, они сохраняют исходный (dhg печатает `Note:`).
 - **Secrets** попадают в `values.yaml` в base64; для хранения в Git используйте `--with external-secrets` или `vault-agent`.
 
