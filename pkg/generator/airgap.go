@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // ImageRef represents a container image reference found in templates.

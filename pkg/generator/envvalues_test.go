@@ -7,7 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // baseVals returns a simple base values map for testing.

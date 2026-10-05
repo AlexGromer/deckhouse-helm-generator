@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/extractor"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/extractor"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 type graphOptions struct {

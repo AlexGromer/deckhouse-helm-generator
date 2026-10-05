@@ -6,9 +6,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor/value"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor/value"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // ConfigMapProcessor processes Kubernetes ConfigMaps.

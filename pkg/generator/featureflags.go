@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 	"sigs.k8s.io/yaml"
 )
 

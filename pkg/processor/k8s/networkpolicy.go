@@ -7,7 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
 )
 
 // NetworkPolicyProcessor processes Kubernetes NetworkPolicy resources.

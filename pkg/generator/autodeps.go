@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/helm"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // knownDependency defines a single infrastructure dependency that can be

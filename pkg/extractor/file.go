@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/yaml"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // FileExtractor extracts Kubernetes resources from YAML files.

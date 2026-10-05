@@ -3,7 +3,7 @@ package k8s
 import (
 	"testing"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
 )
 
 func TestRegisterAll(t *testing.T) {

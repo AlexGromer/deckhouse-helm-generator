@@ -1,7 +1,7 @@
 package generator
 
 import (
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // GroupingStrategy indicates how a service group was formed.

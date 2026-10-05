@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // Policy-as-code: one catalogue of workload rules rendered for two engines.

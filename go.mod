@@ -1,4 +1,4 @@
-module github.com/deckhouse/deckhouse-helm-generator
+module github.com/AlexGromer/deckhouse-helm-generator
 
 go 1.26
 

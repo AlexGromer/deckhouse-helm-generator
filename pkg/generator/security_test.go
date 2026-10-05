@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // TestWriteChart_PathTraversal ensures that external file paths cannot escape the chart directory.

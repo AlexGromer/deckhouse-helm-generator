@@ -108,7 +108,7 @@ import (
     "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
     "k8s.io/apimachinery/pkg/runtime/schema"
 
-    "github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
+    "github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
 )
 
 // MyKindProcessor processes MyKind resources.
@@ -197,8 +197,8 @@ import (
 
     "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-    "github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
-    "github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+    "github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
+    "github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 func TestMyKindProcessor_Process(t *testing.T) {
@@ -265,8 +265,8 @@ PASS
 package detector
 
 import (
-    "github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer"
-    "github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+    "github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer"
+    "github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // MyDetector detects relationships between MyKind and Deployment resources.

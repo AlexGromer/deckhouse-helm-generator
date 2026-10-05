@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // OpenTelemetry auto-instrumentation (`dhg generate --with otel`).

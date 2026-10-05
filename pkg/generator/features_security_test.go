@@ -10,12 +10,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer/detector"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor/k8s"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor/value"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer/detector"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor/k8s"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor/value"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // secTestManifests is a small application: a Deployment consuming three

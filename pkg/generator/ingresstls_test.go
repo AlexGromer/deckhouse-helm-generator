@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // tlsIngressTemplate has the shape of the Ingress processor's template.

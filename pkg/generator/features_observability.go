@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // Service mesh, observability and delivery features (`dhg generate --with ...`).

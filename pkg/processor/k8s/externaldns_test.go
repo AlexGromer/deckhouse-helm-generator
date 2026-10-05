@@ -5,7 +5,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/testutil"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/testutil"
 )
 
 // ExternalDNS tests verify detection of external-dns annotations on Ingress/Service.

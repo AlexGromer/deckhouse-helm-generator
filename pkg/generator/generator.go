@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor/value"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/helm"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor/value"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // Options configures the generator behavior.

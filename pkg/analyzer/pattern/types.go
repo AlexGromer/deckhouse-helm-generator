@@ -2,7 +2,7 @@
 package pattern
 
 import (
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // ArchitecturePattern represents detected architecture pattern.

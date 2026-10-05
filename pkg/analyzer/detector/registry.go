@@ -1,7 +1,7 @@
 package detector
 
 import (
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer"
 )
 
 // RegisterAll registers all default detectors with the analyzer.

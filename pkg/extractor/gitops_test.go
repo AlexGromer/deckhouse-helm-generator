@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // makeRepo creates a local git repository with manifests on branch "main".

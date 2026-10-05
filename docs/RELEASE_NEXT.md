@@ -1,4 +1,4 @@
-# Следующий релиз (номер версии не выбран)
+# Следующий релиз (v1.x)
 
 Ревизия корректности: каждый сгенерированный chart проверяется настоящим Helm, рендер воспроизводит входные манифесты, недостижимый код подключён или удалён. Решения — ADR-045 … ADR-057 в [ADR.md](ADR.md).
 
@@ -34,7 +34,10 @@
 - Плагины процессоров (`--plugin`), `.dhg.yaml` (`--config`), `--template-dir`.
 - Golden-набор `tests/golden`: lint/template, сохранность объектов, ссылки и селекторы, fidelity, `helm unittest`, post-renderer, `kustomize build`; CI-job с Helm 3.19.
 
+## Путь модуля
+
+Модуль переименован в `github.com/AlexGromer/deckhouse-helm-generator` — фактический адрес репозитория; `go install github.com/AlexGromer/deckhouse-helm-generator/cmd/dhg@<версия>` работает начиная с этого релиза. Код, импортировавший пакеты по прежнему пути `github.com/deckhouse/deckhouse-helm-generator`, нужно обновить. Тег релиза — `v1.x`: тег `v2.0.0` и выше Go примет, только если путь модуля оканчивается на `/v2`.
+
 ## Известные ограничения
 
-- `go.mod` объявляет модуль `github.com/deckhouse/deckhouse-helm-generator`, а репозиторий расположен в `github.com/AlexGromer/deckhouse-helm-generator`: `go install …@latest` не работает, нужна сборка из исходников или релизный бинарник.
 - Объекты рендерятся в namespace релиза (кроме одноимённых объектов из разных namespace).

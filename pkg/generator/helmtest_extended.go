@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // GenerateSnapshotTests returns a helm-unittest snapshot suite per rendered
