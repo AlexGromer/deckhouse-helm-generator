@@ -836,3 +836,39 @@ func TestBaseGenerator_Mode(t *testing.T) {
 		t.Errorf("expected mode %s, got %s", types.OutputModeSeparate, bg.Mode())
 	}
 }
+
+func TestCRDsGoToCrdsDirectory(t *testing.T) {
+	crd := makeProcessedResourceWithValues("CustomResourceDefinition", "widgets.example.com", "",
+		nil, map[string]interface{}{"spec": "x"}, "# crd template")
+	crd.Original.Object.SetAPIVersion("apiextensions.k8s.io/v1")
+	crd.Original.Object.Object["status"] = map[string]interface{}{"acceptedNames": map[string]interface{}{}}
+	crd.TemplatePath = "templates/widgets-crd.yaml"
+	crd.ValuesPath = "services.widgets.customResourceDefinition"
+	deploy := makeProcessedResourceWithValues("Deployment", "web", "default", nil,
+		map[string]interface{}{"replicas": 1}, "# deploy")
+	deploy.TemplatePath = "templates/web-deployment.yaml"
+
+	graph := buildGraph([]*types.ProcessedResource{crd, deploy}, nil)
+	graph.Groups = []*types.ResourceGroup{{Name: "web", Resources: []*types.ProcessedResource{crd, deploy}}}
+
+	charts, err := NewUniversalGenerator().Generate(context.Background(), graph, Options{ChartName: "app", ChartVersion: "0.1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chart := charts[0]
+	if _, ok := chart.Templates["templates/widgets-crd.yaml"]; ok {
+		t.Error("CRD must not be a template")
+	}
+	if strings.Contains(chart.ValuesYAML, "customResourceDefinition") {
+		t.Error("CRD must not have values")
+	}
+	var crdFile string
+	for _, f := range chart.ExternalFiles {
+		if f.Path == "crds/widgets.example.com.yaml" {
+			crdFile = f.Content
+		}
+	}
+	if !strings.Contains(crdFile, "kind: CustomResourceDefinition") || strings.Contains(crdFile, "status:") {
+		t.Errorf("unexpected crds/ file:\n%s", crdFile)
+	}
+}

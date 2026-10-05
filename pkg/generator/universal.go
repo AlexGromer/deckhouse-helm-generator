@@ -56,6 +56,9 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 
 		var unplaced []*types.ProcessedResource
 		for _, resource := range group.Resources {
+			if isCRD(resource) {
+				continue
+			}
 			if !placeValuesByPath(valuesBuilder, resource) {
 				unplaced = append(unplaced, resource)
 			}
@@ -82,8 +85,13 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 
 	// Build templates map
 	templates := make(map[string]string)
+	var allResources []*types.ProcessedResource
 	for _, group := range graph.Groups {
 		for _, resource := range group.Resources {
+			allResources = append(allResources, resource)
+			if isCRD(resource) {
+				continue
+			}
 			if resource.TemplatePath != "" && resource.TemplateContent != "" {
 				templates[resource.TemplatePath] = resource.TemplateContent
 			}
@@ -108,8 +116,8 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	// Generate _helpers.tpl
 	helpers := helm.GenerateHelpers(opts.ChartName)
 
-	// Collect external files from ExternalFileManager
-	externalFiles := make([]types.ExternalFileInfo, 0)
+	// CRDs go to crds/; collect external files from ExternalFileManager
+	externalFiles := crdFiles(allResources)
 	if opts.ExternalFileManager != nil {
 		files := opts.ExternalFileManager.GetFiles()
 		for _, file := range files {
@@ -324,10 +332,16 @@ func ValidateChart(chart *types.GeneratedChart) error {
 	}
 	// An umbrella parent chart legitimately has no templates of its own (its
 	// content is the set of subcharts declared as dependencies), nor does a
-	// library chart (its content is _helpers.tpl).
+	// library chart (its content is _helpers.tpl) or a chart of CRDs only.
 	isLibrary := strings.Contains(chart.ChartYAML, "\ntype: library") && chart.Helpers != ""
 	hasDeps := strings.Contains(chart.ChartYAML, "\ndependencies:")
-	if len(chart.Templates) == 0 && !isLibrary && !hasDeps {
+	hasCRDs := false
+	for _, f := range chart.ExternalFiles {
+		if strings.HasPrefix(f.Path, "crds/") {
+			hasCRDs = true
+		}
+	}
+	if len(chart.Templates) == 0 && !isLibrary && !hasDeps && !hasCRDs {
 		return fmt.Errorf("no templates generated")
 	}
 	return nil

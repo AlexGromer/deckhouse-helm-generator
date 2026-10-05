@@ -163,7 +163,7 @@ func checkReleaseIntegrity(t *testing.T, helm, input, out string) {
 		if err != nil || bytes.Contains(data, []byte("type: library")) {
 			continue
 		}
-		stream, err := run(helm, "template", "golden", chart)
+		stream, err := run(helm, "template", "golden", chart, "--include-crds")
 		if err != nil {
 			return // reported by checkCharts
 		}
@@ -222,7 +222,7 @@ func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 		if bytes.Contains(chartYAML, []byte("type: library")) {
 			continue // library charts are not installable and cannot be templated
 		}
-		out, err := run(helm, "template", "golden", chart)
+		out, err := run(helm, "template", "golden", chart, "--include-crds")
 		if err != nil {
 			t.Errorf("helm template %s failed:\n%s", rel, out)
 			continue
@@ -240,7 +240,7 @@ func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 		// implementation is available.
 		if script := filepath.Join(chart, "post-renderer", "kustomize.sh"); fileExists(script) && hasKustomize() {
 			for _, env := range []string{"dev", "staging", "prod"} {
-				out, err := run(helm, "template", "golden", chart, "--post-renderer", script, "--post-renderer-args", env)
+				out, err := run(helm, "template", "golden", chart, "--include-crds", "--post-renderer", script, "--post-renderer-args", env)
 				if err != nil {
 					t.Errorf("helm template %s with post-renderer %s failed:\n%s", rel, env, out)
 				} else if countObjects(out) != n {

@@ -86,6 +86,9 @@ func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Opti
 	// but in separate mode, values are flat: .Values.<kind>.
 	templates := make(map[string]string)
 	for _, resource := range group.Resources {
+		if isCRD(resource) {
+			continue
+		}
 		if resource.TemplatePath != "" && resource.TemplateContent != "" {
 			content := rewriteTemplateForSeparateMode(resource.TemplateContent, resource.ServiceName)
 			content = rewriteHelperReferences(content, sourceChartName, chartName)
@@ -105,14 +108,15 @@ func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Opti
 	}
 
 	chart := &types.GeneratedChart{
-		Name:         chartName,
-		Path:         opts.OutputDir,
-		ChartYAML:    chartYAML,
-		ValuesYAML:   valuesYAML,
-		Templates:    templates,
-		Helpers:      helpers,
-		Notes:        notes,
-		ValuesSchema: valuesSchema,
+		Name:          chartName,
+		Path:          opts.OutputDir,
+		ChartYAML:     chartYAML,
+		ValuesYAML:    valuesYAML,
+		Templates:     templates,
+		Helpers:       helpers,
+		Notes:         notes,
+		ValuesSchema:  valuesSchema,
+		ExternalFiles: crdFiles(group.Resources),
 	}
 	if opts.IncludeREADME {
 		chart.ExternalFiles = append(chart.ExternalFiles, types.ExternalFileInfo{
@@ -137,6 +141,9 @@ func (g *SeparateGenerator) buildFlatValues(group *ServiceGroup) map[string]inte
 
 	var unplaced []*types.ProcessedResource
 	for _, resource := range group.Resources {
+		if isCRD(resource) {
+			continue
+		}
 		path := resource.ValuesPath
 		if parts := strings.SplitN(path, ".", 3); len(parts) == 3 && parts[0] == "services" {
 			path = parts[2]
