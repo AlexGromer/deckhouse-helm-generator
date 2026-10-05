@@ -495,3 +495,24 @@ func TestSeparateGenerator_Edge_SingleResourceGroup(t *testing.T) {
 		t.Error("expected at least 1 template")
 	}
 }
+
+func TestServiceValuesKeys_NestsOnlyCollidingServices(t *testing.T) {
+	res := func(svc, path string) *types.ProcessedResource {
+		r := makeProcessedResource("Deployment", svc, "default", nil)
+		r.ServiceName = svc
+		r.ValuesPath = "services." + svc + "." + path
+		return r
+	}
+	group := &ServiceGroup{Name: "shop", Resources: []*types.ProcessedResource{
+		res("shopWorker", "deployment"),
+		res("shop", "deployment"),
+		res("shopCache", "configMaps.cache"),
+	}}
+	keys := serviceValuesKeys(group)
+	if keys["shop"] != "" || keys["shopCache"] != "" {
+		t.Errorf("main and non-colliding services must stay flat: %v", keys)
+	}
+	if keys["shopWorker"] != "shopWorker" {
+		t.Errorf("colliding service must get its own key: %v", keys)
+	}
+}

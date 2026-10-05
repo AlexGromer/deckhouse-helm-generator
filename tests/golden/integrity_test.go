@@ -24,6 +24,11 @@ func parseStream(stream string) []object {
 }
 
 func (o object) kind() string { s, _ := o["kind"].(string); return s }
+func (o object) namespace() string {
+	m, _ := o["metadata"].(map[string]interface{})
+	s, _ := m["namespace"].(string)
+	return s
+}
 func (o object) name() string {
 	m, _ := o["metadata"].(map[string]interface{})
 	s, _ := m["name"].(string)

@@ -712,7 +712,7 @@ func TestRewriteTemplateForSeparateMode_BasicRewrite(t *testing.T) {
 	content := `{{- $svc := .Values.services.frontend }}
 replicas: {{ $svc.replicaCount }}`
 
-	result := rewriteTemplateForSeparateMode(content, "frontend")
+	result := rewriteTemplateForSeparateMode(content, "frontend", "")
 
 	expected := `{{- $svc := .Values }}
 replicas: {{ $svc.replicaCount }}`
@@ -724,7 +724,7 @@ replicas: {{ $svc.replicaCount }}`
 
 func TestRewriteTemplateForSeparateMode_EmptyServiceName(t *testing.T) {
 	content := "some content"
-	result := rewriteTemplateForSeparateMode(content, "")
+	result := rewriteTemplateForSeparateMode(content, "", "")
 	if result != content {
 		t.Error("content should be unchanged for empty service name")
 	}
@@ -732,7 +732,7 @@ func TestRewriteTemplateForSeparateMode_EmptyServiceName(t *testing.T) {
 
 func TestRewriteTemplateForSeparateMode_NoMatch(t *testing.T) {
 	content := "replicas: {{ .Values.replicaCount }}"
-	result := rewriteTemplateForSeparateMode(content, "frontend")
+	result := rewriteTemplateForSeparateMode(content, "frontend", "")
 	if result != content {
 		t.Error("content should be unchanged when no pattern matches")
 	}

@@ -164,24 +164,7 @@ func InjectDependencies(chart *types.GeneratedChart, deps []helm.Dependency) *ty
 		return out
 	}
 
-	var entries strings.Builder
-	for _, d := range deps {
-		fmt.Fprintf(&entries, "  - name: %s\n", d.Name)
-		fmt.Fprintf(&entries, "    version: %q\n", d.Version)
-		fmt.Fprintf(&entries, "    repository: %s\n", d.Repository)
-		if d.Condition != "" {
-			fmt.Fprintf(&entries, "    condition: %s\n", d.Condition)
-		}
-	}
-	if i := strings.Index(out.ChartYAML, "\ndependencies:\n"); i >= 0 {
-		at := i + len("\ndependencies:\n")
-		out.ChartYAML = out.ChartYAML[:at] + entries.String() + out.ChartYAML[at:]
-	} else {
-		if out.ChartYAML != "" && !strings.HasSuffix(out.ChartYAML, "\n") {
-			out.ChartYAML += "\n"
-		}
-		out.ChartYAML += "dependencies:\n" + entries.String()
-	}
+	out.ChartYAML = addChartDependencies(out.ChartYAML, deps)
 
 	for _, d := range deps {
 		if values, err := appendTopLevelValues(out.ValuesYAML, d.Name, map[string]interface{}{"enabled": false}); err == nil {
@@ -192,6 +175,28 @@ func InjectDependencies(chart *types.GeneratedChart, deps []helm.Dependency) *ty
 }
 
 var dependencyNameRegex = regexp.MustCompile(`(?m)^\s+- name: "?([^"\s]+)"?\s*$`)
+
+// addChartDependencies adds deps to the dependencies list of chartYAML,
+// creating the list when the chart declares none.
+func addChartDependencies(chartYAML string, deps []helm.Dependency) string {
+	var entries strings.Builder
+	for _, d := range deps {
+		fmt.Fprintf(&entries, "  - name: %s\n", d.Name)
+		fmt.Fprintf(&entries, "    version: %q\n", d.Version)
+		fmt.Fprintf(&entries, "    repository: %s\n", d.Repository)
+		if d.Condition != "" {
+			fmt.Fprintf(&entries, "    condition: %s\n", d.Condition)
+		}
+	}
+	if i := strings.Index(chartYAML, "\ndependencies:\n"); i >= 0 {
+		at := i + len("\ndependencies:\n")
+		return chartYAML[:at] + entries.String() + chartYAML[at:]
+	}
+	if chartYAML != "" && !strings.HasSuffix(chartYAML, "\n") {
+		chartYAML += "\n"
+	}
+	return chartYAML + "dependencies:\n" + entries.String()
+}
 
 // declaredDependencies returns the dependencies already listed in Chart.yaml.
 func declaredDependencies(chartYAML string) []helm.Dependency {

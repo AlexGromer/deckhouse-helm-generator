@@ -1538,9 +1538,9 @@ spec:
 	// Apply Deckhouse module scaffold
 	result := generator.GenerateDeckhouseModule(chart, nil)
 
-	// Verify ChartYAML contains helm_lib dependency
-	if !strings.Contains(result.ChartYAML, "helm_lib") {
-		t.Error("Expected result.ChartYAML to contain 'helm_lib' dependency")
+	// Verify ChartYAML contains deckhouse_lib_helm dependency
+	if !strings.Contains(result.ChartYAML, "deckhouse_lib_helm") {
+		t.Error("Expected result.ChartYAML to contain 'deckhouse_lib_helm' dependency")
 	}
 
 	// Verify ExternalFiles contains the required paths

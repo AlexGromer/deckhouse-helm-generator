@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -118,11 +120,43 @@ func applyVeleroBackupFeature(chart *types.GeneratedChart, fc FeatureContext) (*
 	if err := opts.normalize(); err != nil {
 		return nil, err
 	}
-	if !opsHasPersistentStorage(opsChartResources(chart, fc.Graph)) {
+	resources := opsChartResources(chart, fc.Graph)
+	if !opsHasPersistentStorage(resources) {
 		return chart, nil
 	}
+	opts.LabelSelectors = veleroLabelSelectors(resources)
 	out, _, err := InjectVeleroBackup(chart, opts)
 	return out, err
+}
+
+// veleroLabelSelectors returns, without duplicates, the pod selector of each
+// workload (its pods and their PVCs) and the labels of each PVC.
+func veleroLabelSelectors(resources []*types.ProcessedResource) []map[string]interface{} {
+	var out []map[string]interface{}
+	seen := map[string]bool{}
+	add := func(sel map[string]interface{}) {
+		if len(sel) == 0 {
+			return
+		}
+		key, _ := json.Marshal(sel)
+		if !seen[string(key)] {
+			seen[string(key)] = true
+			out = append(out, sel)
+		}
+	}
+	for _, r := range resources {
+		obj := r.Original.Object.Object
+		switch r.Original.GVK.Kind {
+		case "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet":
+			sel, _, _ := unstructured.NestedMap(obj, "spec", "selector")
+			add(sel)
+		case "PersistentVolumeClaim":
+			if labels, _, _ := unstructured.NestedMap(obj, "metadata", "labels"); len(labels) > 0 {
+				add(map[string]interface{}{"matchLabels": labels})
+			}
+		}
+	}
+	return out
 }
 
 // ── resource-report ─────────────────────────────────────────────────────────

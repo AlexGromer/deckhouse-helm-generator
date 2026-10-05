@@ -6,11 +6,12 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
 // GenerateDeckhouseModule transforms a standard Helm chart into a Deckhouse module structure.
-// It adds helm_lib dependency, OpenAPI schemas, images/ and hooks/ directories,
+// It adds the deckhouse_lib_helm dependency, OpenAPI schemas, images/ and hooks/ directories,
 // and injects helm_lib helpers into templates.
 // When values is nil, the config schema is derived from the chart's values.yaml.
 func GenerateDeckhouseModule(chart *types.GeneratedChart, values map[string]interface{}) *types.GeneratedChart {
@@ -20,7 +21,7 @@ func GenerateDeckhouseModule(chart *types.GeneratedChart, values map[string]inte
 		_ = yaml.Unmarshal([]byte(chart.ValuesYAML), &values)
 	}
 
-	// Modify Chart.yaml to add helm_lib dependency
+	// Modify Chart.yaml to add the deckhouse_lib_helm dependency
 	result.ChartYAML = injectHelmLibDep(chart.ChartYAML)
 
 	// Inject helm_lib includes into templates
@@ -33,17 +34,21 @@ func GenerateDeckhouseModule(chart *types.GeneratedChart, values map[string]inte
 	return &result
 }
 
-func injectHelmLibDep(chartYAML string) string {
-	if strings.Contains(chartYAML, "helm_lib") {
-		return chartYAML
-	}
+// helmLib is the Deckhouse library chart providing the helm_lib_* helpers
+// (chart name as published in https://deckhouse.github.io/lib-helm).
+var helmLib = helm.Dependency{
+	Name:       "deckhouse_lib_helm",
+	Version:    "~1",
+	Repository: "https://deckhouse.github.io/lib-helm",
+}
 
-	dep := `dependencies:
-  - name: helm_lib
-    version: "*"
-    repository: https://deckhouse.github.io/lib-helm
-`
-	return chartYAML + "\n" + dep
+func injectHelmLibDep(chartYAML string) string {
+	for _, d := range declaredDependencies(chartYAML) {
+		if d.Name == helmLib.Name {
+			return chartYAML
+		}
+	}
+	return addChartDependencies(chartYAML, []helm.Dependency{helmLib})
 }
 
 func injectHelmLibIncludes(templates map[string]string) map[string]string {

@@ -1,0 +1,59 @@
+# Objects that map to the same template or values path: the same kind and
+# name in two namespaces, and two Deployments labelled with the same app.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+  namespace: team-a
+data:
+  owner: a
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+  namespace: team-b
+data:
+  owner: b
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-api
+  labels:
+    app: shop
+spec:
+  selector:
+    matchLabels:
+      app: shop
+      tier: api
+  template:
+    metadata:
+      labels:
+        app: shop
+        tier: api
+    spec:
+      containers:
+        - name: api
+          image: shop/api:1.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-worker
+  labels:
+    app: shop
+spec:
+  selector:
+    matchLabels:
+      app: shop
+      tier: worker
+  template:
+    metadata:
+      labels:
+        app: shop
+        tier: worker
+    spec:
+      containers:
+        - name: worker
+          image: shop/worker:1.0

@@ -401,6 +401,13 @@ func TestVeleroBackupFeature(t *testing.T) {
 				if locs, _ := v["volumeSnapshotLocations"].([]interface{}); len(locs) != 2 || locs[1] != "aws-dr" {
 					t.Errorf("%s: volumeSnapshotLocations = %v", chart.Name, v["volumeSnapshotLocations"])
 				}
+				// The StatefulSet's selector picks up its pods and the PVCs of
+				// its volumeClaimTemplates, which lack the chart's labels.
+				if sels, _ := v["labelSelectors"].([]interface{}); len(sels) == 0 {
+					t.Errorf("%s: no labelSelectors for the release's workloads: %v", chart.Name, v)
+				} else if _, ok := sels[0].(map[string]interface{})["matchLabels"]; !ok {
+					t.Errorf("%s: labelSelectors[0] = %v, want a workload selector", chart.Name, sels[0])
+				}
 			}
 			if withSchedule != 1 {
 				t.Errorf("expected exactly one chart with a velero schedule, got %d", withSchedule)

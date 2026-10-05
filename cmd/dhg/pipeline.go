@@ -98,6 +98,10 @@ func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, er
 		}
 	}
 
+	for _, note := range processor.ResolveCollisions(processed) {
+		fmt.Fprintf(os.Stderr, "Note: %s\n", note)
+	}
+
 	if opts.verbose {
 		fmt.Printf("\n[3/5] Analyzing relationships...\n")
 	}

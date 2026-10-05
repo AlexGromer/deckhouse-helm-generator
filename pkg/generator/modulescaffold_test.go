@@ -25,8 +25,8 @@ func TestModuleScaffold_ChartYAML_HasHelmLibDep(t *testing.T) {
 
 	result := GenerateDeckhouseModule(chart, values)
 
-	if !strings.Contains(result.ChartYAML, "helm_lib") {
-		t.Error("Expected helm_lib dependency in Chart.yaml")
+	if !strings.Contains(result.ChartYAML, "name: deckhouse_lib_helm") {
+		t.Error("Expected deckhouse_lib_helm dependency in Chart.yaml")
 	}
 }
 
@@ -168,5 +168,28 @@ func TestModuleScaffold_DefaultDisabled(t *testing.T) {
 	opts := Options{}
 	if opts.DeckhouseModule {
 		t.Error("Expected DeckhouseModule to default to false")
+	}
+}
+
+func TestGenerateDeckhouseModule_MergesIntoExistingDependencies(t *testing.T) {
+	chart := &types.GeneratedChart{
+		Name:      "app",
+		ChartYAML: "apiVersion: v2\nname: app\nversion: 0.1.0\ndependencies:\n  - name: redis\n    version: 1.0.0\n    repository: https://example.com\n",
+		Templates: map[string]string{},
+	}
+	result := GenerateDeckhouseModule(chart, nil)
+
+	if n := strings.Count(result.ChartYAML, "dependencies:"); n != 1 {
+		t.Fatalf("dependencies key appears %d times:\n%s", n, result.ChartYAML)
+	}
+	names := map[string]bool{}
+	for _, d := range declaredDependencies(result.ChartYAML) {
+		names[d.Name] = true
+	}
+	if !names["redis"] || !names["deckhouse_lib_helm"] {
+		t.Errorf("dependencies = %v, want redis and deckhouse_lib_helm", names)
+	}
+	if again := GenerateDeckhouseModule(result, nil); again.ChartYAML != result.ChartYAML {
+		t.Errorf("second application changed Chart.yaml:\n%s", again.ChartYAML)
 	}
 }

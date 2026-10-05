@@ -172,7 +172,7 @@ dhg generate -f ./manifests --chart-name app \
 | `reloader` | Аннотации Stakater Reloader |
 | `resource-report` | `docs/resource-report.md`: оценка стоимости, right-sizing, находки по томам |
 | `vault-agent` | Аннотации HashiCorp Vault Agent для workload'ов с Secrets |
-| `velero-backup` | `Schedule` Velero для chart'ов с томами |
+| `velero-backup` | `Schedule` Velero (≥ 1.10) для chart'ов с томами: объекты релиза, pod'ы его workload'ов и их PVC (`orLabelSelectors`, `veleroBackup.labelSelectors`) |
 
 Все 16 возможностей проверяются в CI и по отдельности, и все вместе, во всех режимах.
 
@@ -241,8 +241,7 @@ DHG_REQUIRE_HELM=1 go test ./tests/golden/   # без helm набор пропу
 ## Ограничения
 
 - **Аутентификация в кластере** только через CA/client-cert/bearer token из kubeconfig. Exec-плагины (OIDC через kubelogin/Dex, cloud CLI) пока не поддерживаются.
-- **Имя зависимости `helm_lib`** в Deckhouse-модуле не сверено с текущим индексом `deckhouse.github.io/lib-helm`. Проверьте имя и зафиксируйте версию (`"*"` по умолчанию).
-- **Плоские values.** В `separate`/`umbrella` два ресурса одного вида в одной группе делят ключ values.
+- **Один namespace на релиз.** Объекты рендерятся в namespace релиза; исключение — одноимённые объекты из разных namespace, они сохраняют исходный (dhg печатает `Note:`).
 - **Secrets** попадают в `values.yaml` в base64; для хранения в Git используйте `--with external-secrets` или `vault-agent`.
 
 ---

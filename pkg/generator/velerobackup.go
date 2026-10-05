@@ -34,6 +34,11 @@ type VeleroBackupOptions struct {
 	// DefaultVolumesToFsBackup backs up all pod volumes with file-system backup
 	// (Kopia/Restic) instead of snapshots.
 	DefaultVolumesToFsBackup bool
+	// LabelSelectors select the pods and PVCs of the release in addition to
+	// the chart's selector labels: workloads keep the labels of the input
+	// manifests, and PVCs created from volumeClaimTemplates carry the labels
+	// of their StatefulSet's selector, not the chart's.
+	LabelSelectors []map[string]interface{}
 }
 
 // normalize applies defaults and validates the options.
@@ -57,9 +62,10 @@ func (opts *VeleroBackupOptions) normalize() error {
 }
 
 // GenerateVeleroScheduleTemplate returns a Helm template for a Velero
-// Schedule (velero.io/v1) that backs up the release: every object carrying
-// the chart's selector labels in the release namespace, together with the
-// volumes of its pods. prefix is the prefix of the chart's
+// Schedule (velero.io/v1) that backs up the release in its namespace: every
+// object carrying the chart's selector labels or matching one of
+// veleroBackup.labelSelectors, together with the volumes of its pods.
+// orLabelSelectors requires Velero 1.10 or later. prefix is the prefix of the chart's
 // "<prefix>.fullname" helpers.
 func GenerateVeleroScheduleTemplate(prefix string) string {
 	v := ".Values." + veleroValuesKey
@@ -78,9 +84,12 @@ func GenerateVeleroScheduleTemplate(prefix string) string {
 	w(`  template:`)
 	w(`    includedNamespaces:`)
 	w(`      - {{ .Release.Namespace | quote }}`)
-	w(`    labelSelector:`)
-	w(`      matchLabels:`)
-	w(fmt.Sprintf(`        {{- include %q . | nindent 8 }}`, prefix+".selectorLabels"))
+	w(`    orLabelSelectors:`)
+	w(`      - matchLabels:`)
+	w(fmt.Sprintf(`          {{- include %q . | nindent 10 }}`, prefix+".selectorLabels"))
+	w(`      {{- with ` + v + `.labelSelectors }}`)
+	w(`      {{- toYaml . | nindent 6 }}`)
+	w(`      {{- end }}`)
 	w(`    ttl: {{ ` + v + `.ttl | default "` + defaultVeleroTTL + `" | quote }}`)
 	w(`    {{- with ` + v + `.storageLocation }}`)
 	w(`    storageLocation: {{ . | quote }}`)
@@ -113,6 +122,10 @@ func InjectVeleroBackup(chart *types.GeneratedChart, opts VeleroBackupOptions) (
 		return nil, false, err
 	}
 
+	selectors := make([]interface{}, 0, len(opts.LabelSelectors))
+	for _, sel := range opts.LabelSelectors {
+		selectors = append(selectors, sel)
+	}
 	locations := make([]interface{}, 0, len(opts.VolumeSnapshotLocations))
 	for _, l := range opts.VolumeSnapshotLocations {
 		locations = append(locations, l)
@@ -126,6 +139,7 @@ func InjectVeleroBackup(chart *types.GeneratedChart, opts VeleroBackupOptions) (
 		"volumeSnapshotLocations":  locations,
 		"snapshotVolumes":          opts.SnapshotVolumes,
 		"defaultVolumesToFsBackup": opts.DefaultVolumesToFsBackup,
+		"labelSelectors":           selectors,
 	})
 	if err != nil {
 		return nil, false, err

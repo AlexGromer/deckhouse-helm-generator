@@ -3,9 +3,12 @@ package generator
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 
 	"sigs.k8s.io/yaml"
@@ -85,12 +88,13 @@ func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Opti
 	// Processor-generated templates reference .Values.services.<serviceName>.<kind>
 	// but in separate mode, values are flat: .Values.<kind>.
 	templates := make(map[string]string)
+	keys := serviceValuesKeys(group)
 	for _, resource := range group.Resources {
 		if isCRD(resource) {
 			continue
 		}
 		if resource.TemplatePath != "" && resource.TemplateContent != "" {
-			content := rewriteTemplateForSeparateMode(resource.TemplateContent, resource.ServiceName)
+			content := rewriteTemplateForSeparateMode(resource.TemplateContent, resource.ServiceName, keys[resource.ServiceName])
 			content = rewriteHelperReferences(content, sourceChartName, chartName)
 			templates[resource.TemplatePath] = content
 		}
@@ -139,6 +143,7 @@ func (g *SeparateGenerator) buildFlatValues(group *ServiceGroup) map[string]inte
 	// Templates reference $.Values.global.*; an umbrella parent overrides it.
 	b.SetValue("global", map[string]interface{}{})
 
+	keys := serviceValuesKeys(group)
 	var unplaced []*types.ProcessedResource
 	for _, resource := range group.Resources {
 		if isCRD(resource) {
@@ -147,6 +152,10 @@ func (g *SeparateGenerator) buildFlatValues(group *ServiceGroup) map[string]inte
 		path := resource.ValuesPath
 		if parts := strings.SplitN(path, ".", 3); len(parts) == 3 && parts[0] == "services" {
 			path = parts[2]
+			if key := keys[resource.ServiceName]; key != "" {
+				b.SetValue(key+".enabled", true)
+				path = key + "." + path
+			}
 		}
 		if path == "" {
 			unplaced = append(unplaced, resource)
@@ -218,18 +227,78 @@ func marshalFlatValues(chartName string, values map[string]interface{}) (string,
 //
 //	.Values.services.<svc>.<path> -> .Values.<path>
 //	$svc := .Values.services.<svc> -> $svc := .Values
-func rewriteTemplateForSeparateMode(content, serviceName string) string {
+//
+// or, for a service kept under its own key, .Values.services.<svc> -> .Values.<key>.
+func rewriteTemplateForSeparateMode(content, serviceName, key string) string {
 	if serviceName == "" {
 		return content
 	}
+	target := ".Values"
+	if key != "" {
+		target += "." + key
+	}
+	ref := regexp.MustCompile(`\.Values\.services\.` + regexp.QuoteMeta(serviceName) + `\b`)
+	return ref.ReplaceAllString(content, target)
+}
 
-	// Replace $svc variable assignment pattern.
-	// e.g., {{- $svc := .Values.services.frontend }} -> {{- $svc := .Values }}
-	content = strings.ReplaceAll(content,
-		".Values.services."+serviceName,
-		".Values")
+// serviceValuesKeys decides where each service of a group puts its values in
+// the group chart: "" for the top level, or a key of its own when its paths
+// would collide with those of a service already at the top level (e.g. two
+// Deployments of one group both writing "deployment"). The group's main
+// service (the one named like the group, else the one with most resources)
+// is always at the top level, so single-service charts stay flat.
+func serviceValuesKeys(group *ServiceGroup) map[string]string {
+	paths := map[string][]string{}
+	count := map[string]int{}
+	for _, r := range group.Resources {
+		if isCRD(r) || r.ServiceName == "" {
+			continue
+		}
+		count[r.ServiceName]++
+		if parts := strings.SplitN(r.ValuesPath, ".", 3); len(parts) == 3 && parts[0] == "services" {
+			paths[r.ServiceName] = append(paths[r.ServiceName], parts[2])
+		}
+	}
+	services := make([]string, 0, len(count))
+	for svc := range count {
+		services = append(services, svc)
+	}
+	main := processor.SanitizeServiceName(group.Name)
+	sort.Slice(services, func(i, j int) bool {
+		a, b := services[i], services[j]
+		if (a == main) != (b == main) {
+			return a == main
+		}
+		if count[a] != count[b] {
+			return count[a] > count[b]
+		}
+		return a < b
+	})
 
-	return content
+	keys := make(map[string]string, len(services))
+	taken := []string{"enabled", "global"}
+	for _, svc := range services {
+		if !pathsCollide(paths[svc], taken) {
+			taken = append(taken, paths[svc]...)
+			continue
+		}
+		keys[svc] = svc
+		taken = append(taken, svc)
+	}
+	return keys
+}
+
+// pathsCollide reports whether a dotted values path of a equals, contains or
+// is contained in one of b.
+func pathsCollide(a, b []string) bool {
+	for _, p := range a {
+		for _, q := range b {
+			if p == q || strings.HasPrefix(p, q+".") || strings.HasPrefix(q, p+".") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // rewriteHelperReferences points include/template calls at the helpers of the

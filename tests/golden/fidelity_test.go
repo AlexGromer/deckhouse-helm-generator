@@ -12,23 +12,41 @@ import (
 // the rendered object with the same value. The chart may add fields (chart
 // labels, defaults), but must not drop or change input data.
 func checkFidelity(input, rendered []object) []string {
+	// Objects of the same kind and name in several namespaces must keep
+	// their namespace to coexist; they are matched by namespace too.
+	namespaces := map[string]map[string]bool{}
+	for _, in := range input {
+		id := in.kind() + "/" + in.name()
+		if namespaces[id] == nil {
+			namespaces[id] = map[string]bool{}
+		}
+		namespaces[id][in.namespace()] = true
+	}
+	key := func(o object) string {
+		id := o.kind() + "/" + o.name()
+		if len(namespaces[id]) > 1 {
+			return o.kind() + "/" + o.namespace() + "/" + o.name()
+		}
+		return id
+	}
+
 	byKey := map[string]object{}
 	for _, o := range rendered {
-		byKey[o.kind()+"/"+o.name()] = o
+		byKey[key(o)] = o
 	}
 	var problems []string
 	for _, in := range input {
-		key := in.kind() + "/" + in.name()
+		k := key(in)
 		if in.kind() == "CustomResourceDefinition" {
 			continue // copied verbatim to crds/
 		}
-		out, ok := byKey[key]
+		out, ok := byKey[k]
 		if !ok {
-			problems = append(problems, fmt.Sprintf("%s: not rendered under its input name", key))
+			problems = append(problems, fmt.Sprintf("%s: not rendered under its input name", k))
 			continue
 		}
 		for _, d := range diffSubset("", map[string]interface{}(in), map[string]interface{}(out)) {
-			problems = append(problems, fmt.Sprintf("%s: %s", key, d))
+			problems = append(problems, fmt.Sprintf("%s: %s", k, d))
 		}
 	}
 	return problems
