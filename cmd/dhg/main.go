@@ -60,6 +60,8 @@ It supports extracting resources from:
   - Live Kubernetes clusters
   - GitOps repositories`,
 		Version: fmt.Sprintf("%s (built: %s)", version, buildTime),
+		// Runtime errors are not usage errors: print the error, not the help.
+		SilenceUsage: true,
 	}
 
 	rootCmd.AddCommand(newGenerateCmd())
@@ -69,25 +71,26 @@ It supports extracting resources from:
 	rootCmd.AddCommand(newMigrateCmd())
 	rootCmd.AddCommand(newFixCmd())
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newFeaturesCmd())
 
 	return rootCmd
 }
 
 func newGenerateCmd() *cobra.Command {
 	var (
-		paths           []string
-		outputDir       string
-		chartName       string
-		chartVersion    string
-		appVersion      string
-		mode            string
-		source          string
-		namespace       string
-		namespaces      []string
-		labelSelector   string
-		includeKinds    []string
-		excludeKinds    []string
-		recursive       bool
+		paths              []string
+		outputDir          string
+		chartName          string
+		chartVersion       string
+		appVersion         string
+		mode               string
+		source             string
+		namespace          string
+		namespaces         []string
+		labelSelector      string
+		includeKinds       []string
+		excludeKinds       []string
+		recursive          bool
 		kubeConfig         string
 		kubeContext        string
 		clusterNamespace   string
@@ -95,10 +98,10 @@ func newGenerateCmd() *cobra.Command {
 		gitBranch          string
 		sshKey             string
 		includeTests       bool
-		includeREADME   bool
-		includeSchema   bool
-		verbose         bool
-		envValues       bool
+		includeREADME      bool
+		includeSchema      bool
+		verbose            bool
+		envValues          bool
 		deckhouseModule    bool
 		dryRun             bool
 		airgapRegistry     string
@@ -118,6 +121,8 @@ func newGenerateCmd() *cobra.Command {
 		templateStyle      string
 		includeHooks       bool
 		valuesFlat         bool
+		withFeatures       []string
+		featureOpts        []string
 	)
 
 	cmd := &cobra.Command{
@@ -136,30 +141,30 @@ Examples:
   dhg generate -f ./manifests --include-kinds Deployment,Service,Ingress`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGenerate(cmd.Context(), generateOptions{
-				paths:           paths,
-				outputDir:       outputDir,
-				chartName:       chartName,
-				chartVersion:    chartVersion,
-				appVersion:      appVersion,
-				mode:            mode,
-				source:          source,
-				namespace:       namespace,
-				namespaces:      namespaces,
-				labelSelector:   labelSelector,
-				includeKinds:    includeKinds,
-				excludeKinds:    excludeKinds,
-				recursive:       recursive,
-				kubeConfig:       kubeConfig,
-				kubeContext:      kubeContext,
-				clusterNamespace: clusterNamespace,
-				gitRepo:          gitRepo,
-				gitBranch:        gitBranch,
-				sshKey:           sshKey,
-				includeTests:    includeTests,
-				includeREADME:   includeREADME,
-				includeSchema:   includeSchema,
-				verbose:         verbose,
-				envValues:       envValues,
+				paths:              paths,
+				outputDir:          outputDir,
+				chartName:          chartName,
+				chartVersion:       chartVersion,
+				appVersion:         appVersion,
+				mode:               mode,
+				source:             source,
+				namespace:          namespace,
+				namespaces:         namespaces,
+				labelSelector:      labelSelector,
+				includeKinds:       includeKinds,
+				excludeKinds:       excludeKinds,
+				recursive:          recursive,
+				kubeConfig:         kubeConfig,
+				kubeContext:        kubeContext,
+				clusterNamespace:   clusterNamespace,
+				gitRepo:            gitRepo,
+				gitBranch:          gitBranch,
+				sshKey:             sshKey,
+				includeTests:       includeTests,
+				includeREADME:      includeREADME,
+				includeSchema:      includeSchema,
+				verbose:            verbose,
+				envValues:          envValues,
 				deckhouseModule:    deckhouseModule,
 				dryRun:             dryRun,
 				airgapRegistry:     airgapRegistry,
@@ -179,6 +184,8 @@ Examples:
 				templateStyle:      templateStyle,
 				includeHooks:       includeHooks,
 				valuesFlat:         valuesFlat,
+				withFeatures:       withFeatures,
+				featureOpts:        featureOpts,
 			})
 		},
 	}
@@ -226,6 +233,8 @@ Examples:
 	cmd.Flags().StringVar(&templateStyle, "template-style", "standard", "Template output style: standard, helm")
 	cmd.Flags().BoolVar(&includeHooks, "hooks", false, "Generate Helm lifecycle hook Job templates (pre-upgrade, post-install, pre-delete)")
 	cmd.Flags().BoolVar(&valuesFlat, "values-flat", false, "Add inline dot-notation path comments to values.yaml for --set reference")
+	cmd.Flags().StringSliceVar(&withFeatures, "with", nil, "Enable optional features, applied in order (see `dhg features`)")
+	cmd.Flags().StringArrayVar(&featureOpts, "feature-opt", nil, "Feature parameter as <feature>.<key>=<value> (repeatable)")
 
 	_ = cmd.MarkFlagRequired("chart-name")
 
@@ -233,30 +242,30 @@ Examples:
 }
 
 type generateOptions struct {
-	paths           []string
-	outputDir       string
-	chartName       string
-	chartVersion    string
-	appVersion      string
-	mode            string
-	source          string
-	namespace       string
-	namespaces      []string
-	labelSelector   string
-	includeKinds    []string
-	excludeKinds    []string
-	recursive       bool
-	kubeConfig       string
-	kubeContext      string
-	clusterNamespace string
-	gitRepo          string
-	gitBranch        string
-	sshKey           string
-	includeTests     bool
-	includeREADME   bool
-	includeSchema   bool
-	verbose         bool
-	envValues       bool
+	paths              []string
+	outputDir          string
+	chartName          string
+	chartVersion       string
+	appVersion         string
+	mode               string
+	source             string
+	namespace          string
+	namespaces         []string
+	labelSelector      string
+	includeKinds       []string
+	excludeKinds       []string
+	recursive          bool
+	kubeConfig         string
+	kubeContext        string
+	clusterNamespace   string
+	gitRepo            string
+	gitBranch          string
+	sshKey             string
+	includeTests       bool
+	includeREADME      bool
+	includeSchema      bool
+	verbose            bool
+	envValues          bool
 	deckhouseModule    bool
 	dryRun             bool
 	airgapRegistry     string
@@ -276,6 +285,8 @@ type generateOptions struct {
 	templateStyle      string
 	includeHooks       bool
 	valuesFlat         bool
+	withFeatures       []string
+	featureOpts        []string
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -748,6 +759,23 @@ drain:
 		}
 	}
 
+	// Apply optional features (--with)
+	if len(opts.withFeatures) > 0 {
+		if opts.verbose {
+			fmt.Printf("\n[4k/5] Applying features: %s\n", strings.Join(opts.withFeatures, ", "))
+		}
+		featureOptions, err := generator.ParseFeatureOptions(opts.featureOpts)
+		if err != nil {
+			return err
+		}
+		charts, err = generator.ApplyFeatures(charts, opts.withFeatures, featureOptions, graph)
+		if err != nil {
+			return err
+		}
+	} else if len(opts.featureOpts) > 0 {
+		return fmt.Errorf("--feature-opt requires the feature to be enabled with --with")
+	}
+
 	// Dry-run: print to stdout instead of writing to disk
 	if opts.dryRun {
 		for _, chart := range charts {
@@ -933,17 +961,17 @@ drain:
 
 func newAnalyzeCmd() *cobra.Command {
 	var (
-		paths         []string
-		outputFormat  string
-		outputFile    string
-		summaryOnly   bool
-		color         bool
-		verbose       bool
-		namespace     string
-		namespaces    []string
-		includeKinds  []string
-		excludeKinds  []string
-		recursive     bool
+		paths        []string
+		outputFormat string
+		outputFile   string
+		summaryOnly  bool
+		color        bool
+		verbose      bool
+		namespace    string
+		namespaces   []string
+		includeKinds []string
+		excludeKinds []string
+		recursive    bool
 	)
 
 	cmd := &cobra.Command{
@@ -1320,13 +1348,13 @@ func runValidate(_ context.Context, opts validateOptions) error {
 
 func newMigrateCmd() *cobra.Command {
 	var (
-		fromDir string
-		sourceFiles []string
-		chartName   string
+		fromDir      string
+		sourceFiles  []string
+		chartName    string
 		chartVersion string
-		appVersion  string
-		mode        string
-		verbose     bool
+		appVersion   string
+		mode         string
+		verbose      bool
 	)
 
 	cmd := &cobra.Command{
@@ -2108,4 +2136,33 @@ func newVersionCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "dhg version %s (built: %s)\n", version, buildTime)
 		},
 	}
+}
+
+func newFeaturesCmd() *cobra.Command {
+	var namesOnly bool
+	cmd := &cobra.Command{
+		Use:   "features",
+		Short: "List optional features available to `generate --with`",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			for _, f := range generator.Features() {
+				if namesOnly {
+					fmt.Fprintln(out, f.Name)
+					continue
+				}
+				fmt.Fprintf(out, "%s\n    %s\n", f.Name, f.Description)
+				keys := make([]string, 0, len(f.Params))
+				for k := range f.Params {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					fmt.Fprintf(out, "    --feature-opt %s.%s=%q\n", f.Name, k, f.Params[k])
+				}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&namesOnly, "names", false, "Print feature names only")
+	return cmd
 }
