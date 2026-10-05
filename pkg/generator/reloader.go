@@ -66,17 +66,6 @@ func asList(v interface{}) []interface{} {
 	return l
 }
 
-func sortedSet(set map[string]bool) []string {
-	if len(set) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
 
 // applyReloaderFeature implements the `reloader` feature. By default only
 // workloads that reference a ConfigMap or Secret are annotated; the

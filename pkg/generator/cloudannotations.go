@@ -119,20 +119,6 @@ func InjectCloudAnnotations(chart *types.GeneratedChart, config CloudAnnotationC
 	}
 }
 
-// generateCloudValues builds a cloud configuration values map.
-// Currently unused — cloud settings are injected via annotations only.
-// Retained for potential future use in values.yaml cloud section.
-func generateCloudValues(config CloudAnnotationConfig) map[string]interface{} {
-	return map[string]interface{}{
-		"cloud": map[string]interface{}{
-			"provider": string(config.Provider),
-			"loadBalancer": map[string]interface{}{
-				"internal": config.Internal,
-				"scheme":   config.Scheme,
-			},
-		},
-	}
-}
 
 // annotationsLineRegex matches an existing "  annotations:" line.
 var annotationsLineRegex = regexp.MustCompile(`(?m)^  annotations:\s*$`)

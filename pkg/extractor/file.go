@@ -12,7 +12,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -334,21 +333,3 @@ func isCommentOnly(doc []byte) bool {
 	return true
 }
 
-// Helper function for reading GVK from raw YAML without full unmarshal.
-func ParseGVK(data []byte) (schema.GroupVersionKind, error) {
-	var meta struct {
-		APIVersion string `json:"apiVersion"`
-		Kind       string `json:"kind"`
-	}
-
-	if err := yaml.Unmarshal(data, &meta); err != nil {
-		return schema.GroupVersionKind{}, err
-	}
-
-	gv, err := schema.ParseGroupVersion(meta.APIVersion)
-	if err != nil {
-		return schema.GroupVersionKind{}, err
-	}
-
-	return gv.WithKind(meta.Kind), nil
-}

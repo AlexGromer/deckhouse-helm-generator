@@ -141,37 +141,6 @@ func hasIssue(issues []RightSizingIssue, target RightSizingIssue) bool {
 	return false
 }
 
-// unstructuredStringMap is a helper to get a map[string]string from an unstructured map path.
-func unstructuredStringMap(obj map[string]interface{}, fields ...string) (map[string]string, bool, error) {
-	cur := obj
-	for i, f := range fields {
-		v, ok := cur[f]
-		if !ok {
-			return nil, false, nil
-		}
-		if i == len(fields)-1 {
-			switch m := v.(type) {
-			case map[string]string:
-				return m, true, nil
-			case map[string]interface{}:
-				result := make(map[string]string, len(m))
-				for k, val := range m {
-					if s, ok := val.(string); ok {
-						result[k] = s
-					}
-				}
-				return result, true, nil
-			}
-			return nil, false, nil
-		}
-		next, ok := v.(map[string]interface{})
-		if !ok {
-			return nil, false, nil
-		}
-		cur = next
-	}
-	return nil, false, nil
-}
 
 // containerQuantities returns resources.<field> of a container as strings.
 // Numeric quantities (e.g. `cpu: 2` in YAML) are converted to strings.

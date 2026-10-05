@@ -3,7 +3,6 @@ package helm
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -31,21 +30,6 @@ func (b *ValuesBuilder) SetGlobal(key string, value interface{}) *ValuesBuilder 
 	return b
 }
 
-// AddService adds a service with its configuration.
-func (b *ValuesBuilder) AddService(name string, config map[string]interface{}) *ValuesBuilder {
-	if b.values["services"] == nil {
-		b.values["services"] = make(map[string]interface{})
-	}
-	services := b.values["services"].(map[string]interface{})
-
-	// Ensure service has enabled flag
-	if _, ok := config["enabled"]; !ok {
-		config["enabled"] = true
-	}
-
-	services[name] = config
-	return b
-}
 
 // SetValue sets a value at a given path (dot-notation).
 func (b *ValuesBuilder) SetValue(path string, value interface{}) *ValuesBuilder {
@@ -96,11 +80,6 @@ func (b *ValuesBuilder) GetValue(path string) (interface{}, bool) {
 	return nil, false
 }
 
-// MergeValues merges another values map into this builder.
-func (b *ValuesBuilder) MergeValues(values map[string]interface{}) *ValuesBuilder {
-	b.values = mergeMaps(b.values, values)
-	return b
-}
 
 // Build generates the values.yaml content with nested structure and comments.
 func (b *ValuesBuilder) Build() (string, error) {
@@ -270,60 +249,7 @@ func addCommentsToValues(yaml string) string {
 	return sb.String()
 }
 
-// mergeMaps deeply merges two maps.
-func mergeMaps(dst, src map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
 
-	// Copy dst
-	for k, v := range dst {
-		result[k] = v
-	}
-
-	// Merge src
-	for k, v := range src {
-		if dstVal, ok := result[k]; ok {
-			// Both are maps - merge recursively
-			if dstMap, dstIsMap := dstVal.(map[string]interface{}); dstIsMap {
-				if srcMap, srcIsMap := v.(map[string]interface{}); srcIsMap {
-					result[k] = mergeMaps(dstMap, srcMap)
-					continue
-				}
-			}
-		}
-		// Otherwise, override
-		result[k] = v
-	}
-
-	return result
-}
-
-// FormatValuesForService formats service-specific values.
-func FormatValuesForService(serviceName string, values map[string]interface{}) map[string]interface{} {
-	formatted := make(map[string]interface{})
-
-	// Ensure enabled flag
-	if _, ok := values["enabled"]; !ok {
-		formatted["enabled"] = true
-	} else {
-		formatted["enabled"] = values["enabled"]
-	}
-
-	// Sort keys for consistent output
-	keys := make([]string, 0, len(values))
-	for k := range values {
-		if k != "enabled" {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-
-	// Add sorted values
-	for _, k := range keys {
-		formatted[k] = values[k]
-	}
-
-	return formatted
-}
 
 // InferValuesSchema derives a values.schema.json (JSON Schema draft-07, the
 // draft every Helm 3 release understands) from a chart's default values.

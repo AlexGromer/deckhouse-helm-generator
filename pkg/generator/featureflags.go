@@ -166,16 +166,6 @@ func wrapTemplateWithFeatureFlag(templateContent string, category FeatureCategor
 	return fmt.Sprintf("{{- if .Values.features.%s }}\n%s\n{{- end }}", category, templateContent)
 }
 
-// generateFeatureValues returns a flat map[string]interface{} where every key is
-// the string form of a category in config.Categories and the value is its bool
-// state (true by default).
-func generateFeatureValues(config *FeatureFlagConfig) map[string]interface{} {
-	result := make(map[string]interface{}, len(config.Categories))
-	for cat, enabled := range config.Categories {
-		result[string(cat)] = enabled
-	}
-	return result
-}
 
 // mergeFeatureValues parses existingYAML, adds or updates the `features:` key
 // with values from config (restricted to usedCategories), and returns the

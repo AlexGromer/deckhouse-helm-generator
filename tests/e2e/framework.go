@@ -40,8 +40,6 @@ type E2ETestHarness struct {
 	// HelmClient is the Helm CLI wrapper.
 	Helm *HelmClient
 
-	// K8s is the Kubernetes client (optional).
-	K8s *KubernetesClient
 
 	// Chart is the generated chart metadata.
 	Chart *types.GeneratedChart
@@ -299,32 +297,6 @@ func (h *E2ETestHarness) ChartPath(parts ...string) string {
 	return filepath.Join(args...)
 }
 
-// GenerateFixtureChart generates a chart and copies it to the fixtures directory.
-// Returns the path to the fixture chart.
-func GenerateFixtureChart(t *testing.T, inputs map[string]string, chartName string) string {
-	t.Helper()
-
-	h := NewE2ETestHarness(t)
-
-	for name, content := range inputs {
-		h.WriteInput(name, content)
-	}
-
-	h.GenerateChart(chartName)
-
-	// Copy to a separate directory so it outlives the harness
-	fixtureDir, err := os.MkdirTemp("", "dhg-fixture-*")
-	if err != nil {
-		t.Fatalf("Failed to create fixture dir: %v", err)
-	}
-
-	destDir := filepath.Join(fixtureDir, chartName)
-	if err := copyDir(h.ChartDir, destDir); err != nil {
-		t.Fatalf("Failed to copy chart to fixture: %v", err)
-	}
-
-	return destDir
-}
 
 // startMockAPIServer starts a minimal HTTP server emulating a K8s API server.
 // It responds to /version, /api, /apis, and common resource discovery paths.
@@ -459,27 +431,3 @@ users:
 	return server, kubeconfigPath
 }
 
-// copyDir recursively copies a directory.
-func copyDir(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		destPath := filepath.Join(dst, relPath)
-
-		if info.IsDir() {
-			return os.MkdirAll(destPath, 0755)
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", path, err)
-		}
-		return os.WriteFile(destPath, data, 0644)
-	})
-}

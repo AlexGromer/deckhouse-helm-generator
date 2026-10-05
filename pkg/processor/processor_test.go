@@ -262,51 +262,9 @@ func TestEscapeTemplateString(t *testing.T) {
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
-func TestNewRegistry(t *testing.T) {
-	r := NewRegistry()
-	if r == nil {
-		t.Fatal("NewRegistry returned nil")
-	}
-	if len(r.All()) != 0 {
-		t.Error("new registry should have no processors")
-	}
-}
 
-func TestRegistry_Register_And_GetProcessor(t *testing.T) {
-	r := NewRegistry()
-	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
-	s := newStub("deploy-proc", 10, gvk)
-	r.Register(s)
 
-	p, ok := r.GetProcessor(gvk)
-	if !ok || p.Name() != "deploy-proc" {
-		t.Errorf("GetProcessor failed: ok=%v, name=%v", ok, p)
-	}
-}
 
-func TestRegistry_GetProcessor_NotFound(t *testing.T) {
-	r := NewRegistry()
-	_, ok := r.GetProcessor(schema.GroupVersionKind{Kind: "Missing"})
-	if ok {
-		t.Error("expected false for missing GVK")
-	}
-}
-
-func TestRegistry_PriorityOrdering(t *testing.T) {
-	r := NewRegistry()
-	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
-
-	low := newStub("low", 1, gvk)
-	high := newStub("high", 100, gvk)
-
-	r.Register(low)
-	r.Register(high)
-
-	p, _ := r.GetProcessor(gvk)
-	if p.Name() != "high" {
-		t.Errorf("expected highest-priority processor, got %q", p.Name())
-	}
-}
 
 func TestRegistry_GetProcessors(t *testing.T) {
 	r := NewRegistry()
@@ -333,30 +291,7 @@ func TestRegistry_GetProcessors_NotFound(t *testing.T) {
 	}
 }
 
-func TestRegistry_All(t *testing.T) {
-	r := NewRegistry()
-	gvk1 := schema.GroupVersionKind{Kind: "A"}
-	gvk2 := schema.GroupVersionKind{Kind: "B"}
-	r.Register(newStub("a", 1, gvk1))
-	r.Register(newStub("b", 2, gvk2))
 
-	if len(r.All()) != 2 {
-		t.Errorf("All() = %d; want 2", len(r.All()))
-	}
-}
-
-func TestRegistry_SupportedGVKs(t *testing.T) {
-	r := NewRegistry()
-	gvk1 := schema.GroupVersionKind{Kind: "Deployment"}
-	gvk2 := schema.GroupVersionKind{Kind: "Service"}
-	r.Register(newStub("a", 1, gvk1))
-	r.Register(newStub("b", 1, gvk2))
-
-	gvks := r.SupportedGVKs()
-	if len(gvks) != 2 {
-		t.Errorf("SupportedGVKs() = %d; want 2", len(gvks))
-	}
-}
 
 // ── Registry.Process ─────────────────────────────────────────────────────────
 
@@ -563,5 +498,22 @@ func TestEscapeTemplateDelimiters(t *testing.T) {
 	want := `a {{"{{"}} b {{"}}"}} "c"`
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRegistry_PriorityOrdering(t *testing.T) {
+	r := NewRegistry()
+	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
+
+	r.Register(newStub("low", 1, gvk))
+	r.Register(newStub("high", 100, gvk))
+	r.Register(newStub("mid", 50, gvk))
+
+	ps := r.GetProcessors(gvk)
+	if len(ps) != 3 || ps[0].Name() != "high" || ps[1].Name() != "mid" || ps[2].Name() != "low" {
+		t.Errorf("expected processors by descending priority, got %v", ps)
+	}
+	if got := r.GetProcessors(schema.GroupVersionKind{Kind: "Missing"}); got != nil {
+		t.Errorf("expected nil for a missing GVK, got %v", got)
 	}
 }

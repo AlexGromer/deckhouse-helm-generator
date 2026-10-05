@@ -165,11 +165,3 @@ examples/
 `
 }
 
-// GenerateValuesYAMLComment generates a comment header for values.yaml.
-func GenerateValuesYAMLComment(chartName string) string {
-	return fmt.Sprintf(`# Default values for %s
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
-
-`, chartName)
-}

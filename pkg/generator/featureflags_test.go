@@ -409,43 +409,6 @@ func TestFeatureFlags_DefaultConfig_HasAllMappings(t *testing.T) {
 // Test 12: generateFeatureValues returns all categories as true by default
 // ============================================================
 
-func TestFeatureFlags_GenerateFeatureValues_DefaultTrue(t *testing.T) {
-	config := DefaultFeatureFlagConfig()
-	vals := generateFeatureValues(config)
-
-	if vals == nil {
-		t.Fatal("generateFeatureValues must not return nil")
-	}
-
-	expectedCategories := []FeatureCategory{
-		FeatureMonitoring,
-		FeatureIngress,
-		FeatureAutoscaling,
-		FeatureSecurity,
-		FeatureStorage,
-		FeatureRBAC,
-	}
-
-	for _, cat := range expectedCategories {
-		v, ok := vals[string(cat)]
-		if !ok {
-			t.Errorf("generateFeatureValues missing entry for category %q", cat)
-			continue
-		}
-		boolVal, ok := v.(bool)
-		if !ok {
-			t.Errorf("category %q value must be bool, got %T", cat, v)
-			continue
-		}
-		if !boolVal {
-			t.Errorf("category %q must default to true, got false", cat)
-		}
-	}
-
-	if len(vals) != len(expectedCategories) {
-		t.Errorf("expected %d entries in feature values, got %d", len(expectedCategories), len(vals))
-	}
-}
 
 // ============================================================
 // Test 13: Already-guarded NetworkPolicy is NOT double-wrapped

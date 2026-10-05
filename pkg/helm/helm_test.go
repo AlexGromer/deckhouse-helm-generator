@@ -191,12 +191,6 @@ func TestGenerateHelmIgnore(t *testing.T) {
 	}
 }
 
-func TestGenerateValuesYAMLComment(t *testing.T) {
-	out := GenerateValuesYAMLComment("myapp")
-	if !strings.Contains(out, "myapp") {
-		t.Error("values comment missing chart name")
-	}
-}
 
 // ── ValuesBuilder ─────────────────────────────────────────────────────────────
 
@@ -222,21 +216,6 @@ func TestValuesBuilder_SetGlobal(t *testing.T) {
 	}
 }
 
-func TestValuesBuilder_AddService(t *testing.T) {
-	b := NewValuesBuilder()
-	b.AddService("web", map[string]interface{}{"replicas": 3})
-
-	m := b.BuildMap()
-	services := m["services"].(map[string]interface{})
-	web := services["web"].(map[string]interface{})
-
-	if web["enabled"] != true {
-		t.Error("enabled flag not added automatically")
-	}
-	if web["replicas"] != 3 {
-		t.Errorf("replicas = %v; want 3", web["replicas"])
-	}
-}
 
 func TestValuesBuilder_SetValue(t *testing.T) {
 	b := NewValuesBuilder()
@@ -256,79 +235,8 @@ func TestValuesBuilder_GetValue_NotFound(t *testing.T) {
 	}
 }
 
-func TestValuesBuilder_MergeValues(t *testing.T) {
-	b := NewValuesBuilder()
-	b.SetValue("a.x", "original")
-	b.MergeValues(map[string]interface{}{
-		"a": map[string]interface{}{"y": "merged"},
-		"b": "new",
-	})
 
-	m := b.BuildMap()
-	a := m["a"].(map[string]interface{})
-	if a["x"] != "original" {
-		t.Error("merge should preserve existing keys")
-	}
-	if a["y"] != "merged" {
-		t.Error("merge should add new keys")
-	}
-	if m["b"] != "new" {
-		t.Error("merge should add top-level keys")
-	}
-}
 
-func TestValuesBuilder_Build(t *testing.T) {
-	b := NewValuesBuilder()
-	b.AddService("web", map[string]interface{}{"replicas": 2})
-
-	out, err := b.Build()
-	if err != nil {
-		t.Fatalf("Build() error: %v", err)
-	}
-	if !strings.Contains(out, "global:") {
-		t.Error("Build should add default globals")
-	}
-	if !strings.Contains(out, "services:") {
-		t.Error("Build output should contain services")
-	}
-}
-
-func TestValuesBuilder_BuildFlat(t *testing.T) {
-	b := NewValuesBuilder()
-	b.SetGlobal("imageRegistry", "registry.example.com")
-	b.AddService("web", map[string]interface{}{
-		"replicas": 2,
-		"deployment": map[string]interface{}{
-			"containers": []interface{}{
-				map[string]interface{}{
-					"name": "app",
-					"image": map[string]interface{}{
-						"repository": "nginx",
-						"tag":        "1.21",
-					},
-				},
-			},
-		},
-	})
-
-	out, err := b.BuildFlat()
-	if err != nil {
-		t.Fatalf("BuildFlat() error: %v", err)
-	}
-
-	// Should still contain the nested structure.
-	if !strings.Contains(out, "global:") {
-		t.Error("BuildFlat should contain global section")
-	}
-	if !strings.Contains(out, "services:") {
-		t.Error("BuildFlat should contain services section")
-	}
-
-	// Leaf values should have inline dot-notation path comments.
-	if !strings.Contains(out, "# global.imageRegistry") {
-		t.Errorf("BuildFlat should add inline path comment for global.imageRegistry, got:\n%s", out)
-	}
-}
 
 func TestValuesBuilder_BuildFlat_PathComments(t *testing.T) {
 	b := NewValuesBuilder()
@@ -398,22 +306,7 @@ func TestValuesBuilder_BuildFlat_VsBuild(t *testing.T) {
 	}
 }
 
-func TestFormatValuesForService(t *testing.T) {
-	out := FormatValuesForService("web", map[string]interface{}{"replicas": 3})
-	if out["enabled"] != true {
-		t.Error("FormatValuesForService should ensure enabled flag")
-	}
-	if out["replicas"] != 3 {
-		t.Error("FormatValuesForService should preserve values")
-	}
-}
 
-func TestFormatValuesForService_ExistingEnabled(t *testing.T) {
-	out := FormatValuesForService("web", map[string]interface{}{"enabled": false})
-	if out["enabled"] != false {
-		t.Error("should preserve explicit enabled=false")
-	}
-}
 
 func TestInferValuesSchema(t *testing.T) {
 	out := InferValuesSchema(map[string]interface{}{
@@ -442,5 +335,58 @@ func TestInferValuesSchema(t *testing.T) {
 	pull := schema["properties"].(map[string]interface{})["global"].(map[string]interface{})["properties"].(map[string]interface{})["imagePullSecrets"].(map[string]interface{})
 	if pull["type"] != "array" {
 		t.Error("lists must stay lists")
+	}
+}
+
+func TestValuesBuilder_Build(t *testing.T) {
+	b := NewValuesBuilder()
+	b.SetValue("services.web", map[string]interface{}{"replicas": 2})
+
+	out, err := b.Build()
+	if err != nil {
+		t.Fatalf("Build() error: %v", err)
+	}
+	if !strings.Contains(out, "global:") {
+		t.Error("Build should add default globals")
+	}
+	if !strings.Contains(out, "services:") {
+		t.Error("Build output should contain services")
+	}
+}
+
+func TestValuesBuilder_BuildFlat(t *testing.T) {
+	b := NewValuesBuilder()
+	b.SetGlobal("imageRegistry", "registry.example.com")
+	b.SetValue("services.web", map[string]interface{}{
+		"replicas": 2,
+		"deployment": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name": "app",
+					"image": map[string]interface{}{
+						"repository": "nginx",
+						"tag":        "1.21",
+					},
+				},
+			},
+		},
+	})
+
+	out, err := b.BuildFlat()
+	if err != nil {
+		t.Fatalf("BuildFlat() error: %v", err)
+	}
+
+	// Should still contain the nested structure.
+	if !strings.Contains(out, "global:") {
+		t.Error("BuildFlat should contain global section")
+	}
+	if !strings.Contains(out, "services:") {
+		t.Error("BuildFlat should contain services section")
+	}
+
+	// Leaf values should have inline dot-notation path comments.
+	if !strings.Contains(out, "# global.imageRegistry") {
+		t.Errorf("BuildFlat should add inline path comment for global.imageRegistry, got:\n%s", out)
 	}
 }

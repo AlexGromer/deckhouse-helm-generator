@@ -303,59 +303,6 @@ func TestCloudAnnotations_InjectIntoChart_IngressGetsALBAnnotations(t *testing.T
 // Section 6: generateCloudValues — values map structure
 // ============================================================
 
-func TestCloudAnnotations_ValuesStructure(t *testing.T) {
-	config := CloudAnnotationConfig{
-		Provider: CloudGCP,
-		Internal: true,
-		Scheme:   "internal",
-	}
-
-	values := generateCloudValues(config)
-
-	if values == nil {
-		t.Fatal("generateCloudValues must return a non-nil map")
-	}
-
-	// Must contain top-level "cloud" key.
-	cloud, ok := values["cloud"]
-	if !ok {
-		t.Fatal("expected top-level 'cloud' key in cloud values map")
-	}
-
-	cloudMap, ok := cloud.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected 'cloud' to be map[string]interface{}, got %T", cloud)
-	}
-
-	// cloud.provider
-	provider, ok := cloudMap["provider"]
-	if !ok {
-		t.Error("expected 'cloud.provider' key in cloud values")
-	} else if provider != string(CloudGCP) {
-		t.Errorf("expected cloud.provider='gcp', got '%v'", provider)
-	}
-
-	// cloud.loadBalancer
-	lb, ok := cloudMap["loadBalancer"]
-	if !ok {
-		t.Fatal("expected 'cloud.loadBalancer' key in cloud values")
-	}
-
-	lbMap, ok := lb.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected 'cloud.loadBalancer' to be map[string]interface{}, got %T", lb)
-	}
-
-	// cloud.loadBalancer.internal
-	if _, ok := lbMap["internal"]; !ok {
-		t.Error("expected 'cloud.loadBalancer.internal' key in cloud values")
-	}
-
-	// cloud.loadBalancer.scheme
-	if _, ok := lbMap["scheme"]; !ok {
-		t.Error("expected 'cloud.loadBalancer.scheme' key in cloud values")
-	}
-}
 
 // ============================================================
 // Section 7: InjectCloudAnnotations — multi-service and nil

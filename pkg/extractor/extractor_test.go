@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
@@ -524,36 +522,8 @@ func TestIsCommentOnly(t *testing.T) {
 
 // ── ParseGVK ─────────────────────────────────────────────────────────────────
 
-func TestParseGVK_CoreV1(t *testing.T) {
-	data := []byte(`apiVersion: v1
-kind: Service`)
-	gvk, err := ParseGVK(data)
-	if err != nil {
-		t.Fatalf("ParseGVK() error: %v", err)
-	}
-	if gvk.Kind != "Service" || gvk.Version != "v1" || gvk.Group != "" {
-		t.Errorf("GVK = %v; want /v1/Service", gvk)
-	}
-}
 
-func TestParseGVK_AppsV1(t *testing.T) {
-	data := []byte(`apiVersion: apps/v1
-kind: Deployment`)
-	gvk, err := ParseGVK(data)
-	if err != nil {
-		t.Fatalf("ParseGVK() error: %v", err)
-	}
-	if gvk.Group != "apps" || gvk.Version != "v1" || gvk.Kind != "Deployment" {
-		t.Errorf("GVK = %v; want apps/v1/Deployment", gvk)
-	}
-}
 
-func TestParseGVK_Invalid(t *testing.T) {
-	_, err := ParseGVK([]byte("not: yaml: at: all: {{{"))
-	if err == nil {
-		t.Error("expected error for invalid YAML")
-	}
-}
 
 // ── ClusterExtractor stub ────────────────────────────────────────────────────
 
@@ -879,45 +849,10 @@ func TestFileExtractor_Extract_MultiplePaths(t *testing.T) {
 	}
 }
 
-func TestParseGVK_EmptyAPIVersion(t *testing.T) {
-	data := []byte("kind: Service")
-	gvk, err := ParseGVK(data)
-	if err != nil {
-		t.Fatalf("ParseGVK() error: %v", err)
-	}
-	// Empty apiVersion should still parse (group and version will be empty)
-	if gvk.Kind != "Service" {
-		t.Errorf("Kind = %q; want Service", gvk.Kind)
-	}
-}
 
-func TestParseGVK_CRD(t *testing.T) {
-	data := []byte("apiVersion: deckhouse.io/v1alpha1\nkind: ModuleConfig")
-	gvk, err := ParseGVK(data)
-	if err != nil {
-		t.Fatalf("ParseGVK() error: %v", err)
-	}
-	if gvk.Group != "deckhouse.io" || gvk.Version != "v1alpha1" || gvk.Kind != "ModuleConfig" {
-		t.Errorf("GVK = %v; want deckhouse.io/v1alpha1/ModuleConfig", gvk)
-	}
-}
 
 // ── Merger / ResourceDeduplicator ───────────────────────────────────────────
 
-func makeResource(kind, name, ns string, source types.Source) *types.ExtractedResource {
-	obj := &unstructured.Unstructured{}
-	obj.SetAPIVersion("v1")
-	obj.SetKind(kind)
-	obj.SetName(name)
-	obj.SetNamespace(ns)
-
-	return &types.ExtractedResource{
-		Object:     obj,
-		Source:     source,
-		SourcePath: "test",
-		GVK:        schema.GroupVersionKind{Version: "v1", Kind: kind},
-	}
-}
 
 
 

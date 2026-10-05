@@ -7,50 +7,6 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-func makeChartWithSecurityContext(withAllFields bool) *types.GeneratedChart {
-	var deploymentYAML string
-	if withAllFields {
-		deploymentYAML = `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: secure-app
-spec:
-  template:
-    spec:
-      containers:
-      - name: app
-        securityContext:
-          runAsNonRoot: true
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
-          seccompProfile:
-            type: RuntimeDefault
-`
-	} else {
-		deploymentYAML = `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: basic-app
-spec:
-  template:
-    spec:
-      containers:
-      - name: app
-        securityContext:
-          runAsNonRoot: true
-`
-	}
-
-	return &types.GeneratedChart{
-		Name: "test-chart",
-		Templates: map[string]string{
-			"templates/deployment.yaml": deploymentYAML,
-		},
-	}
-}
 
 func makeChartWithNoSecurityContext() *types.GeneratedChart {
 	return &types.GeneratedChart{

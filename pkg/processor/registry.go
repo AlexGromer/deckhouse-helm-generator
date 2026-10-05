@@ -44,18 +44,6 @@ func (r *Registry) Register(p Processor) {
 	}
 }
 
-// GetProcessor returns the highest-priority processor for a GVK.
-func (r *Registry) GetProcessor(gvk schema.GroupVersionKind) (Processor, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	processors, ok := r.byGVK[gvk]
-	if !ok || len(processors) == 0 {
-		return nil, false
-	}
-
-	return processors[0], true
-}
 
 // GetProcessors returns all processors for a GVK, sorted by priority.
 func (r *Registry) GetProcessors(gvk schema.GroupVersionKind) []Processor {
@@ -332,24 +320,4 @@ func escapeTemplateString(s string) string {
 	return b.String()
 }
 
-// All returns all registered processors.
-func (r *Registry) All() []Processor {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 
-	result := make([]Processor, len(r.processors))
-	copy(result, r.processors)
-	return result
-}
-
-// SupportedGVKs returns all GVKs that have registered processors.
-func (r *Registry) SupportedGVKs() []schema.GroupVersionKind {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	gvks := make([]schema.GroupVersionKind, 0, len(r.byGVK))
-	for gvk := range r.byGVK {
-		gvks = append(gvks, gvk)
-	}
-	return gvks
-}
