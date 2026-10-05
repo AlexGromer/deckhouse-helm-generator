@@ -32,9 +32,9 @@ func (p *ServiceAccountProcessor) Process(ctx processor.Context, obj *unstructur
 		return nil, fmt.Errorf("serviceaccount object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
-		serviceName = obj.GetName()
+		serviceName = processor.SanitizeServiceName(obj.GetName())
 	}
 
 	name := obj.GetName()
@@ -113,9 +113,9 @@ func (p *StatefulSetProcessor) Process(ctx processor.Context, obj *unstructured.
 		return nil, fmt.Errorf("statefulset object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
-		serviceName = obj.GetName()
+		serviceName = processor.SanitizeServiceName(obj.GetName())
 	}
 
 	values, deps := extractWorkloadValues(obj)
@@ -271,9 +271,9 @@ func (p *DaemonSetProcessor) Process(ctx processor.Context, obj *unstructured.Un
 		return nil, fmt.Errorf("daemonset object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
-		serviceName = obj.GetName()
+		serviceName = processor.SanitizeServiceName(obj.GetName())
 	}
 
 	values, deps := extractWorkloadValues(obj)
@@ -400,9 +400,9 @@ func (p *PVCProcessor) Process(ctx processor.Context, obj *unstructured.Unstruct
 		return nil, fmt.Errorf("pvc object is nil")
 	}
 
-	serviceName := processor.ServiceNameFromResource(obj)
+	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
 	if serviceName == "" {
-		serviceName = obj.GetName()
+		serviceName = processor.SanitizeServiceName(obj.GetName())
 	}
 
 	name := obj.GetName()

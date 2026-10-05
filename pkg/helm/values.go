@@ -1,6 +1,7 @@
 package helm
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -347,14 +348,15 @@ func GenerateValuesSchema(services []string) string {
 				},
 			},
 			"services": map[string]interface{}{
-				"type": "object",
+				"type":       "object",
 				"properties": buildServiceSchemaProperties(services),
 			},
 		},
 	}
 
-	schemaBytes, _ := yaml.Marshal(schema)
-	return string(schemaBytes)
+	// Helm requires values.schema.json to be JSON, not YAML.
+	schemaBytes, _ := json.MarshalIndent(schema, "", "  ")
+	return string(schemaBytes) + "\n"
 }
 
 func buildServiceSchemaProperties(services []string) map[string]interface{} {

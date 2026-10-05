@@ -198,7 +198,6 @@ func (g *UniversalGenerator) buildServiceConfig(group *types.ResourceGroup) map[
 	return config
 }
 
-
 // kindToValuesKey converts a GVK Kind name to the values.yaml key used by templates.
 // Templates reference values as $svc.deployment, $svc.service, $svc.statefulSet, etc.
 func kindToValuesKey(kind string) string {
@@ -236,11 +235,11 @@ func sanitizeName(name string) string {
 			continue
 		}
 		if capitalize && c >= 'a' && c <= 'z' {
-			final = append(final, c - 32)
+			final = append(final, c-32)
 			capitalize = false
 		} else if i == 0 && c >= 'A' && c <= 'Z' {
 			// Lowercase first character
-			final = append(final, c + 32)
+			final = append(final, c+32)
 		} else {
 			final = append(final, c)
 		}
@@ -308,7 +307,9 @@ func ValidateChart(chart *types.GeneratedChart) error {
 	if chart.ValuesYAML == "" {
 		return fmt.Errorf("values.yaml is empty")
 	}
-	if len(chart.Templates) == 0 {
+	// An umbrella parent chart legitimately has no templates of its own: its
+	// content is the set of subcharts declared as dependencies.
+	if len(chart.Templates) == 0 && !strings.Contains(chart.ChartYAML, "\ndependencies:") {
 		return fmt.Errorf("no templates generated")
 	}
 	return nil

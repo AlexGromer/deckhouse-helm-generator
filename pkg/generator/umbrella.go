@@ -3,6 +3,7 @@ package generator
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 
@@ -137,5 +138,17 @@ func (g *UmbrellaGenerator) generateParentChart(
 		ValuesYAML: valuesYAML,
 		Templates:  map[string]string{},
 		Helpers:    helm.GenerateHelpers(chartName),
+		Notes:      umbrellaNotes(chartName, deps),
 	}, nil
+}
+
+// umbrellaNotes lists the subcharts of the umbrella and whether each is enabled.
+func umbrellaNotes(chartName string, deps []helm.Dependency) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%s has been deployed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.\n\n", chartName)
+	sb.WriteString("Components:\n")
+	for _, d := range deps {
+		fmt.Fprintf(&sb, "  - %s: {{ if (index .Values %q).enabled }}enabled{{ else }}disabled{{ end }}\n", d.Name, d.Name)
+	}
+	return sb.String()
 }

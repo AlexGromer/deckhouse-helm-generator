@@ -5,6 +5,8 @@ package processor
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -191,6 +193,38 @@ func SanitizeServiceName(name string) string {
 	return string(result)
 }
 
+// ResourceNameSuffix converts a sanitized (camelCase) service name back into a
+// DNS-1123 compatible name segment: "webApp" → "web-app".
+func ResourceNameSuffix(serviceName string) string {
+	var b strings.Builder
+	for i, c := range serviceName {
+		if c >= 'A' && c <= 'Z' {
+			if i > 0 {
+				b.WriteByte('-')
+			}
+			b.WriteRune(c + ('a' - 'A'))
+			continue
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
+}
+
+// NormalizeResourceNames rewrites object names of the form
+// `{{ include "<chart>.fullname" $ }}-<serviceName>` so that the service-name
+// segment is DNS-1123 compatible. The service name doubles as a values key and
+// therefore is camelCase ("webApp"), which Kubernetes rejects in metadata.name.
+// Rewriting every occurrence keeps names and cross-references (scaleTargetRef,
+// serviceAccountName, backend service names, ...) consistent.
+func NormalizeResourceNames(template, serviceName string) string {
+	suffix := ResourceNameSuffix(serviceName)
+	if serviceName == "" || suffix == serviceName {
+		return template
+	}
+	re := regexp.MustCompile(`(\.fullname" [$.] \}\}-)` + regexp.QuoteMeta(serviceName) + `\b`)
+	return re.ReplaceAllString(template, "${1}"+suffix)
+}
+
 // ValuesPathForKind returns the standard values path for a resource kind.
 func ValuesPathForKind(kind, serviceName string) string {
 	kindPath := kindToValuesKey(kind)
@@ -208,22 +242,22 @@ func TemplatePathForResource(kind, name, _ string) string {
 // kindToValuesKey converts a Kind to a values.yaml key.
 func kindToValuesKey(kind string) string {
 	mapping := map[string]string{
-		"Deployment":         "deployment",
-		"StatefulSet":        "statefulSet",
-		"DaemonSet":          "daemonSet",
-		"Service":            "service",
-		"Ingress":            "ingress",
-		"ConfigMap":          "configMap",
-		"Secret":             "secret",
-		"PersistentVolumeClaim": "persistentVolumeClaim",
-		"ServiceAccount":     "serviceAccount",
-		"Role":               "role",
-		"RoleBinding":        "roleBinding",
-		"ClusterRole":        "clusterRole",
-		"ClusterRoleBinding": "clusterRoleBinding",
+		"Deployment":              "deployment",
+		"StatefulSet":             "statefulSet",
+		"DaemonSet":               "daemonSet",
+		"Service":                 "service",
+		"Ingress":                 "ingress",
+		"ConfigMap":               "configMap",
+		"Secret":                  "secret",
+		"PersistentVolumeClaim":   "persistentVolumeClaim",
+		"ServiceAccount":          "serviceAccount",
+		"Role":                    "role",
+		"RoleBinding":             "roleBinding",
+		"ClusterRole":             "clusterRole",
+		"ClusterRoleBinding":      "clusterRoleBinding",
 		"HorizontalPodAutoscaler": "hpa",
-		"PodDisruptionBudget": "pdb",
-		"NetworkPolicy":      "networkPolicy",
+		"PodDisruptionBudget":     "pdb",
+		"NetworkPolicy":           "networkPolicy",
 	}
 
 	if v, ok := mapping[kind]; ok {
@@ -240,22 +274,22 @@ func kindToValuesKey(kind string) string {
 // kindToFileName converts a Kind to a file name component.
 func kindToFileName(kind string) string {
 	mapping := map[string]string{
-		"Deployment":         "deployment",
-		"StatefulSet":        "statefulset",
-		"DaemonSet":          "daemonset",
-		"Service":            "service",
-		"Ingress":            "ingress",
-		"ConfigMap":          "configmap",
-		"Secret":             "secret",
-		"PersistentVolumeClaim": "pvc",
-		"ServiceAccount":     "serviceaccount",
-		"Role":               "role",
-		"RoleBinding":        "rolebinding",
-		"ClusterRole":        "clusterrole",
-		"ClusterRoleBinding": "clusterrolebinding",
+		"Deployment":              "deployment",
+		"StatefulSet":             "statefulset",
+		"DaemonSet":               "daemonset",
+		"Service":                 "service",
+		"Ingress":                 "ingress",
+		"ConfigMap":               "configmap",
+		"Secret":                  "secret",
+		"PersistentVolumeClaim":   "pvc",
+		"ServiceAccount":          "serviceaccount",
+		"Role":                    "role",
+		"RoleBinding":             "rolebinding",
+		"ClusterRole":             "clusterrole",
+		"ClusterRoleBinding":      "clusterrolebinding",
 		"HorizontalPodAutoscaler": "hpa",
-		"PodDisruptionBudget": "pdb",
-		"NetworkPolicy":      "networkpolicy",
+		"PodDisruptionBudget":     "pdb",
+		"NetworkPolicy":           "networkpolicy",
 	}
 
 	if v, ok := mapping[kind]; ok {

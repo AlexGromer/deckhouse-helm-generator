@@ -72,6 +72,15 @@ func (r *Registry) GetProcessors(gvk schema.GroupVersionKind) []Processor {
 
 // Process processes a resource using the first matching processor.
 func (r *Registry) Process(ctx Context, obj *unstructured.Unstructured) (*Result, error) {
+	result, err := r.process(ctx, obj)
+	if err != nil || result == nil {
+		return result, err
+	}
+	result.TemplateContent = NormalizeResourceNames(result.TemplateContent, result.ServiceName)
+	return result, nil
+}
+
+func (r *Registry) process(ctx Context, obj *unstructured.Unstructured) (*Result, error) {
 	gvk := obj.GroupVersionKind()
 
 	processors := r.GetProcessors(gvk)
