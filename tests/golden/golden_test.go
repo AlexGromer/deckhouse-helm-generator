@@ -109,6 +109,19 @@ var scenarios = []scenario{
 	{"library", []string{"--mode", "library", "--include-schema", "--include-tests"}},
 	{"umbrella", []string{"--mode", "umbrella", "--include-schema", "--include-tests"}},
 	{"deckhouse-module", []string{"--mode", "universal", "--deckhouse-module"}},
+	// Post-processing flags of `dhg generate`.
+	{"env-values", []string{"--env-values"}},
+	{"airgap", []string{"--airgap-registry", "registry.example.com"}},
+	{"namespace-resources", []string{"--namespace-resources"}},
+	{"multi-tenant", []string{"--multi-tenant"}},
+	{"feature-flags", []string{"--feature-flags"}},
+	{"cloud-aws", []string{"--cloud-provider", "aws"}},
+	{"detect-ingress", []string{"--detect-ingress"}},
+	{"spot", []string{"--spot", "--cloud-provider", "gcp"}},
+	{"auto-deps", []string{"--auto-deps"}},
+	{"kustomize", []string{"--kustomize"}},
+	{"monorepo", []string{"--monorepo"}},
+	{"separate-post", []string{"--mode", "separate", "--env-values", "--namespace-resources", "--feature-flags", "--spot"}},
 }
 
 func TestGeneratedChartsPassHelm(t *testing.T) {
@@ -182,6 +195,14 @@ func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 			t.Errorf("helm template %s rendered no objects", rel)
 		}
 		rendered += n
+
+		// Every values overlay shipped with the chart must render too.
+		overlays, _ := filepath.Glob(filepath.Join(chart, "values-*.yaml"))
+		for _, overlay := range overlays {
+			if out, err := run(helm, "template", "golden", chart, "-f", overlay); err != nil {
+				t.Errorf("helm template %s -f %s failed:\n%s", rel, filepath.Base(overlay), out)
+			}
+		}
 	}
 	return rendered, complete
 }
@@ -270,4 +291,73 @@ func runOK(t *testing.T, name string, args ...string) string {
 		t.Fatalf("%s %s failed: %v\n%s", name, strings.Join(args, " "), err, out)
 	}
 	return out
+}
+
+// featureInputs are representative inputs every feature is exercised on:
+// a web app, a stateful database, batch jobs, RBAC, monitoring CRDs.
+var featureInputs = []string{
+	"examples/01-simple-web",
+	"examples/02-statefulset-db",
+	"examples/03-batch-processing",
+	"examples/04-rbac-setup",
+	"examples/05-full-stack",
+	"examples/11-monitoring-stack",
+	"fixtures/full-stack",
+}
+
+func featureNames(t *testing.T) []string {
+	t.Helper()
+	out := runOK(t, dhgBin, "features", "--names")
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			names = append(names, line)
+		}
+	}
+	return names
+}
+
+// TestFeaturesPassHelm enables every registered feature (with its default
+// parameters) on representative inputs, alone and all together.
+func TestFeaturesPassHelm(t *testing.T) {
+	helm := requireHelm(t)
+	in := inputs(t)
+	names := featureNames(t)
+	if len(names) == 0 {
+		t.Skip("no features registered")
+	}
+
+	run := func(t *testing.T, input string, args ...string) {
+		out := t.TempDir()
+		args = append([]string{"generate", "-f", input, "-o", out, "--chart-name", "app"}, args...)
+		runOK(t, dhgBin, args...)
+		rendered, complete := checkCharts(t, helm, out)
+		if want := countInputObjects(t, input); complete && rendered < want {
+			t.Errorf("rendered %d objects, want at least %d (one per input manifest)", rendered, want)
+		}
+	}
+
+	for _, name := range names {
+		for _, key := range featureInputs {
+			input, ok := in[key]
+			if !ok {
+				t.Fatalf("feature input %s not found", key)
+			}
+			t.Run(name+"/"+key, func(t *testing.T) {
+				t.Parallel()
+				run(t, input, "--with", name)
+			})
+		}
+	}
+
+	all := strings.Join(names, ",")
+	for _, key := range sortedKeys(in) {
+		input := in[key]
+		for _, mode := range []string{"universal", "separate", "umbrella"} {
+			t.Run("all/"+mode+"/"+key, func(t *testing.T) {
+				t.Parallel()
+				run(t, input, "--mode", mode, "--with", all)
+			})
+		}
+	}
 }

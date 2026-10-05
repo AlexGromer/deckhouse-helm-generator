@@ -101,3 +101,17 @@ func TestRegisteredFeaturesAreComplete(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendTopLevelValues(t *testing.T) {
+	in := "# header\nservices:\n  web:\n    enabled: true\n"
+	out, err := appendTopLevelValues(in, "reloader", map[string]interface{}{"enabled": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, in) || !strings.Contains(out, "reloader:\n  enabled: true\n") {
+		t.Errorf("unexpected output:\n%s", out)
+	}
+	if _, err := appendTopLevelValues(out, "reloader", 1); err == nil {
+		t.Error("expected error on duplicate key")
+	}
+}

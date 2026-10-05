@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
@@ -174,4 +176,25 @@ func cloneChart(chart *types.GeneratedChart) *types.GeneratedChart {
 	}
 	out.ExternalFiles = append([]types.ExternalFileInfo(nil), chart.ExternalFiles...)
 	return &out
+}
+
+// appendTopLevelValues appends a new top-level key to a values.yaml document,
+// preserving the existing content and comments. It fails if the key already
+// exists, so features never silently overwrite generated values.
+func appendTopLevelValues(valuesYAML, key string, value interface{}) (string, error) {
+	var existing map[string]interface{}
+	if err := yaml.Unmarshal([]byte(valuesYAML), &existing); err != nil {
+		return "", fmt.Errorf("parsing values.yaml: %w", err)
+	}
+	if _, ok := existing[key]; ok {
+		return "", fmt.Errorf("values.yaml already has top-level key %q", key)
+	}
+	block, err := yaml.Marshal(map[string]interface{}{key: value})
+	if err != nil {
+		return "", err
+	}
+	if valuesYAML != "" && !strings.HasSuffix(valuesYAML, "\n") {
+		valuesYAML += "\n"
+	}
+	return valuesYAML + "\n" + string(block), nil
 }
