@@ -250,36 +250,13 @@ func TestEscapeTemplateString(t *testing.T) {
 		{`a"b`, `a\"b`},
 		{"a\nb", "a\\nb"},
 		{"a\tb", "a\\tb"},
-		{"{{value}}", `{{"{{"}}`+"value"+`{{"}}"}}` },
+		{"{{value}}", `{{"{{"}}` + "value" + `{{"}}"}}`},
 		{"no braces", "no braces"},
 	}
 	for _, tc := range tests {
 		if got := escapeTemplateString(tc.in); got != tc.want {
 			t.Errorf("escapeTemplateString(%q) = %q; want %q", tc.in, got, tc.want)
 		}
-	}
-}
-
-// ── toTemplateRef ────────────────────────────────────────────────────────────
-
-func TestToTemplateRef_NoDefault(t *testing.T) {
-	got := toTemplateRef("services.web.enabled", nil)
-	if got != ".Values.services.web.enabled" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestToTemplateRef_BoolTrue(t *testing.T) {
-	got := toTemplateRef("services.web.enabled", true)
-	if !strings.Contains(got, "default true") {
-		t.Errorf("got %q; want containing 'default true'", got)
-	}
-}
-
-func TestToTemplateRef_BoolFalse(t *testing.T) {
-	got := toTemplateRef("services.web.enabled", false)
-	if got != ".Values.services.web.enabled" {
-		t.Errorf("got %q; want plain ref for false default", got)
 	}
 }
 
@@ -462,7 +439,7 @@ func TestGenerateGenericTemplate_IncludesLabels(t *testing.T) {
 	obj.SetLabels(map[string]string{"app": "test"})
 	tpl, _ := generateGenericTemplate(Context{ChartName: "chart"}, obj, "cfg")
 
-	if !strings.Contains(tpl, "app: test") {
+	if !strings.Contains(tpl, `app: "test"`) {
 		t.Error("template should include original labels")
 	}
 }
@@ -487,5 +464,104 @@ func TestGenerateGenericTemplate_WithSpec(t *testing.T) {
 	}
 	if vals["spec"] == nil {
 		t.Error("values should include spec")
+	}
+}
+
+func TestGenerateGenericTemplate_KeepsTopLevelFieldsAndDropsStatus(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion":  "example.com/v1",
+		"kind":        "Widget",
+		"metadata":    map[string]interface{}{"name": "w", "namespace": "default"},
+		"spec":        map[string]interface{}{"size": int64(3)},
+		"data":        map[string]interface{}{"greeting": "hello"},
+		"rules":       []interface{}{map[string]interface{}{"match": "*"}},
+		"provisioner": "ebs.csi.aws.com",
+		"enabled":     false,
+		"x-extra":     "v",
+		"status":      map[string]interface{}{"ready": true},
+	}}
+	tpl, vals := generateGenericTemplate(Context{ChartName: "app"}, obj, "widget")
+
+	for _, want := range []string{
+		"data:\n  {{- toYaml .Values.services.widget.widget.data | nindent 2 }}",
+		"rules:\n  {{- toYaml .Values.services.widget.widget.rules | nindent 2 }}",
+		"provisioner:\n  {{- toYaml .Values.services.widget.widget.provisioner | nindent 2 }}",
+		"spec:\n  {{- toYaml .Values.services.widget.widget.spec | nindent 2 }}",
+		"enabled:\n  {{- toYaml .Values.services.widget.widget.enabledField | nindent 2 }}",
+		"x-extra:\n  {{- toYaml (index .Values.services.widget.widget \"x-extra\") | nindent 2 }}",
+		`{{- if ne (toString .Values.services.widget.widget.enabled) "false" }}`,
+	} {
+		if !strings.Contains(tpl, want) {
+			t.Errorf("template missing %q:\n%s", want, tpl)
+		}
+	}
+	if strings.Contains(tpl, "status") {
+		t.Errorf("status must not be templated:\n%s", tpl)
+	}
+	if _, ok := vals["status"]; ok {
+		t.Error("status must not be copied into values")
+	}
+	if vals["enabled"] != true || vals["enabledField"] != false || vals["provisioner"] != "ebs.csi.aws.com" {
+		t.Errorf("unexpected values: %v", vals)
+	}
+	if vals["data"] == nil || vals["rules"] == nil || vals["x-extra"] != "v" {
+		t.Errorf("unexpected values: %v", vals)
+	}
+	// Values are copies, not aliases of the input object.
+	vals["data"].(map[string]interface{})["greeting"] = "changed"
+	if obj.Object["data"].(map[string]interface{})["greeting"] != "hello" {
+		t.Error("values must not alias the input object")
+	}
+}
+
+func TestGenerateGenericTemplate_CRDKeepsNameAndStaticBody(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "apiextensions.k8s.io/v1",
+		"kind":       "CustomResourceDefinition",
+		"metadata":   map[string]interface{}{"name": "widgets.example.com"},
+		"spec": map[string]interface{}{
+			"group": "example.com",
+			"versions": []interface{}{map[string]interface{}{
+				"name":        "v1",
+				"description": "uses {{ braces }}",
+			}},
+		},
+	}}
+	tpl, vals := generateGenericTemplate(Context{ChartName: "app"}, obj, "widgets")
+
+	if !strings.Contains(tpl, "  name: widgets.example.com\n") {
+		t.Errorf("CRD name must be kept verbatim:\n%s", tpl)
+	}
+	if strings.Contains(tpl, "fullname") {
+		t.Errorf("CRD name must not get the release prefix:\n%s", tpl)
+	}
+	if !strings.Contains(tpl, "spec:\n  group: example.com\n") {
+		t.Errorf("CRD body should be rendered verbatim:\n%s", tpl)
+	}
+	if !strings.Contains(tpl, `uses {{"{{"}} braces {{"}}"}}`) {
+		t.Errorf("template delimiters in the CRD body must be escaped:\n%s", tpl)
+	}
+	if len(vals) != 1 || vals["enabled"] != true {
+		t.Errorf("CRD values should only hold the enabled switch, got %v", vals)
+	}
+}
+
+func TestGenerateGenericTemplate_SortsAndQuotesLabels(t *testing.T) {
+	obj := makeObj("Widget", "w", "")
+	obj.SetLabels(map[string]string{"b": "true", "a": "1.0", "app.kubernetes.io/name": "w"})
+	tpl, _ := generateGenericTemplate(Context{ChartName: "app"}, obj, "w")
+	if !strings.Contains(tpl, "    a: \"1.0\"\n    b: \"true\"\n") {
+		t.Errorf("labels should be sorted and quoted:\n%s", tpl)
+	}
+	if strings.Contains(tpl, "app.kubernetes.io/name") {
+		t.Errorf("labels set by the chart helper must not be duplicated:\n%s", tpl)
+	}
+}
+
+func TestEscapeTemplateDelimiters(t *testing.T) {
+	got := escapeTemplateDelimiters(`a {{ b }} "c"`)
+	want := `a {{"{{"}} b {{"}}"}} "c"`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
