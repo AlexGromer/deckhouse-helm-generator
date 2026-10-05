@@ -1,13 +1,17 @@
 # Example 07: Library Mode
 
-Generates a **shared library chart** with DRY named templates, plus thin **wrapper charts** for each service.
+Generates a **library chart** holding the helpers shared by all services
+(`library.name`, `library.fullname`, `library.labels`, `library.selectorLabels`,
+`library.image`, …) and one **application chart per service group** whose
+templates call those helpers instead of carrying their own `_helpers.tpl`,
+the pattern of common library charts such as `bitnami/common`.
 
 ## Input
 
 ```
 07-library-mode/
-├── frontend.yaml   # Deployment + Service для frontend
-└── backend.yaml    # Deployment + Service для backend
+├── frontend.yaml   # Deployment + Service for frontend
+└── backend.yaml    # Deployment + Service for backend
 ```
 
 ## Usage
@@ -19,62 +23,36 @@ dhg generate \
   --chart-name myapp \
   --chart-version 1.0.0 \
   --mode library
+
+helm dependency build ./output/07/frontend   # vendors ../library into charts/
+helm template frontend ./output/07/frontend
 ```
 
-## Expected Output
+## Output
 
 ```
 output/07/
-├── myapp/                    # library chart (type: library)
-│   ├── Chart.yaml            # type: library
+├── library/                  # type: library
+│   ├── Chart.yaml
 │   └── templates/
-│       ├── _helpers.tpl
-│       ├── _deployment.tpl   # define "library.deployment"
-│       ├── _service.tpl      # define "library.service"
-│       ├── _resources.tpl    # define "library.resources"
-│       ├── _env.tpl          # define "library.env"
-│       └── ...
-├── frontend/                 # wrapper chart
-│   ├── Chart.yaml            # dependencies: [myapp library]
-│   ├── values.yaml
+│       └── _helpers.tpl      # define "library.fullname", "library.labels", ...
+├── frontend/                 # application chart
+│   ├── Chart.yaml            # dependencies: library (file://../library)
+│   ├── values.yaml           # flat values: enabled, deployment, service, ...
+│   ├── README.md             # parameter table
 │   └── templates/
-│       ├── _helpers.tpl
-│       ├── deployment.yaml   # calls {{ include "library.deployment" . }}
-│       └── service.yaml
-└── backend/                  # wrapper chart
-    ├── Chart.yaml
-    ├── values.yaml
-    └── templates/
+│       ├── frontend-deployment.yaml   # {{ include "library.labels" $ }} ...
+│       ├── frontend-service.yaml
+│       └── NOTES.txt
+└── backend/                  # same structure
 ```
-
-## DRY Shared Templates
-
-The library chart contains named templates used by all wrappers:
-
-| Template | Description |
-|----------|-------------|
-| `library.resources` | CPU/memory requests and limits |
-| `library.probes` | livenessProbe and readinessProbe |
-| `library.env` | Environment variables |
-| `library.volumeMounts` | Volume mounts |
-| `library.volumes` | Volumes |
-| `library.labels` | Standard Kubernetes labels |
-| `library.annotations` | Annotations |
-| `library.securityContext` | Pod security context |
-| `library.containerSecurityContext` | Container security context |
 
 ## When to Use
 
-- Multiple services share **identical template patterns**
-- You want a **single source of truth** for template logic
-- Reducing maintenance overhead across many charts
-- Enforcing organizational standards for all services
+- Several services should share one definition of names and labels
+- Organisation-wide label or naming conventions are changed once, in the
+  library chart, and picked up by every service chart on its next
+  `helm dependency update`
 
-## Comparison with Other Modes
-
-| Feature | Library | Separate |
-|---------|---------|----------|
-| Template duplication | ❌ (DRY) | ✅ (per chart) |
-| Shared standards | ✅ | ❌ |
-| Update all charts at once | ✅ (library version bump) | ❌ (N charts) |
-| Helm history per service | ✅ | ✅ |
+Compared with `--mode separate`, the service charts are identical except
+that helpers come from the library instead of a per-chart `_helpers.tpl`.
