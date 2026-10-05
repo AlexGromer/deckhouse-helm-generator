@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
@@ -118,7 +119,10 @@ func newGenerateCmd() *cobra.Command {
 		postRenderer       bool
 		autoDeps           bool
 		tenantCount        int
-		templateStyle      string
+		templateDir        string
+		templateStrategy   string
+		plugins            []string
+		configPath         string
 		includeHooks       bool
 		valuesFlat         bool
 		withFeatures       []string
@@ -181,7 +185,9 @@ Examples:
 				postRenderer:       postRenderer,
 				autoDeps:           autoDeps,
 				tenantCount:        tenantCount,
-				templateStyle:      templateStyle,
+				templateDir:        templateDir,
+				templateStrategy:   templateStrategy,
+				plugins:            plugins,
 				includeHooks:       includeHooks,
 				valuesFlat:         valuesFlat,
 				withFeatures:       withFeatures,
@@ -230,13 +236,25 @@ Examples:
 	cmd.Flags().BoolVar(&postRenderer, "post-renderer", false, "Generate a Helm post-renderer (post-renderer/kustomize.sh) applying per-environment Kustomize overlays")
 	cmd.Flags().BoolVar(&autoDeps, "auto-deps", false, "Auto-detect infrastructure dependencies (PostgreSQL, Redis, etc.)")
 	cmd.Flags().IntVar(&tenantCount, "tenant-count", 2, "Number of tenant examples to scaffold (default: 2)")
-	cmd.Flags().StringVar(&templateStyle, "template-style", "standard", "Template output style: standard, helm")
+	cmd.Flags().StringVar(&templateDir, "template-dir", "", "Directory of template overrides merged into every chart (<dir>/x.yaml → templates/x.yaml; _helpers.tpl and NOTES.txt allowed)")
+	cmd.Flags().StringVar(&templateStrategy, "template-strategy", "override", "How --template-dir files are merged: override, append, prepend")
+	cmd.Flags().StringArrayVar(&plugins, "plugin", nil, "External processor <apiVersion>/<Kind>[,...]=<executable> (repeatable), e.g. example.com/v1/Widget=./bin/widget")
+	cmd.Flags().StringVar(&configPath, "config", "", "Config file whose keys are flag names (default: .dhg.yaml in the working directory, if present)")
 	cmd.Flags().BoolVar(&includeHooks, "hooks", false, "Generate Helm lifecycle hook Job templates (pre-upgrade, post-install, pre-delete)")
 	cmd.Flags().BoolVar(&valuesFlat, "values-flat", false, "Add inline dot-notation path comments to values.yaml for --set reference")
 	cmd.Flags().StringSliceVar(&withFeatures, "with", nil, "Enable optional features, applied in order (see `dhg features`)")
 	cmd.Flags().StringArrayVar(&featureOpts, "feature-opt", nil, "Feature parameter as <feature>.<key>=<value> (repeatable)")
 
-	_ = cmd.MarkFlagRequired("chart-name")
+	// chart-name may come from the config file, so it is checked after loading it.
+	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		if err := applyConfigFile(cmd, configPath); err != nil {
+			return err
+		}
+		if chartName == "" {
+			return fmt.Errorf("--chart-name is required (flag or config file)")
+		}
+		return nil
+	}
 
 	return cmd
 }
@@ -282,7 +300,9 @@ type generateOptions struct {
 	postRenderer       bool
 	autoDeps           bool
 	tenantCount        int
-	templateStyle      string
+	templateDir        string
+	templateStrategy   string
+	plugins            []string
 	includeHooks       bool
 	valuesFlat         bool
 	withFeatures       []string
@@ -335,12 +355,11 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		return fmt.Errorf("--monorepo and --kustomize are mutually exclusive")
 	}
 
-	// Validate template style
-	switch opts.templateStyle {
-	case "standard", "helm":
-		// valid
+	// Validate template override strategy
+	switch opts.templateStrategy {
+	case "", "override", "append", "prepend":
 	default:
-		return fmt.Errorf("unknown template style: %q (must be standard or helm)", opts.templateStyle)
+		return fmt.Errorf("unknown template strategy: %q (must be override, append or prepend)", opts.templateStrategy)
 	}
 
 	// Validate cloud provider
@@ -434,6 +453,13 @@ drain:
 
 	processorRegistry := processor.NewRegistry()
 	k8s.RegisterAll(processorRegistry)
+	for _, spec := range opts.plugins {
+		path, gvks, err := processor.ParsePluginSpec(spec)
+		if err != nil {
+			return err
+		}
+		processorRegistry.Register(processor.NewPluginProcessor(path, 30*time.Second, gvks...))
+	}
 
 	// Initialize value processor and external file manager
 	valueProcessor := value.DefaultProcessor()
@@ -530,7 +556,6 @@ drain:
 		ExternalFileManager: externalFileManager,
 		EnvValues:           opts.envValues,
 		DeckhouseModule:     opts.deckhouseModule,
-		TemplateStyle:       opts.templateStyle,
 		IncludeHooks:        opts.includeHooks,
 		ValuesFlat:          opts.valuesFlat,
 	}
@@ -739,6 +764,19 @@ drain:
 		}
 	} else if len(opts.featureOpts) > 0 {
 		return fmt.Errorf("--feature-opt requires the feature to be enabled with --with")
+	}
+
+	// Apply template overrides (--template-dir)
+	if opts.templateDir != "" {
+		overrides, err := generator.LoadTemplateOverrides(opts.templateDir)
+		if err != nil {
+			return err
+		}
+		for i, chart := range charts {
+			if !strings.Contains(chart.ChartYAML, "\ntype: library") {
+				charts[i] = generator.ApplyTemplateOverrides(chart, overrides, opts.templateStrategy)
+			}
+		}
 	}
 
 	// Dry-run: print to stdout instead of writing to disk

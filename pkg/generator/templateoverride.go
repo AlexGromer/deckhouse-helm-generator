@@ -2,8 +2,11 @@ package generator
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
 // MergeStrategy controls how template overrides are applied to generated content.
@@ -20,41 +23,70 @@ const (
 	MergeStrategyPrepend MergeStrategy = "prepend"
 )
 
-// LoadTemplateOverrides reads all .yaml and .tpl files from dir and returns a
-// map of relative file path → content. An empty string dir returns an empty map
-// without error. A non-existent directory returns an error.
+// LoadTemplateOverrides reads all .yaml, .yml, .tpl and .txt files below dir
+// (recursively) and returns them keyed like chart templates:
+// <dir>/hooks/job.yaml → "templates/hooks/job.yaml". An empty dir returns an
+// empty map without error; a non-existent directory is an error.
 func LoadTemplateOverrides(dir string) (map[string]string, error) {
 	if dir == "" {
 		return map[string]string{}, nil
 	}
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("template overrides: read dir %q: %w", dir, err)
+	if _, err := os.Stat(dir); err != nil {
+		return nil, fmt.Errorf("template overrides: %w", err)
 	}
 
 	overrides := make(map[string]string)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-
-		name := entry.Name()
-		ext := filepath.Ext(name)
-		if ext != ".yaml" && ext != ".tpl" {
-			continue
+		switch filepath.Ext(path) {
+		case ".yaml", ".yml", ".tpl", ".txt":
+		default:
+			return nil
 		}
-
-		fullPath := filepath.Join(dir, name)
-		data, readErr := os.ReadFile(fullPath)
-		if readErr != nil {
-			return nil, fmt.Errorf("template overrides: read file %q: %w", fullPath, readErr)
+		if d.IsDir() {
+			return nil
 		}
-
-		overrides[fullPath] = string(data)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		overrides["templates/"+filepath.ToSlash(rel)] = string(data)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("template overrides: read %q: %w", dir, err)
 	}
-
 	return overrides, nil
+}
+
+// ApplyTemplateOverrides merges overrides into a chart's templates.
+// templates/_helpers.tpl and templates/NOTES.txt address the chart's Helpers
+// and Notes, which are stored separately from Templates. The input chart is
+// not mutated.
+func ApplyTemplateOverrides(chart *types.GeneratedChart, overrides map[string]string, strategy string) *types.GeneratedChart {
+	out := cloneChart(chart)
+	special := map[string]*string{
+		"templates/_helpers.tpl": &out.Helpers,
+		"templates/NOTES.txt":    &out.Notes,
+	}
+	regular := make(map[string]string, len(overrides))
+	for key, content := range overrides {
+		target, ok := special[key]
+		if !ok {
+			regular[key] = content
+			continue
+		}
+		merged := MergeTemplateOverrides(map[string]string{key: *target}, map[string]string{key: content}, strategy)
+		*target = merged[key]
+	}
+	out.Templates = MergeTemplateOverrides(out.Templates, regular, strategy)
+	return out
 }
 
 // MergeTemplateOverrides merges override templates into the generated map using

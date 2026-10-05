@@ -54,9 +54,6 @@ type Options struct {
 	// (openapi/, images/, hooks/, helm_lib dependency).
 	DeckhouseModule bool
 
-	// TemplateStyle selects the template output style ("standard" or "helm").
-	TemplateStyle string
-
 	// ValuesFlat generates values.yaml with inline dot-notation path comments
 	// for easier --set reference (e.g., "# image.repository").
 	ValuesFlat bool

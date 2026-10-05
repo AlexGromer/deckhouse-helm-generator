@@ -80,9 +80,6 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	// Sort service names for consistent output
 	sort.Strings(serviceNames)
 
-	// TODO: apply template style variants (standard vs helm-specific functions)
-	// based on opts.TemplateStyle
-
 	// Build templates map
 	templates := make(map[string]string)
 	for _, group := range graph.Groups {
