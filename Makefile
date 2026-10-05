@@ -1,4 +1,4 @@
-.PHONY: build test lint clean install deps fmt vet bench ci
+.PHONY: build test golden lint clean install deps fmt vet bench ci
 
 BINARY_NAME=dhg
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -26,9 +26,13 @@ build-all:
 	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o bin/$(BINARY_NAME)-darwin-arm64 ./cmd/dhg
 	GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o bin/$(BINARY_NAME)-windows-amd64.exe ./cmd/dhg
 
-# Run tests
+# Run tests (tests/golden is skipped when helm is not installed)
 test:
-	$(GOTEST) -v -race -coverprofile=coverage.out ./...
+	$(GOTEST) -race -coverprofile=coverage.out ./...
+
+# Run the golden suite: generated charts checked by the real Helm CLI
+golden:
+	DHG_REQUIRE_HELM=1 $(GOTEST) -count=1 ./tests/golden/
 
 # Run tests with coverage report
 test-coverage: test
@@ -36,7 +40,7 @@ test-coverage: test
 
 # Run linter
 lint:
-	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
+	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest)
 	golangci-lint run ./...
 
 # Format code
@@ -72,8 +76,8 @@ generate:
 # E2E test: generate chart and validate with helm
 e2e: build
 	./bin/$(BINARY_NAME) generate -f testdata/simple -o /tmp/dhg-test-chart --chart-name test-app
-	helm lint /tmp/dhg-test-chart
-	helm template test-release /tmp/dhg-test-chart
+	helm lint --strict /tmp/dhg-test-chart/test-app
+	helm template test-release /tmp/dhg-test-chart/test-app
 	@echo "E2E test passed!"
 
 # Run benchmarks
@@ -85,7 +89,7 @@ dev: build
 	./bin/$(BINARY_NAME) generate -f testdata/simple -o /tmp/dhg-dev-chart --chart-name dev-app --verbose
 
 # Run full CI pipeline locally
-ci: deps vet lint test build
+ci: deps vet lint test golden build
 	@echo "CI pipeline passed!"
 
 .DEFAULT_GOAL := build
