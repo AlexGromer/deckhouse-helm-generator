@@ -53,51 +53,40 @@ make build
 ```
 deckhouse-helm-generator/
 ├── cmd/dhg/
-│   ├── main.go              # CLI (Cobra root + все subcommands), оркестрация пайплайна
-│   └── main_test.go         # Интеграционные тесты CLI
+│   ├── main.go          # Cobra: generate, analyze, migrate, diff, fix, version, features
+│   ├── pipeline.go      # Общий конвейер extract → dedupe → process → analyze
+│   ├── validate.go      # dhg validate (разбор шаблонов, матрица версий K8s)
+│   ├── graph.go         # dhg graph (DOT/Mermaid)
+│   └── config.go        # .dhg.yaml: ключи = имена флагов generate
 ├── pkg/
-│   ├── analyzer/            # Обнаружение паттернов, граф связей, генерация DOT
-│   │   ├── analyzer.go      # Ядро Analyzer, точка входа Analyze()
-│   │   ├── graph.go         # GenerateDOTGraph(), обнаружение циклических зависимостей
-│   │   ├── detector/        # Детекторы связей (label, reference, annotation, volume, deckhouse)
-│   │   └── pattern/         # Проверки паттернов (11), детекторы паттернов (6), Recommender, Formatter
-│   ├── extractor/           # Извлечение ресурсов из YAML-файлов, cluster, gitops
-│   │   ├── extractor.go     # Интерфейс Extractor + файловая реализация
-│   │   ├── cluster.go       # Cluster extractor (динамический client клиент-go)
-│   │   ├── gitops.go        # GitOps extractor (go-git)
-│   │   └── merger.go        # Дедупликация из нескольких источников и разрешение конфликтов
-│   ├── generator/           # Генерация Helm chart (70+ файлов генераторов)
-│   │   ├── generator.go     # Интерфейс Generator, DefaultRegistry(), Options
-│   │   ├── universal.go     # Режим Universal (единый chart)
-│   │   ├── separate.go      # Режим Separate (chart для каждого сервиса)
-│   │   ├── library.go       # Режим Library chart
-│   │   ├── umbrella.go      # Режим Umbrella chart
-│   │   └── ...              # 60+ phase-специфичных генераторов
-│   ├── processor/           # Интерфейс Processor и registry
-│   │   ├── processor.go     # Интерфейс Processor, Context, Result, BaseProcessor
-│   │   ├── registry.go      # Registry — маршрутизация на основе GVK
-│   │   └── k8s/             # 50 процессоров по типам ресурсов
-│   ├── helm/                # Модели данных Chart.yaml и values.yaml
-│   └── types/               # Общие типы (ExtractedResource, ProcessedResource, GeneratedChart и др.)
+│   ├── extractor/       # file, cluster (REST по kubeconfig), gitops (git clone), Deduplicate
+│   ├── processor/       # Processor, Registry (GVK, приоритеты, generic fallback), plugin.go
+│   │   └── k8s/         # Процессоры по видам ресурсов
+│   ├── analyzer/        # Детекторы связей, граф, группы; graph.go — DOT/Mermaid/циклы
+│   │   └── pattern/     # Проверки паттернов и рекомендации (dhg analyze)
+│   ├── generator/       # Режимы universal/separate/library/umbrella, пост-обработка,
+│   │                    # реестр features (features.go, features_*.go), CRD → crds/
+│   ├── helm/            # Chart.yaml, values, helpers, README, схема values
+│   └── types/           # ExtractedResource, ProcessedResource, ResourceGraph, GeneratedChart
 ├── tests/
-│   ├── integration/         # Полные тесты пайплайна с реальными YAML-fixtures
-│   └── e2e/                 # End-to-end тесты (generate + helm lint)
-├── Makefile
-├── .goreleaser.yml
-└── .golangci.yml
+│   ├── golden/          # Настоящий dhg + настоящий Helm на всех примерах и фикстурах
+│   ├── integration/     # Конвейер на фикстурах
+│   └── e2e/             # Рендеринг фикстурных chart'ов через Helm
+└── examples/            # Примеры входных манифестов (входы golden-набора)
 ```
 
-### Этапы пайплайна (из `cmd/dhg/main.go`)
+### Этапы конвейера (`cmd/dhg/pipeline.go`)
 
 ```
-[1] Extract   → extractor.Extract()     → []ExtractedResource
-[2] Process   → processor.Process()     → []ProcessedResource
-[3] Analyze   → analyzer.Analyze()      → ResourceGraph
-[4] Generate  → generator.Generate()    → []GeneratedChart
-[4b..4j]      → Post-processor'ы Phase 2 (copy-on-write)
-[4k..4t]      → Security post-processor'ы Phase 2.5
-[5] Write     → generator.WriteChart()  → filesystem
+[1] Extract   → extractor.Extract()  → []ExtractedResource → extractor.Deduplicate()
+[2] Process   → processor.Registry   → []ProcessedResource   (плагины --plugin первыми)
+[3] Analyze   → analyzer.Analyze()   → ResourceGraph (связи, группы)
+[4] Generate  → generator.Generate() → []GeneratedChart       (generate)
+[4b..]        → пост-обработка флагов generate, затем features (--with), затем --template-dir
+[5] Write     → generator.WriteChart()
 ```
+
+Инвариант процессоров, на который опираются шаблоны: `Result.ServiceName` — допустимый идентификатор Go-шаблона (registry санитизирует его), значения ресурса лежат ровно по `Result.ValuesPath`, который читает шаблон.
 
 ---
 
@@ -342,229 +331,80 @@ func TestMyDetector_Detect(t *testing.T) {
 
 ---
 
-## 5. Добавление нового генератора
+## 5. Добавление опциональной возможности (`--with`)
 
-Генераторы запускаются после этапа Analyze как post-processor'ы. Они получают `*GeneratedChart` и возвращают новый (copy-on-write — ADR-008). Используйте их для добавления новых файлов шаблонов или записей в values.
-
-### 5.1 Понять контракт copy-on-write
-
-Каждый генератор, модифицирующий `GeneratedChart`, **обязан**:
-
-1. Создать новый `map[string]string` для `Templates`.
-2. Скопировать все записи из `chart.Templates` в новую map.
-3. Добавить или изменить записи в новой map.
-4. Вернуть новый `*types.GeneratedChart` с новой map.
-
-Не изменяйте `chart.Templates` напрямую.
-
-### 5.2 Создайте файл генератора
-
-Создайте `pkg/generator/myfeature.go`:
+Новые возможности не добавляют флагов в `main.go`: они регистрируются в реестре `pkg/generator/features.go` и сразу доступны как `dhg generate --with <имя>`, видны в `dhg features` и автоматически попадают в golden-набор (каждая возможность — на 7 входах, все вместе — во всех режимах на всех входах).
 
 ```go
-package generator
-
-import (
-    "fmt"
-
-    "github.com/deckhouse/deckhouse-helm-generator/pkg/types"
-)
-
-// MyFeatureConfig holds configuration for MyFeature generation.
-type MyFeatureConfig struct {
-    Enabled bool
-    Label   string
-}
-
-// InjectMyFeature adds a ConfigMap template that exposes MyFeature settings.
-// It follows the copy-on-write contract (ADR-008).
-func InjectMyFeature(chart *types.GeneratedChart, cfg MyFeatureConfig) *types.GeneratedChart {
-    if !cfg.Enabled {
-        return chart
-    }
-
-    // Step 1: new templates map
-    templates := make(map[string]string, len(chart.Templates)+1)
-
-    // Step 2: copy existing templates
-    for k, v := range chart.Templates {
-        templates[k] = v
-    }
-
-    // Step 3: add new template
-    templates["templates/myfeature-configmap.yaml"] = fmt.Sprintf(`apiVersion: v1
+// pkg/generator/features_myteam.go
+func init() {
+	RegisterFeature(Feature{
+		Name:        "my-feature",
+		Description: "One line shown by dhg features",
+		Params:      map[string]string{"label": "default"}, // все параметры с умолчаниями
+		Apply: func(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {
+			out := cloneChart(chart) // copy-on-write: входной chart не меняется
+			name := chartNameOf(chart)
+			out.Templates["templates/my-feature.yaml"] = fmt.Sprintf(`{{- if .Values.myFeature.enabled }}
+apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "%s.fullname" . }}-myfeature
-  labels:
-    {{- include "%s.labels" . | nindent 4 }}
+  name: {{ include "%s.fullname" . }}-my-feature
 data:
-  label: {{ .Values.myfeature.label | quote }}
-`, chart.Name, chart.Name)
-
-    // Step 4: return new chart struct
-    return &types.GeneratedChart{
-        Name:          chart.Name,
-        Path:          chart.Path,
-        ChartYAML:     chart.ChartYAML,
-        ValuesYAML:    chart.ValuesYAML,
-        Templates:     templates,
-        Helpers:       chart.Helpers,
-        Notes:         chart.Notes,
-        ValuesSchema:  chart.ValuesSchema,
-        ExternalFiles: chart.ExternalFiles,
-    }
+  label: {{ .Values.myFeature.label | quote }}
+{{- end }}
+`, name)
+			values, err := appendTopLevelValues(out.ValuesYAML, "myFeature",
+				map[string]interface{}{"enabled": true, "label": fc.Param("label")})
+			if err != nil {
+				return nil, err
+			}
+			out.ValuesYAML = values
+			return out, nil
+		},
+	})
 }
 ```
 
-### 5.3 Подключите генератор к пайплайну
+Правила:
+- каждое добавление выключается через values (`<feature>.enabled`);
+- уникальные пути шаблонов и ключи values, чтобы возможности комбинировались;
+- в separate/umbrella values плоские, а helpers называются по chart'у (`chartNameOf`);
+- `fc.Graph` даёт доступ к входным ресурсам.
 
-Откройте `cmd/dhg/main.go`. В `runGenerate()` добавьте переменную флага в начало `newGenerateCmd()`:
-
-```go
-var myFeature bool
-// ...
-cmd.Flags().BoolVar(&myFeature, "my-feature", false, "Generate MyFeature ConfigMap")
-```
-
-Затем примените генератор после генерации базового chart (следуя существующему паттерну Phase 2 post-processor):
-
-```go
-if opts.myFeature {
-    cfg := generator.MyFeatureConfig{Enabled: true, Label: opts.chartName}
-    for i, chart := range charts {
-        charts[i] = generator.InjectMyFeature(chart, cfg)
-    }
-}
-```
-
-### 5.4 Напишите тесты
-
-Создайте `pkg/generator/myfeature_test.go`:
-
-```go
-package generator
-
-import (
-    "strings"
-    "testing"
-
-    "github.com/deckhouse/deckhouse-helm-generator/pkg/types"
-)
-
-func TestInjectMyFeature_AddsConfigMap(t *testing.T) {
-    chart := &types.GeneratedChart{
-        Name:      "testchart",
-        Templates: map[string]string{},
-    }
-
-    cfg := MyFeatureConfig{Enabled: true, Label: "test-label"}
-    result := InjectMyFeature(chart, cfg)
-
-    const key = "templates/myfeature-configmap.yaml"
-    content, ok := result.Templates[key]
-    if !ok {
-        t.Fatalf("expected template %s not found", key)
-    }
-
-    if !strings.Contains(content, "kind: ConfigMap") {
-        t.Errorf("template does not contain ConfigMap kind")
-    }
-}
-
-func TestInjectMyFeature_Disabled_ReturnsOriginal(t *testing.T) {
-    chart := &types.GeneratedChart{
-        Name:      "testchart",
-        Templates: map[string]string{},
-    }
-
-    result := InjectMyFeature(chart, MyFeatureConfig{Enabled: false})
-    if result != chart {
-        t.Error("expected original chart to be returned when disabled")
-    }
-}
-```
+`dhg generate -f examples/05-full-stack --chart-name app --with my-feature --feature-opt my-feature.label=x` — проверить вручную.
 
 ---
 
 ## 6. Запуск тестов
 
-### Юнит-тесты
-
 ```bash
-# Все пакеты
-make test
-
-# Отдельный пакет
-go test ./pkg/processor/k8s/... -v
-
-# Отдельный тест
-go test ./pkg/generator/... -run TestInjectMyFeature -v
+make test        # все тесты; tests/golden пропускается без helm
+make golden      # DHG_REQUIRE_HELM=1 go test ./tests/golden/
+make lint        # golangci-lint v2 (.golangci.yml)
+go test ./pkg/generator -run TestApplyFeatures -v
 ```
 
-### С покрытием
+**Golden-набор** (`tests/golden`) — главный критерий корректности. Он собирает `dhg` и для каждого входа (`examples/*`, `tests/integration/fixtures/*`) × режима × флагов пост-обработки × features проверяет:
+- `helm lint --strict`, `helm template --include-crds`, все `values-*.yaml`;
+- число объектов не меньше входного; селекторы workload'ов совпадают с метками pod'ов;
+- ссылки (ConfigMap/Secret/PVC/SA, backend'ы Ingress, roleRef, …) и селекторы Service/PDB/NetworkPolicy продолжают разрешаться (`integrity_test.go`);
+- `helm unittest` (если установлен плагин), post-renderer (если есть kustomize/kubectl);
+- источники `cluster` (fake API-сервер) и `gitops` (локальный репозиторий).
 
-```bash
-make coverage
-# Открывает отчёт о покрытии; минимальный порог проекта — 70%, текущий уровень — 86%+
-```
-
-### Интеграционные тесты
-
-```bash
-go test ./tests/integration/... -v -timeout 60s
-```
-
-Интеграционные тесты используют реальные YAML-fixtures в `tests/integration/testdata/`. Они запускают полный пайплайн и проверяют структуру сгенерированного chart. Helm должен быть установлен.
-
-### End-to-end тесты
-
-```bash
-go test ./tests/e2e/... -v -timeout 120s
-```
-
-E2E тесты генерируют chart и затем запускают `helm lint` и `helm template`. Helm должен быть в `$PATH`.
-
-### Бенчмарки
-
-```bash
-go test ./pkg/... -bench=. -benchtime=5s
-```
-
-### Lint
-
-```bash
-make lint
-# Эквивалентно: golangci-lint run ./...
-```
-
-Конфигурация линтера находится в `.golangci.yml`. CI-пайплайн запускает lint с `continue-on-error: true` — ошибки lint не блокируют слияние, но должны устраняться.
+Новый вход — каталог в `tests/integration/fixtures/` или `examples/`: golden подхватит его автоматически.
 
 ---
 
-## 7. Обзор CI/CD пайплайна
+## 7. CI (`.github/workflows/test.yml`)
 
-Весь CI работает на GitHub Actions. Файлы workflow находятся в `.github/workflows/`.
-
-| Workflow | Файл | Триггер | Этапы |
-|----------|------|---------|-------|
-| Test | `test.yml` | push, PR | Unit (матрица Go 1.25+1.26), Integration, E2E, Lint, Security, Coverage |
-| Release | `release.yml` | push тега (`v*`) | GoReleaser: сборка, Docker, Homebrew |
-| CodeQL | `codeql.yml` | push, расписание | Статический анализ |
-| Auto-approve | `auto-approve.yml` | PR | Авто-approve PR от владельца через GitHub App bot |
-
-### Правила защиты веток
-
-PR в `main` должны пройти:
-
-- `Unit Tests (Go 1.26)`
-- `Lint Code`
-- `Security Scan`
-- `Build Binary`
-
-### Порог покрытия
-
-Шаг объединения покрытия в `test.yml` объединяет все профили покрытия и применяет **минимальный порог 70%**. Текущее покрытие по всему проекту составляет 86%+. Новый код должен поддерживать этот уровень.
+| Job | Что делает |
+|---|---|
+| Unit Tests | `go vet`, `go test -race ./cmd/... ./pkg/...` |
+| Integration / E2E | `tests/integration`, `tests/e2e` с Helm 3.19 |
+| Golden | `tests/golden` с Helm 3.19, helm-unittest, `DHG_REQUIRE_HELM=1` |
+| Lint Code | golangci-lint v2 и gofmt — ошибки блокируют |
+| Security Scan, Coverage, Build, Benchmarks | как раньше |
 
 ---
 
@@ -612,40 +452,16 @@ docker run --rm ghcr.io/alexgromer/dhg:v0.8.0 version
 
 ```go
 // pkg/processor/processor.go
-
 type Processor interface {
-    // Name returns a unique identifier for this processor.
-    Name() string
-
-    // Priority controls ordering when multiple processors match the same GVK.
-    // Lower number = higher priority.
-    Priority() int
-
-    // Supports returns true if this processor can handle the given GVK.
-    Supports(gvk schema.GroupVersionKind) bool
-
-    // Process transforms an unstructured resource into a Result.
-    Process(ctx Context, obj *unstructured.Unstructured) (*Result, error)
-}
-
-type Context struct {
-    Ctx                 context.Context
-    ChartName           string
-    OutputMode          types.OutputMode
-    Namespace           string
-    AllResources        map[types.ResourceKey]*types.ExtractedResource
-    ExternalFileManager *value.ExternalFileManager
-    ValueProcessor      *value.Processor
-}
-
-type Result struct {
-    Processed       bool
-    ServiceName     string
-    TemplatePath    string
-    TemplateContent string
-    ValuesPath      string
-    Values          map[string]interface{}
-    Dependencies    []types.ResourceKey
-    Metadata        map[string]interface{}
+	// Process returns a Result; Processed=false passes the resource on to the
+	// next processor (or the generic fallback).
+	Process(ctx Context, obj *unstructured.Unstructured) (*Result, error)
+	// Supports lists the exact GVKs (including version) the processor handles.
+	Supports() []schema.GroupVersionKind
+	// Priority: higher runs first; plugins use PluginPriority (1000).
+	Priority() int
+	Name() string
 }
 ```
+
+`Result`: `Processed`, `ServiceName`, `TemplatePath`, `TemplateContent`, `ValuesPath`, `Values`, `Dependencies`, `ExternalFiles`, `Metadata`.
