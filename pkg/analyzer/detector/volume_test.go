@@ -310,14 +310,12 @@ func TestVolumeDetector_ProjectedVolume(t *testing.T) {
 
 func TestVolumeDetector_EnvFromConfigMap(t *testing.T) {
 	// Deployment with envFrom configMapRef; ConfigMap is in allResources.
-	// An empty volumes slice is required so that Detect() does not early-return
-	// before reaching the envFrom detection logic.
+	// The workload has no volumes: env/envFrom references must still be found.
 	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
 		nil, nil,
 		map[string]interface{}{
 			"template": map[string]interface{}{
 				"spec": map[string]interface{}{
-					"volumes": []interface{}{},
 					"containers": []interface{}{
 						map[string]interface{}{
 							"name":  "app",
@@ -371,14 +369,12 @@ func TestVolumeDetector_EnvFromConfigMap(t *testing.T) {
 
 func TestVolumeDetector_EnvValueFromSecret(t *testing.T) {
 	// Deployment with env[].valueFrom.secretKeyRef; Secret is in allResources.
-	// An empty volumes slice is required so that Detect() does not early-return
-	// before reaching the env valueFrom detection logic.
+	// The workload has no volumes: env/envFrom references must still be found.
 	deployment := makeProcessedResource("apps/v1", "Deployment", "my-deploy", "default",
 		nil, nil,
 		map[string]interface{}{
 			"template": map[string]interface{}{
 				"spec": map[string]interface{}{
-					"volumes": []interface{}{},
 					"containers": []interface{}{
 						map[string]interface{}{
 							"name":  "app",
@@ -440,7 +436,6 @@ func TestVolumeDetector_EnvFromSecretRef(t *testing.T) {
 		map[string]interface{}{
 			"template": map[string]interface{}{
 				"spec": map[string]interface{}{
-					"volumes": []interface{}{},
 					"containers": []interface{}{
 						map[string]interface{}{
 							"name":  "app",
@@ -487,7 +482,6 @@ func TestVolumeDetector_EnvValueFromConfigMapKeyRef(t *testing.T) {
 		map[string]interface{}{
 			"template": map[string]interface{}{
 				"spec": map[string]interface{}{
-					"volumes": []interface{}{},
 					"containers": []interface{}{
 						map[string]interface{}{
 							"name":  "app",
@@ -754,7 +748,6 @@ func TestVolumeDetector_CronJobEnvFrom(t *testing.T) {
 				"spec": map[string]interface{}{
 					"template": map[string]interface{}{
 						"spec": map[string]interface{}{
-							"volumes": []interface{}{},
 							"containers": []interface{}{
 								map[string]interface{}{
 									"name":  "job",
@@ -803,7 +796,6 @@ func TestVolumeDetector_PodEnvFrom(t *testing.T) {
 	pod := makeProcessedResource("v1", "Pod", "my-pod", "default",
 		nil, nil,
 		map[string]interface{}{
-			"volumes": []interface{}{},
 			"containers": []interface{}{
 				map[string]interface{}{
 					"name":  "app",
@@ -852,7 +844,6 @@ func TestVolumeDetector_CronJobEnvValueFrom(t *testing.T) {
 				"spec": map[string]interface{}{
 					"template": map[string]interface{}{
 						"spec": map[string]interface{}{
-							"volumes": []interface{}{},
 							"containers": []interface{}{
 								map[string]interface{}{
 									"name":  "job",
@@ -905,7 +896,6 @@ func TestVolumeDetector_PodEnvValueFrom(t *testing.T) {
 	pod := makeProcessedResource("v1", "Pod", "my-pod", "default",
 		nil, nil,
 		map[string]interface{}{
-			"volumes": []interface{}{},
 			"containers": []interface{}{
 				map[string]interface{}{
 					"name":  "app",
@@ -957,7 +947,6 @@ func TestVolumeDetector_EnvFromMalformedContainers(t *testing.T) {
 		map[string]interface{}{
 			"template": map[string]interface{}{
 				"spec": map[string]interface{}{
-					"volumes": []interface{}{},
 					"containers": []interface{}{
 						"not-a-map-container",
 						map[string]interface{}{
@@ -1005,7 +994,6 @@ func TestVolumeDetector_EnvValueFromMalformedContainers(t *testing.T) {
 		map[string]interface{}{
 			"template": map[string]interface{}{
 				"spec": map[string]interface{}{
-					"volumes": []interface{}{},
 					"containers": []interface{}{
 						map[string]interface{}{
 							"name":  "app",

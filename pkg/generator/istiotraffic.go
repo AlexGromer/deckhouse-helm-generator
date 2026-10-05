@@ -164,6 +164,13 @@ func istioTemplateBody(svc *resourceTemplate) []string {
 	}
 	matchLabels := append([]string{"  selector:", "    matchLabels:"}, reindent(selector[1:], 2)...)
 
+	// A Service renders its selector only when it has one (selector-less
+	// Services front manually managed endpoints); a policy without a
+	// selector would apply to the whole namespace instead.
+	guard := selectorGuard(svc)
+	if guard != "" {
+		b = append(b, "{{- if "+guard+" }}")
+	}
 	b = append(b, "{{- if $.Values.istio.peerAuthentication.mtlsMode }}")
 	b = append(b, meta("PeerAuthentication", "security.istio.io/v1")...)
 	b = append(b, "spec:")
@@ -183,7 +190,25 @@ func istioTemplateBody(svc *resourceTemplate) []string {
 		"    {{- toYaml $.Values.istio.authorizationPolicy.rules | nindent 4 }}",
 		"{{- end }}",
 	)
+	if guard != "" {
+		b = append(b, "{{- end }}")
+	}
 	return b
+}
+
+var reSelectorGuard = regexp.MustCompile(`^  \{\{- (?:if|with) (\S+) \}\}$`)
+
+// selectorGuard returns the condition of the `{{- if X }}` (or with) that
+// encloses the spec.selector key of rt, or "" when the key is unconditional.
+func selectorGuard(rt *resourceTemplate) string {
+	i := rt.child(rt.topLevel("spec:"), "  selector:")
+	if i <= 0 {
+		return ""
+	}
+	if m := reSelectorGuard.FindStringSubmatch(rt.body[i-1]); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 func applyIstioFeature(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {

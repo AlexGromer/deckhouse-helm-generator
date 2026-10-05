@@ -125,5 +125,5 @@ metadata:
 spec:
   {{- toYaml .spec | nindent 2 }}
 {{- end }}
-`, sanitized, p.kind, name, ctx.ChartName)
+`, sanitized, p.kind, processor.ObjectName(name), ctx.ChartName)
 }

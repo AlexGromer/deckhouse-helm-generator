@@ -104,5 +104,5 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 {{- end }}
-`, sanitized, serviceName, ctx.ChartName)
+`, sanitized, processor.ObjectName(obj.GetName()), ctx.ChartName)
 }

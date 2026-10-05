@@ -193,7 +193,6 @@ func (p *SecretProcessor) extractValues(ctx processor.Context, obj *unstructured
 
 func (p *SecretProcessor) generateTemplate(ctx processor.Context, obj *unstructured.Unstructured, serviceName, secretName string) string {
 	sanitizedName := sanitizeName(secretName)
-	fullnameHelper := fmt.Sprintf("{{ include \"%s.fullname\" $ }}", ctx.ChartName)
 
 	template := fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -202,7 +201,7 @@ func (p *SecretProcessor) generateTemplate(ctx processor.Context, obj *unstructu
 apiVersion: v1
 kind: Secret
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -254,7 +253,7 @@ stringData:
 {{- end }}
 {{- end }}
 `, serviceName, sanitizedName,
-		fullnameHelper, secretName,
+		processor.ObjectName(secretName),
 		ctx.ChartName, serviceName)
 
 	return template

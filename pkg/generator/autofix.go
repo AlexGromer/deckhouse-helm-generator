@@ -205,8 +205,8 @@ func InjectPDB(chart *types.GeneratedChart) (*types.GeneratedChart, int) {
 		if extractReplicas(content, 2) < 2 {
 			continue
 		}
-		m := componentLabelRegex.FindStringSubmatch(content)
-		if m == nil || hasPDBForComponent(result.Templates, m[1]) {
+		wl, ok := parseResourceTemplate(path, content)
+		if !ok || hasPDBForWorkload(result, wl) {
 			continue
 		}
 
@@ -215,7 +215,11 @@ func InjectPDB(chart *types.GeneratedChart) (*types.GeneratedChart, int) {
 			continue
 		}
 
-		result.Templates[pdbKey] = workloadPDBTemplate(name, m[1], "pdb", "")
+		pdb, ok := workloadPDBTemplate(name, wl, "pdb", "")
+		if !ok {
+			continue
+		}
+		result.Templates[pdbKey] = pdb
 		count++
 	}
 

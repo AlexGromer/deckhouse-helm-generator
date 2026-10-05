@@ -205,15 +205,13 @@ func toInt64(v interface{}) (int64, bool) {
 }
 
 func (p *ServiceProcessor) generateTemplate(ctx processor.Context, obj *unstructured.Unstructured, serviceName string) string {
-	fullnameHelper := fmt.Sprintf("{{ include \"%s.fullname\" $ }}", ctx.ChartName)
-
 	template := fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
 {{- with $svc.service }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -246,6 +244,9 @@ spec:
   {{- with .sessionAffinity }}
   sessionAffinity: {{ . }}
   {{- end }}
+  {{- with .externalName }}
+  externalName: {{ . }}
+  {{- end }}
   ports:
     {{- range .ports }}
     - name: {{ .name | default "http" }}
@@ -256,15 +257,16 @@ spec:
       nodePort: {{ .nodePort }}
       {{- end }}
     {{- end }}
+  {{- /* The selector of the input Service: it selects the pods by their labels from the input. */}}
+  {{- if .selector }}
   selector:
-    {{- include "%s.selectorLabels" $ | nindent 4 }}
-    app.kubernetes.io/component: %s
+    {{- toYaml .selector | nindent 4 }}
+  {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName,
+`, serviceName, processor.ObjectName(obj.GetName()),
 		ctx.ChartName, serviceName,
-		serviceName,
-		ctx.ChartName, serviceName)
+		serviceName)
 
 	return template
 }

@@ -42,7 +42,7 @@ func (p *ClusterRoleBindingProcessor) Process(ctx processor.Context, obj *unstru
 
 	values, deps := p.extractValues(obj)
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -108,8 +108,7 @@ func (p *ClusterRoleBindingProcessor) extractValues(obj *unstructured.Unstructur
 	return values, deps
 }
 
-func (p *ClusterRoleBindingProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
+func (p *ClusterRoleBindingProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -117,7 +116,7 @@ func (p *ClusterRoleBindingProcessor) generateTemplate(ctx processor.Context, se
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: %s-%s
+  name: %s
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
     app.kubernetes.io/component: %s
@@ -131,5 +130,5 @@ subjects:
 {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
 }

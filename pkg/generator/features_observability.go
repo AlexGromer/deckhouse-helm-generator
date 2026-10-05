@@ -568,6 +568,8 @@ func nameExpressions(templates []*resourceTemplate) []string {
 			expr = fmt.Sprintf(`(printf "%%s%s" (include %q $))`, m[2], m[1])
 		} else if reLiteralNm.MatchString(rt.name) {
 			expr = strconv.Quote(rt.name)
+		} else if name, err := strconv.Unquote(rt.name); err == nil && strings.HasPrefix(rt.name, `"`) {
+			expr = strconv.Quote(name) // a name YAML needs quoted, e.g. "123"
 		} else {
 			continue
 		}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -210,19 +211,28 @@ func ResourceNameSuffix(serviceName string) string {
 	return b.String()
 }
 
-// NormalizeResourceNames rewrites object names of the form
-// `{{ include "<chart>.fullname" $ }}-<serviceName>` so that the service-name
-// segment is DNS-1123 compatible. The service name doubles as a values key and
-// therefore is camelCase ("webApp"), which Kubernetes rejects in metadata.name.
-// Rewriting every occurrence keeps names and cross-references (scaleTargetRef,
-// serviceAccountName, backend service names, ...) consistent.
-func NormalizeResourceNames(template, serviceName string) string {
-	suffix := ResourceNameSuffix(serviceName)
-	if serviceName == "" || suffix == serviceName {
-		return template
+// plainObjectName matches names YAML reads back as the same string when
+// written unquoted.
+var plainObjectName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]*$`)
+
+// yamlKeywords are plain scalars YAML resolves to something other than a
+// string (booleans and null in YAML 1.1, which Helm's parser follows).
+var yamlKeywords = map[string]bool{
+	"y": true, "yes": true, "n": true, "no": true, "true": true, "false": true,
+	"on": true, "off": true, "null": true,
+}
+
+// ObjectName returns name as a YAML scalar for metadata.name (and other
+// fields that refer to an object by name): unquoted when YAML reads it back as
+// the same string, double-quoted otherwise (e.g. "system:auth-delegator",
+// "123"). Generated charts keep every object under its name from the input,
+// so references between objects (Ingress backends, roleRef, serviceName,
+// volumes, env, ...) resolve exactly as they did in the input manifests.
+func ObjectName(name string) string {
+	if plainObjectName.MatchString(name) && !yamlKeywords[strings.ToLower(name)] {
+		return name
 	}
-	re := regexp.MustCompile(`(\.fullname" [$.] \}\}-)` + regexp.QuoteMeta(serviceName) + `\b`)
-	return re.ReplaceAllString(template, "${1}"+suffix)
+	return strconv.Quote(name)
 }
 
 // ValuesPathForKind returns the standard values path for a resource kind.

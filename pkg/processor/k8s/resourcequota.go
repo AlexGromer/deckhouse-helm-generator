@@ -43,7 +43,7 @@ func (p *ResourceQuotaProcessor) Process(ctx processor.Context, obj *unstructure
 
 	values := p.extractValues(obj)
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -81,8 +81,7 @@ func (p *ResourceQuotaProcessor) extractValues(obj *unstructured.Unstructured) m
 	return values
 }
 
-func (p *ResourceQuotaProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
+func (p *ResourceQuotaProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -90,7 +89,7 @@ func (p *ResourceQuotaProcessor) generateTemplate(ctx processor.Context, service
 apiVersion: v1
 kind: ResourceQuota
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -110,5 +109,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
 }

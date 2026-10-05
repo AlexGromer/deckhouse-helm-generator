@@ -111,10 +111,11 @@ func InjectAntiAffinity(chart *types.GeneratedChart, opts AntiAffinityOptions) (
 	return out, res, nil
 }
 
-// standardAffinityBlockRe matches the values-driven affinity block that the
-// processors render; any other "affinity:" key means the template already
-// carries hand-made affinity.
-var standardAffinityBlockRe = regexp.MustCompile(`(?m)^ *\{\{- with \.affinity \}\}\n *affinity:\n *\{\{- toYaml \. \| nindent \d+ \}\}\n *\{\{- end \}\}\n`)
+// standardAffinityBlockRe matches the values-driven affinity and
+// topologySpreadConstraints blocks that the processors render; any other
+// "affinity:" or "topologySpreadConstraints:" key means the template already
+// carries hand-made scheduling rules.
+var standardAffinityBlockRe = regexp.MustCompile(`(?m)^ *\{\{- with \.(?:affinity|topologySpreadConstraints) \}\}\n *(?:affinity|topologySpreadConstraints):\n *\{\{- toYaml \. \| nindent \d+ \}\}\n *\{\{- end \}\}\n`)
 
 var nindentRe = regexp.MustCompile(`nindent (\d+)`)
 
@@ -123,12 +124,12 @@ var nindentRe = regexp.MustCompile(`nindent (\d+)`)
 // affinity/topology spread or its shape is not recognised.
 func injectAntiAffinityBlock(content string) (string, bool) {
 	rest := standardAffinityBlockRe.ReplaceAllString(content, "")
-	if strings.Contains(rest, "affinity:") || strings.Contains(content, "topologySpreadConstraints") {
+	if strings.Contains(rest, "affinity:") || strings.Contains(rest, "topologySpreadConstraints") {
 		return content, false
 	}
 
 	lines := strings.Split(content, "\n")
-	selector, ok := extractSelectorMatchLabels(lines)
+	selector, ok := workloadSelectorLines(lines)
 	if !ok {
 		return content, false
 	}
@@ -149,27 +150,24 @@ func injectAntiAffinityBlock(content string) (string, bool) {
 	w(`    requiredDuringSchedulingIgnoredDuringExecution:`)
 	w(`      - topologyKey: {{ $dhgAntiAffinity.topologyKey | default "` + defaultAntiAffinityTopologyKey + `" | quote }}`)
 	w(`        labelSelector:`)
-	w(`          matchLabels:`)
-	b.WriteString(reindentBlock(selector, n+12))
+	b.WriteString(reindentBlock(selector, n+10))
 	w(`    {{- else }}`)
 	w(`    preferredDuringSchedulingIgnoredDuringExecution:`)
 	w(`      - weight: {{ $dhgAntiAffinity.weight | default 100 | int }}`)
 	w(`        podAffinityTerm:`)
 	w(`          topologyKey: {{ $dhgAntiAffinity.topologyKey | default "` + defaultAntiAffinityTopologyKey + `" | quote }}`)
 	w(`          labelSelector:`)
-	w(`            matchLabels:`)
-	b.WriteString(reindentBlock(selector, n+14))
+	b.WriteString(reindentBlock(selector, n+12))
 	w(`    {{- end }}`)
 	w(`{{- end }}`)
 	w(`{{- $dhgZoneSpread := $dhgAntiAffinity.zoneSpread | default dict }}`)
-	w(`{{- if and $dhgAntiAffinity.enabled $dhgZoneSpread.enabled }}`)
+	w(`{{- if and $dhgAntiAffinity.enabled $dhgZoneSpread.enabled (not .topologySpreadConstraints) }}`)
 	w(`topologySpreadConstraints:`)
 	w(`  - maxSkew: {{ $dhgZoneSpread.maxSkew | default 1 | int }}`)
 	w(`    topologyKey: ` + zoneTopologyKey)
 	w(`    whenUnsatisfiable: {{ $dhgZoneSpread.whenUnsatisfiable | default "ScheduleAnyway" }}`)
 	w(`    labelSelector:`)
-	w(`      matchLabels:`)
-	b.WriteString(reindentBlock(selector, n+8))
+	b.WriteString(reindentBlock(selector, n+6))
 	w(`{{- end }}`)
 
 	block := strings.TrimSuffix(b.String(), "\n")
@@ -180,19 +178,18 @@ func injectAntiAffinityBlock(content string) (string, bool) {
 	return strings.Join(out, "\n"), true
 }
 
-// extractSelectorMatchLabels returns the lines under the workload's
-// spec.selector.matchLabels (the first selector of the template).
-func extractSelectorMatchLabels(lines []string) ([]string, bool) {
+// workloadSelectorLines returns the lines below the workload's
+// spec.selector key (the first selector of the template): a label selector
+// (matchLabels and/or matchExpressions, literal or rendered from values) that
+// selects exactly the workload's pods.
+func workloadSelectorLines(lines []string) ([]string, bool) {
 	for i := 0; i+1 < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) != "selector:" || strings.TrimSpace(lines[i+1]) != "matchLabels:" {
+		if strings.TrimSpace(lines[i]) != "selector:" {
 			continue
 		}
-		base := opsIndentWidth(lines[i+1])
-		if base <= opsIndentWidth(lines[i]) {
-			return nil, false
-		}
+		base := opsIndentWidth(lines[i])
 		var body []string
-		for j := i + 2; j < len(lines); j++ {
+		for j := i + 1; j < len(lines); j++ {
 			if strings.TrimSpace(lines[j]) == "" || opsIndentWidth(lines[j]) <= base {
 				break
 			}

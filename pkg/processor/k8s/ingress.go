@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -148,7 +149,7 @@ func (p *IngressProcessor) extractValues(obj *unstructured.Unstructured) (map[st
 				})
 			}
 			if port, ok := service["port"].(map[string]interface{}); ok {
-				if number, ok := port["number"].(int64); ok {
+				if number, ok := toInt64(port["number"]); ok {
 					svcBackend["port"] = number
 				}
 				if name, ok := port["name"].(string); ok {
@@ -156,6 +157,9 @@ func (p *IngressProcessor) extractValues(obj *unstructured.Unstructured) (map[st
 				}
 			}
 			dbValues["service"] = svcBackend
+		}
+		if resource, ok := defaultBackend["resource"].(map[string]interface{}); ok {
+			dbValues["resource"] = resource
 		}
 		values["defaultBackend"] = dbValues
 	}
@@ -208,7 +212,7 @@ func (p *IngressProcessor) extractValues(obj *unstructured.Unstructured) (map[st
 									})
 								}
 								if port, ok := service["port"].(map[string]interface{}); ok {
-									if number, ok := port["number"].(int64); ok {
+									if number, ok := toInt64(port["number"]); ok {
 										svcBackend["port"] = number
 									}
 									if name, ok := port["name"].(string); ok {
@@ -216,6 +220,9 @@ func (p *IngressProcessor) extractValues(obj *unstructured.Unstructured) (map[st
 									}
 								}
 								pe["service"] = svcBackend
+							}
+							if resource, ok := backend["resource"].(map[string]interface{}); ok {
+								pe["resource"] = resource
 							}
 						}
 
@@ -235,7 +242,6 @@ func (p *IngressProcessor) extractValues(obj *unstructured.Unstructured) (map[st
 }
 
 func (p *IngressProcessor) generateTemplate(ctx processor.Context, obj *unstructured.Unstructured, serviceName string) string {
-	fullnameHelper := fmt.Sprintf("{{ include \"%s.fullname\" $ }}", ctx.ChartName)
 
 	template := fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -244,7 +250,7 @@ func (p *IngressProcessor) generateTemplate(ctx processor.Context, obj *unstruct
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -267,8 +273,12 @@ spec:
       secretName: {{ .secretName }}
     {{- end }}
   {{- end }}
+  {{- with .defaultBackend }}
+  defaultBackend:
+%s  {{- end }}
+  {{- with .rules }}
   rules:
-    {{- range .rules }}
+    {{- range . }}
     - host: {{ .host | quote }}
       http:
         paths:
@@ -276,21 +286,44 @@ spec:
           - path: {{ .path }}
             pathType: {{ .pathType | default "Prefix" }}
             backend:
-              service:
-                name: {{ .service.name }}
-                port:
-                  {{- if .service.portName }}
-                  name: {{ .service.portName }}
-                  {{- else }}
-                  number: {{ .service.port }}
-                  {{- end }}
-          {{- end }}
+%s          {{- end }}
     {{- end }}
+  {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName,
-		ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(obj.GetName()),
+		ctx.ChartName, serviceName,
+		ingressBackendTemplate(4), ingressBackendTemplate(14))
 
 	return template
+}
+
+// ingressBackendTemplate renders an Ingress backend (service or resource)
+// from values at the given indentation. The service name is the name from
+// the input, which is also the name the chart gives the Service.
+func ingressBackendTemplate(indent int) string {
+	pad := strings.Repeat(" ", indent)
+	lines := []string{
+		`{{- with .service }}`,
+		`service:`,
+		`  name: {{ .name }}`,
+		`  {{- if .portName }}`,
+		`  port:`,
+		`    name: {{ .portName }}`,
+		`  {{- else if .port }}`,
+		`  port:`,
+		`    number: {{ .port }}`,
+		`  {{- end }}`,
+		`{{- end }}`,
+		`{{- with .resource }}`,
+		`resource:`,
+		fmt.Sprintf(`  {{- toYaml . | nindent %d }}`, indent+2),
+		`{{- end }}`,
+	}
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString(pad + l + "\n")
+	}
+	return b.String()
 }

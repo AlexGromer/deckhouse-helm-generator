@@ -24,11 +24,13 @@ func TestIstioFeature(t *testing.T) {
 		"apiVersion: networking.istio.io/v1\nkind: DestinationRule",
 		"apiVersion: security.istio.io/v1\nkind: PeerAuthentication",
 		"apiVersion: security.istio.io/v1\nkind: AuthorizationPolicy",
-		`    - {{ include "app.fullname" $ }}-web`,
-		`            host: {{ include "app.fullname" $ }}-web`,
-		`  host: {{ include "app.fullname" $ }}-web`,
-		// Service selector re-indented under matchLabels.
-		"    matchLabels:\n      {{- include \"app.selectorLabels\" $ | nindent 6 }}\n      app.kubernetes.io/component: web",
+		"    - web\n",
+		"            host: web\n",
+		"  host: web\n",
+		// The Service's selector (from values) re-indented under matchLabels;
+		// workload-scoped policies only exist while the Service has one.
+		"  selector:\n    matchLabels:\n      {{- toYaml .selector | nindent 6 }}\n",
+		"{{- if .selector }}\n{{- if $.Values.istio.peerAuthentication.mtlsMode }}",
 		"{{- if $.Values.istio.authorizationPolicy.rules }}",
 	} {
 		if !strings.Contains(content, want) {

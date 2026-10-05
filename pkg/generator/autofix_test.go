@@ -13,6 +13,9 @@ metadata:
   name: test-app
 spec:
   replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: testApp
   template:
     metadata:
       labels:
@@ -30,6 +33,9 @@ metadata:
   name: test-db
 spec:
   replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: testDb
   template:
     metadata:
       labels:
@@ -232,7 +238,8 @@ func TestInjectPDB(t *testing.T) {
 		"templates/statefulset-pdb.yaml": "testDb",
 	} {
 		pdb := result.Templates[path]
-		for _, want := range []string{"kind: PodDisruptionBudget", "maxUnavailable: 1", "app.kubernetes.io/component: " + component} {
+		// The selector is the workload's own spec.selector.
+		for _, want := range []string{"kind: PodDisruptionBudget", "maxUnavailable: 1", "  selector:\n    matchLabels:\n      app.kubernetes.io/component: " + component + "\n"} {
 			if !strings.Contains(pdb, want) {
 				t.Errorf("%s missing %q:\n%s", path, want, pdb)
 			}

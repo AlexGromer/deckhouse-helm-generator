@@ -41,7 +41,7 @@ func (p *TriggerAuthenticationProcessor) Process(ctx processor.Context, obj *uns
 	namespace := obj.GetNamespace()
 
 	values := p.extractValues(obj)
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -83,7 +83,7 @@ func (p *TriggerAuthenticationProcessor) extractValues(obj *unstructured.Unstruc
 	return values
 }
 
-func (p *TriggerAuthenticationProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
+func (p *TriggerAuthenticationProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 	sanitized := processor.SanitizeServiceName(serviceName)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
@@ -111,5 +111,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, sanitized, serviceName, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName)
 }

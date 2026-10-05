@@ -42,7 +42,7 @@ func (p *RoleProcessor) Process(ctx processor.Context, obj *unstructured.Unstruc
 
 	values := p.extractValues(obj)
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -68,8 +68,7 @@ func (p *RoleProcessor) extractValues(obj *unstructured.Unstructured) map[string
 	return values
 }
 
-func (p *RoleProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
+func (p *RoleProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -77,7 +76,7 @@ func (p *RoleProcessor) generateTemplate(ctx processor.Context, serviceName stri
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -88,5 +87,5 @@ rules:
 {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
 }

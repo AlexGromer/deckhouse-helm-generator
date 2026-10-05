@@ -20,7 +20,7 @@ func TestPrometheusRulesFeature(t *testing.T) {
 		"apiVersion: monitoring.coreos.com/v1",
 		"kind: PrometheusRule",
 		// Every workload of the chart (sorted by template path) is selected by pod name.
-		`{{- $pods := list (printf "%s-backup" (include "app.fullname" $)) (printf "%s-db" (include "app.fullname" $)) (printf "%s-web" (include "app.fullname" $)) }}`,
+		`{{- $pods := list "backup" "db" "web" }}`,
 		`max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff", {{ $sel }}}[5m]) >= 1`,
 		`increase(kube_pod_container_status_restarts_total{{ $matcher }}[1h]) > 5`,
 		// Prometheus label references are escaped from Helm.

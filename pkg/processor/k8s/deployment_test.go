@@ -1323,8 +1323,15 @@ func TestProcessDeployment_GeneratesTemplate(t *testing.T) {
 	testutil.AssertContains(t, tpl, "kind: Deployment", "template should have kind")
 	testutil.AssertContains(t, tpl, "{{ $.Release.Namespace }}", "template should use release namespace")
 	testutil.AssertContains(t, tpl, `include "myapp.labels"`, "template should include labels helper")
-	testutil.AssertContains(t, tpl, `include "myapp.selectorLabels"`, "template should include selectorLabels helper")
-	testutil.AssertContains(t, tpl, `include "myapp.fullname"`, "template should include fullname helper")
+	testutil.AssertContains(t, tpl, "  name: test-deploy\n", "the Deployment keeps its name from the input")
+	if strings.Contains(tpl, `fullname`) {
+		t.Error("the name must not get the release prefix")
+	}
+	testutil.AssertContains(t, tpl, "  selector:\n    {{- toYaml .selector | nindent 4 }}", "the selector comes from values (the input's selector)")
+	if strings.Contains(tpl, `selectorLabels`) {
+		t.Error("chart selector labels must not replace the input's selector")
+	}
+	testutil.AssertContains(t, tpl, `merge (dict) (.podLabels | default dict) (include "myapp.labels" $ | fromYaml)`, "pod labels from the input win over chart labels")
 	testutil.AssertContains(t, tpl, ".replicas", "template should reference replicas")
 	testutil.AssertContains(t, tpl, ".image.repository", "template should reference image repo")
 	testutil.AssertContains(t, tpl, ".image.tag", "template should reference image tag")
@@ -1399,10 +1406,10 @@ func TestNewDeploymentProcessor(t *testing.T) {
 
 func TestParseImage(t *testing.T) {
 	tests := []struct {
-		name       string
-		image      string
-		wantRepo   string
-		wantTag    string
+		name     string
+		image    string
+		wantRepo string
+		wantTag  string
 	}{
 		{"WithTag", "nginx:1.21", "nginx", "1.21"},
 		{"NoTag", "nginx", "nginx", "latest"},
@@ -1622,7 +1629,7 @@ func TestExtractVolumeDependencies(t *testing.T) {
 				"emptyDir": map[string]interface{}{},
 			},
 			map[string]interface{}{
-				"name":     "config",
+				"name":      "config",
 				"configMap": map[string]interface{}{"name": "cfg"},
 			},
 			map[string]interface{}{

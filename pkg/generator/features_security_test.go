@@ -377,6 +377,28 @@ func TestFeatureExternalSecrets(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("externalSecrets.secrets =\n%v\nwant\n%v", got, want)
 	}
+	// The chart's own api-keys Secret (same name as the ExternalSecret's
+	// target) gives way to the ExternalSecret; other Secrets are untouched.
+	guarded := 0
+	for path, content := range out.Templates {
+		if !strings.Contains(content, "kind: Secret\n") {
+			continue
+		}
+		if !strings.Contains(content, "  name: api-keys\n") {
+			if strings.Contains(content, "externalSecrets") {
+				t.Errorf("%s must not be guarded:\n%s", path, content)
+			}
+			continue
+		}
+		if !strings.HasPrefix(content, `{{- if not (and .Values.externalSecrets .Values.externalSecrets.enabled (hasKey (.Values.externalSecrets.secrets | default dict) "api-keys")) }}`) ||
+			!strings.HasSuffix(content, "\n{{- end }}\n") {
+			t.Errorf("%s is not guarded by externalSecrets:\n%s", path, content)
+		}
+		guarded++
+	}
+	if guarded != 1 {
+		t.Errorf("guarded %d Secret templates, want 1", guarded)
+	}
 
 	// Separate mode: db-credentials is used by both charts but owned by one.
 	sep, sgraph := secTestCharts(t, types.OutputModeSeparate, secTestManifests)

@@ -23,7 +23,7 @@ const obsDeploymentTemplate = `{{- $svc := .Values.services.web -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "app.fullname" $ }}-web
+  name: web
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "app.labels" $ | nindent 4 }}
@@ -33,9 +33,7 @@ spec:
   replicas: {{ .replicas | default 1 }}
   {{- end }}
   selector:
-    matchLabels:
-      {{- include "app.selectorLabels" $ | nindent 6 }}
-      app.kubernetes.io/component: web
+    {{- toYaml .selector | nindent 4 }}
   template:
     metadata:
       {{- with .podAnnotations }}
@@ -43,8 +41,8 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "app.labels" $ | nindent 8 }}
-        app.kubernetes.io/component: web
+        {{- /* Pod labels from the input win over the chart labels: the input's selectors must keep matching. */}}
+        {{- toYaml (merge (dict) (.podLabels | default dict) (include "app.labels" $ | fromYaml)) | nindent 8 }}
     spec:
       containers:
         {{- range .containers }}
@@ -61,7 +59,7 @@ const obsServiceTemplate = `{{- $svc := .Values.services.web -}}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "app.fullname" $ }}-web
+  name: web
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "app.labels" $ | nindent 4 }}
@@ -77,9 +75,11 @@ spec:
     - name: {{ .name | default "http" }}
       port: {{ .port }}
     {{- end }}
+  {{- /* The selector of the input Service: it selects the pods by their labels from the input. */}}
+  {{- if .selector }}
   selector:
-    {{- include "app.selectorLabels" $ | nindent 4 }}
-    app.kubernetes.io/component: web
+    {{- toYaml .selector | nindent 4 }}
+  {{- end }}
 {{- end }}
 {{- end }}
 `
@@ -90,18 +90,18 @@ const obsStatefulSetTemplate = `{{- $svc := .Values.services.db -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "app.fullname" $ }}-db
+  name: db
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "app.labels" $ | nindent 4 }}
     app.kubernetes.io/component: db
 spec:
-  serviceName: {{ .serviceName }}
+  {{- with .serviceName }}
+  serviceName: {{ . }}
+  {{- end }}
   replicas: {{ .replicas | default 1 }}
   selector:
-    matchLabels:
-      {{- include "app.selectorLabels" $ | nindent 6 }}
-      app.kubernetes.io/component: db
+    {{- toYaml .selector | nindent 4 }}
   template:
     metadata:
       {{- with .podAnnotations }}
@@ -109,8 +109,8 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "app.labels" $ | nindent 8 }}
-        app.kubernetes.io/component: db
+        {{- /* Pod labels from the input win over the chart labels: the input's selectors must keep matching. */}}
+        {{- toYaml (merge (dict) (.podLabels | default dict) (include "app.labels" $ | fromYaml)) | nindent 8 }}
     spec:
       containers:
         {{- range .containers }}
@@ -127,7 +127,7 @@ const obsCronJobTemplate = `{{- $svc := .Values.services.backup -}}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ include "app.fullname" $ }}-backup
+  name: backup
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "app.labels" $ | nindent 4 }}
@@ -257,7 +257,7 @@ func assertTemplateParses(t *testing.T, name, content string) {
 	stub := func(...interface{}) interface{} { return nil }
 	funcs := template.FuncMap{}
 	for _, f := range []string{"include", "toYaml", "nindent", "indent", "quote", "default", "list",
-		"join", "trimSuffix", "trunc", "tpl", "printf"} {
+		"join", "trimSuffix", "trunc", "tpl", "printf", "merge", "dict", "fromYaml", "concat"} {
 		funcs[f] = stub
 	}
 	if _, err := template.New(name).Funcs(funcs).Parse(content); err != nil {
@@ -280,7 +280,7 @@ func TestParseResourceTemplate(t *testing.T) {
 	if !ok {
 		t.Fatal("generated Deployment template not recognised")
 	}
-	if rt.kind != "Deployment" || rt.name != `{{ include "app.fullname" $ }}-web` {
+	if rt.kind != "Deployment" || rt.name != "web" {
 		t.Errorf("kind=%q name=%q", rt.kind, rt.name)
 	}
 	if len(rt.prefix) != 3 || len(rt.suffix) != 2 {
@@ -289,7 +289,7 @@ func TestParseResourceTemplate(t *testing.T) {
 	if rt.render() != obsDeploymentTemplate {
 		t.Errorf("render() does not round-trip:\n%s", rt.render())
 	}
-	if got := rt.selector(); len(got) != 4 || got[0] != "  selector:" {
+	if got := rt.selector(); len(got) != 2 || got[0] != "  selector:" {
 		t.Errorf("selector() = %q", got)
 	}
 	if got := rt.labels(); len(got) != 3 || got[0] != "  labels:" {
@@ -390,9 +390,10 @@ func TestNameExpressions(t *testing.T) {
 		{name: "literal-name"},
 		{name: `{{ .Values.weird }}`},
 		{name: `{{ include "app.fullname" $ }}-web`},
+		{name: `"123"`},
 	}
 	got := nameExpressions(templates)
-	want := []string{`(printf "%s-web" (include "app.fullname" $))`, `"literal-name"`}
+	want := []string{`(printf "%s-web" (include "app.fullname" $))`, `"literal-name"`, `"123"`}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("nameExpressions = %q, want %q", got, want)
 	}

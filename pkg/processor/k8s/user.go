@@ -102,5 +102,5 @@ spec:
   {{- end }}
   password: {{ .passwordRef | default "CHANGE_ME" }}
 {{- end }}
-`, sanitized, name, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName)
 }

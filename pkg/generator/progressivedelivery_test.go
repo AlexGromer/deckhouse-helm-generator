@@ -49,7 +49,7 @@ func TestArgoRolloutsFeature(t *testing.T) {
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
 metadata:
-  name: {{ include "app.fullname" $ }}-web
+  name: web
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "app.labels" $ | nindent 4 }}
@@ -59,13 +59,11 @@ spec:
   replicas: {{ .replicas | default 1 }}
   {{- end }}
   selector:
-    matchLabels:
-      {{- include "app.selectorLabels" $ | nindent 6 }}
-      app.kubernetes.io/component: web
+    {{- toYaml .selector | nindent 4 }}
   workloadRef:
     apiVersion: apps/v1
     kind: "Deployment"
-    name: {{ include "app.fullname" $ }}-web
+    name: web
     scaleDown: {{ $.Values.argoRollouts.scaleDown | default "progressively" }}
   strategy:
     canary:

@@ -378,8 +378,10 @@ func TestApplyNamespaceResources_SelectsOwnGroupAndAddsValues(t *testing.T) {
 		}
 	}
 	np := out.Templates["templates/frontend-networkpolicy.yaml"]
-	if !strings.Contains(np, `include "frontend.fullname"`) || !strings.Contains(np, "app.kubernetes.io/component") {
-		t.Errorf("network policy must use chart helpers and select pods by component:\n%s", np)
+	// The Deployment has no selector in the input: the processor gives it
+	// app=<name>, and the policy selects the same pods.
+	if !strings.Contains(np, `include "frontend.fullname"`) || !strings.Contains(np, "  podSelector:\n    matchLabels:\n      app: frontend\n") {
+		t.Errorf("network policy must use chart helpers and select the workload's pods:\n%s", np)
 	}
 	if _, ok := out.Templates["templates/frontend-networkpolicy-default.yaml"]; ok {
 		t.Error("default policy must be skipped when a fine-grained policy exists")

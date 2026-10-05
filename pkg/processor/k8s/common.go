@@ -135,6 +135,11 @@ func (p *StatefulSetProcessor) Process(ctx processor.Context, obj *unstructured.
 		values["volumeClaimTemplates"] = vcts
 	}
 
+	// PVC retention policy
+	if policy, found, _ := unstructured.NestedMap(obj.Object, "spec", "persistentVolumeClaimRetentionPolicy"); found {
+		values["persistentVolumeClaimRetentionPolicy"] = policy
+	}
+
 	// Pod management policy
 	if policy, found, _ := unstructured.NestedString(obj.Object, "spec", "podManagementPolicy"); found {
 		values["podManagementPolicy"] = policy
@@ -145,7 +150,7 @@ func (p *StatefulSetProcessor) Process(ctx processor.Context, obj *unstructured.
 		values["updateStrategy"] = strategy
 	}
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -158,95 +163,42 @@ func (p *StatefulSetProcessor) Process(ctx processor.Context, obj *unstructured.
 	}, nil
 }
 
-func (p *StatefulSetProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf("{{ include \"%s.fullname\" $ }}", ctx.ChartName)
-
+func (p *StatefulSetProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
 {{- with $svc.statefulSet }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
     app.kubernetes.io/component: %s
 spec:
-  serviceName: {{ .serviceName }}
+  {{- with .serviceName }}
+  serviceName: {{ . }}
+  {{- end }}
   replicas: {{ .replicas | default 1 }}
   {{- with .podManagementPolicy }}
   podManagementPolicy: {{ . }}
   {{- end }}
-  selector:
-    matchLabels:
-      {{- include "%s.selectorLabels" $ | nindent 6 }}
-      app.kubernetes.io/component: %s
-  {{- with .updateStrategy }}
+%s  {{- with .updateStrategy }}
   updateStrategy:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-  template:
-    metadata:
-      {{- with .podAnnotations }}
-      annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      labels:
-        {{- include "%s.labels" $ | nindent 8 }}
-        app.kubernetes.io/component: %s
-    spec:
-      {{- with $.Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .serviceAccountName }}
-      serviceAccountName: {{ . }}
-      {{- end }}
-      containers:
-        {{- range .containers }}
-        - name: {{ .name }}
-          image: "{{ .image.repository }}:{{ .image.tag }}"
-          imagePullPolicy: {{ .image.pullPolicy | default "IfNotPresent" }}
-          {{- with .ports }}
-          ports:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .env }}
-          env:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .volumeMounts }}
-          volumeMounts:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-        {{- end }}
-      {{- with .volumes }}
-      volumes:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-  {{- with .volumeClaimTemplates }}
+  {{- with .persistentVolumeClaimRetentionPolicy }}
+  persistentVolumeClaimRetentionPolicy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+%s  {{- with .volumeClaimTemplates }}
   volumeClaimTemplates:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName,
-		ctx.ChartName, serviceName,
-		ctx.ChartName, serviceName,
-		ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName,
+		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, ""))
 }
 
 // DaemonSetProcessor processes Kubernetes DaemonSets.
@@ -283,7 +235,7 @@ func (p *DaemonSetProcessor) Process(ctx processor.Context, obj *unstructured.Un
 		values["updateStrategy"] = strategy
 	}
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -296,86 +248,27 @@ func (p *DaemonSetProcessor) Process(ctx processor.Context, obj *unstructured.Un
 	}, nil
 }
 
-func (p *DaemonSetProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf("{{ include \"%s.fullname\" $ }}", ctx.ChartName)
-
+func (p *DaemonSetProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
 {{- with $svc.daemonSet }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
     app.kubernetes.io/component: %s
 spec:
-  selector:
-    matchLabels:
-      {{- include "%s.selectorLabels" $ | nindent 6 }}
-      app.kubernetes.io/component: %s
-  {{- with .updateStrategy }}
+%s  {{- with .updateStrategy }}
   updateStrategy:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-  template:
-    metadata:
-      {{- with .podAnnotations }}
-      annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      labels:
-        {{- include "%s.labels" $ | nindent 8 }}
-        app.kubernetes.io/component: %s
-    spec:
-      {{- with $.Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .serviceAccountName }}
-      serviceAccountName: {{ . }}
-      {{- end }}
-      containers:
-        {{- range .containers }}
-        - name: {{ .name }}
-          image: "{{ .image.repository }}:{{ .image.tag }}"
-          imagePullPolicy: {{ .image.pullPolicy | default "IfNotPresent" }}
-          {{- with .ports }}
-          ports:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .env }}
-          env:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .volumeMounts }}
-          volumeMounts:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-        {{- end }}
-      {{- with .volumes }}
-      volumes:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, serviceName, fullnameHelper, serviceName,
-		ctx.ChartName, serviceName,
-		ctx.ChartName, serviceName,
-		ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName,
+		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, ""))
 }
 
 // PVCProcessor processes Kubernetes PersistentVolumeClaims.
@@ -448,7 +341,7 @@ func (p *PVCProcessor) Process(ctx processor.Context, obj *unstructured.Unstruct
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "%s.fullname" $ }}-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -461,12 +354,20 @@ spec:
   {{- with .volumeMode }}
   volumeMode: {{ . }}
   {{- end }}
+  {{- with .dataSource }}
+  dataSource:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .selector }}
+  selector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   resources:
     {{- toYaml .resources | nindent 4 }}
 {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, ctx.ChartName, name, ctx.ChartName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName)
 
 	return &processor.Result{
 		Processed:       true,
@@ -478,85 +379,17 @@ spec:
 	}, nil
 }
 
-// Helper function to extract common workload values (used by Deployment, StatefulSet, DaemonSet).
+// extractWorkloadValues extracts the values shared by StatefulSets and
+// DaemonSets: replicas, the pod template and the selector.
 func extractWorkloadValues(obj *unstructured.Unstructured) (map[string]interface{}, []types.ResourceKey) {
 	values := make(map[string]interface{})
-	var deps []types.ResourceKey
 
 	// Replicas (not for DaemonSet)
-	if replicas, found, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas"); found {
+	if replicas, ok := nestedInt64(obj.Object, "spec", "replicas"); ok {
 		values["replicas"] = replicas
 	}
 
-	// Containers
-	if containers, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers"); len(containers) > 0 {
-		containerValues := make([]map[string]interface{}, 0, len(containers))
-		for _, c := range containers {
-			container, ok := c.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			cv := make(map[string]interface{})
-			if name, ok := container["name"].(string); ok {
-				cv["name"] = name
-			}
-			if image, ok := container["image"].(string); ok {
-				repo, tag := parseImage(image)
-				cv["image"] = map[string]interface{}{
-					"repository": repo,
-					"tag":        tag,
-				}
-			}
-			if resources, ok := container["resources"].(map[string]interface{}); ok {
-				cv["resources"] = resources
-			}
-			if ports, ok := container["ports"].([]interface{}); ok {
-				cv["ports"] = ports
-			}
-			if env, ok := container["env"].([]interface{}); ok {
-				cv["env"] = env
-				deps = append(deps, extractEnvDependencies(env, obj.GetNamespace())...)
-			}
-			if volumeMounts, ok := container["volumeMounts"].([]interface{}); ok {
-				cv["volumeMounts"] = volumeMounts
-			}
-
-			containerValues = append(containerValues, cv)
-		}
-		values["containers"] = containerValues
-	}
-
-	// Volumes
-	if volumes, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "volumes"); len(volumes) > 0 {
-		values["volumes"] = volumes
-		deps = append(deps, extractVolumeDependencies(volumes, obj.GetNamespace())...)
-	}
-
-	// ServiceAccount
-	if sa, found, _ := unstructured.NestedString(obj.Object, "spec", "template", "spec", "serviceAccountName"); found && sa != "" {
-		values["serviceAccountName"] = sa
-		deps = append(deps, types.ResourceKey{
-			GVK:       schema.GroupVersionKind{Version: "v1", Kind: "ServiceAccount"},
-			Namespace: obj.GetNamespace(),
-			Name:      sa,
-		})
-	}
-
-	// Node selector
-	if nodeSelector, found, _ := unstructured.NestedStringMap(obj.Object, "spec", "template", "spec", "nodeSelector"); found {
-		values["nodeSelector"] = nodeSelector
-	}
-
-	// Tolerations
-	if tolerations, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "tolerations"); len(tolerations) > 0 {
-		values["tolerations"] = tolerations
-	}
-
-	// Pod annotations
-	if annotations, found, _ := unstructured.NestedStringMap(obj.Object, "spec", "template", "metadata", "annotations"); found {
-		values["podAnnotations"] = annotations
-	}
-
+	deps := extractPodTemplateValues(obj, values, "spec", "template")
+	extractWorkloadSelector(obj, values)
 	return values, deps
 }
