@@ -148,8 +148,14 @@ func TestGenerateNOTES_WithAuth(t *testing.T) {
 }
 
 func TestGenerateREADME(t *testing.T) {
-	out := GenerateREADME(ChartMetadata{Name: "myapp"}, []string{"web"})
-	for _, want := range []string{"# myapp", "helm install", "web", "helm uninstall"} {
+	out := GenerateREADME(ChartMetadata{Name: "myapp"}, map[string]interface{}{
+		"services": map[string]interface{}{"web": map[string]interface{}{"enabled": true, "deployment": map[string]interface{}{"replicas": 2}}},
+		"global":   map[string]interface{}{"imagePullSecrets": []interface{}{}},
+		"podLabels": map[string]interface{}{"app.kubernetes.io/name": "web"},
+	})
+	for _, want := range []string{"# myapp", "helm install", "helm uninstall",
+		"| `services.web.enabled` | `true` |", "| `services.web.deployment.replicas` | `2` |",
+		"| `global.imagePullSecrets` | `[]` |", "`podLabels.app\\.kubernetes\\.io/name`"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in README", want)
 		}

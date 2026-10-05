@@ -45,15 +45,15 @@ func TestNewRootCmd(t *testing.T) {
 		subNames[sub.Use] = true
 	}
 
-	for _, expected := range []string{"generate", "analyze", "validate", "diff <dir1> <dir2>", "version", "features"} {
+	for _, expected := range []string{"generate", "analyze", "validate", "diff <dir1> <dir2>", "version", "features", "graph"} {
 		if !subNames[expected] {
 			t.Errorf("expected subcommand %q to be registered", expected)
 		}
 	}
 
 	got := len(cmd.Commands())
-	if got != 8 {
-		t.Errorf("expected 8 subcommands (generate, analyze, validate, diff, version, fix, migrate, features), got %d", got)
+	if got != 9 {
+		t.Errorf("expected 9 subcommands (generate, analyze, validate, diff, version, fix, migrate, features, graph), got %d", got)
 	}
 }
 
@@ -749,5 +749,21 @@ func TestGenerateCmd_PostRendererFlag(t *testing.T) {
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("Expected default value 'false', got '%s'", flag.DefValue)
+	}
+}
+
+func TestGraphCmd(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "g")
+	for format, want := range map[string]string{"dot": "digraph resources", "mermaid": "flowchart LR"} {
+		if _, err := executeCmd(t, "graph", "-f", "../../examples/05-full-stack", "--format", format, "-o", out); err != nil {
+			t.Fatalf("%s: %v", format, err)
+		}
+		data, _ := os.ReadFile(out)
+		if !strings.Contains(string(data), want) || !strings.Contains(string(data), "Deployment") {
+			t.Errorf("%s output missing %q:\n%s", format, want, data)
+		}
+	}
+	if _, err := executeCmd(t, "graph", "-f", "../../examples/05-full-stack", "--format", "png"); err == nil {
+		t.Error("expected error for an unknown format")
 	}
 }

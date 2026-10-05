@@ -667,3 +667,25 @@ func TestAutoDeps_KafkaBootstrapServersCanonical(t *testing.T) {
 		t.Errorf("expected 'kafka' dependency from KAFKA_BOOTSTRAP_SERVERS env var, got: %+v", deps)
 	}
 }
+
+func TestInjectDependencies_MergesIntoExistingList(t *testing.T) {
+	chart := &types.GeneratedChart{
+		Name:       "app",
+		ChartYAML:  "apiVersion: v2\nname: app\nversion: 0.1.0\ndependencies:\n  - name: helm_lib\n    version: \"*\"\n    repository: https://example.com\n  - name: redis\n    version: 1.0.0\n    repository: https://example.com\n",
+		ValuesYAML: "redis:\n  enabled: true\n",
+		Templates:  map[string]string{},
+	}
+	out := InjectDependencies(chart, []helm.Dependency{
+		{Name: "redis", Version: "2.0.0", Repository: "https://charts.bitnami.com/bitnami", Condition: "redis.enabled"},
+		{Name: "postgresql", Version: "16.0.0", Repository: "https://charts.bitnami.com/bitnami", Condition: "postgresql.enabled"},
+	})
+	if n := strings.Count(out.ChartYAML, "dependencies:"); n != 1 {
+		t.Errorf("expected one dependencies key, got %d:\n%s", n, out.ChartYAML)
+	}
+	if strings.Count(out.ChartYAML, "name: redis") != 1 || !strings.Contains(out.ChartYAML, "name: postgresql") {
+		t.Errorf("redis must not be duplicated and postgresql must be added:\n%s", out.ChartYAML)
+	}
+	if !strings.Contains(out.ValuesYAML, "postgresql:\n  enabled: false") || strings.Count(out.ValuesYAML, "redis:") != 1 {
+		t.Errorf("unexpected values:\n%s", out.ValuesYAML)
+	}
+}

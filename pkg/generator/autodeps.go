@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
@@ -149,63 +150,60 @@ func FilterExistingDependencies(detected []helm.Dependency, existing []helm.Depe
 	return filtered
 }
 
-// InjectDependencies appends a dependencies section to the chart's ChartYAML and
-// adds condition values ("<name>.enabled: false") to ValuesYAML for each
-// dependency. Returns nil if chart is nil.
+// InjectDependencies adds dependencies to the chart's Chart.yaml (merging
+// into an existing dependencies list, skipping names already declared) and a
+// "<name>.enabled: false" value for each added dependency. Returns nil if
+// chart is nil. The input chart is not mutated.
 func InjectDependencies(chart *types.GeneratedChart, deps []helm.Dependency) *types.GeneratedChart {
 	if chart == nil {
 		return nil
 	}
-
-	// Build the dependencies YAML block.
-	var depYAML strings.Builder
-	if len(deps) > 0 {
-		depYAML.WriteString("\ndependencies:\n")
-		for _, d := range deps {
-			depYAML.WriteString(fmt.Sprintf("  - name: %s\n", d.Name))
-			depYAML.WriteString(fmt.Sprintf("    version: %s\n", d.Version))
-			depYAML.WriteString(fmt.Sprintf("    repository: %s\n", d.Repository))
-			if d.Condition != "" {
-				depYAML.WriteString(fmt.Sprintf("    condition: %s\n", d.Condition))
-			}
-		}
+	out := cloneChart(chart)
+	deps = FilterExistingDependencies(deps, declaredDependencies(chart.ChartYAML))
+	if len(deps) == 0 {
+		return out
 	}
 
-	// Build the condition values block.
-	var valuesBlock strings.Builder
+	var entries strings.Builder
 	for _, d := range deps {
-		valuesBlock.WriteString(fmt.Sprintf("\n%s:\n  enabled: false\n", d.Name))
-	}
-
-	// Deep-copy Templates and ExternalFiles to preserve immutability contract.
-	newTemplates := make(map[string]string, len(chart.Templates))
-	for k, v := range chart.Templates {
-		newTemplates[k] = v
-	}
-	newExternalFiles := make([]types.ExternalFileInfo, len(chart.ExternalFiles))
-	copy(newExternalFiles, chart.ExternalFiles)
-
-	// Merge dependencies into ChartYAML, avoiding duplication.
-	mergedChartYAML := chart.ChartYAML
-	if len(deps) > 0 && !strings.Contains(mergedChartYAML, "dependencies:") {
-		// Ensure trailing newline before appending.
-		if mergedChartYAML != "" && !strings.HasSuffix(mergedChartYAML, "\n") {
-			mergedChartYAML += "\n"
+		entries.WriteString(fmt.Sprintf("  - name: %s\n", d.Name))
+		entries.WriteString(fmt.Sprintf("    version: %q\n", d.Version))
+		entries.WriteString(fmt.Sprintf("    repository: %s\n", d.Repository))
+		if d.Condition != "" {
+			entries.WriteString(fmt.Sprintf("    condition: %s\n", d.Condition))
 		}
-		mergedChartYAML += depYAML.String()
+	}
+	if i := strings.Index(out.ChartYAML, "\ndependencies:\n"); i >= 0 {
+		at := i + len("\ndependencies:\n")
+		out.ChartYAML = out.ChartYAML[:at] + entries.String() + out.ChartYAML[at:]
+	} else {
+		if out.ChartYAML != "" && !strings.HasSuffix(out.ChartYAML, "\n") {
+			out.ChartYAML += "\n"
+		}
+		out.ChartYAML += "dependencies:\n" + entries.String()
 	}
 
-	return &types.GeneratedChart{
-		Name:          chart.Name,
-		Path:          chart.Path,
-		ChartYAML:     mergedChartYAML,
-		ValuesYAML:    chart.ValuesYAML + valuesBlock.String(),
-		Templates:     newTemplates,
-		Helpers:       chart.Helpers,
-		Notes:         chart.Notes,
-		ValuesSchema:  chart.ValuesSchema,
-		ExternalFiles: newExternalFiles,
+	for _, d := range deps {
+		if values, err := appendTopLevelValues(out.ValuesYAML, d.Name, map[string]interface{}{"enabled": false}); err == nil {
+			out.ValuesYAML = values
+		}
 	}
+	return out
+}
+
+var dependencyNameRegex = regexp.MustCompile(`(?m)^\s+- name: "?([^"\s]+)"?\s*$`)
+
+// declaredDependencies returns the dependencies already listed in Chart.yaml.
+func declaredDependencies(chartYAML string) []helm.Dependency {
+	i := strings.Index(chartYAML, "\ndependencies:\n")
+	if i < 0 {
+		return nil
+	}
+	var deps []helm.Dependency
+	for _, m := range dependencyNameRegex.FindAllStringSubmatch(chartYAML[i:], -1) {
+		deps = append(deps, helm.Dependency{Name: m[1]})
+	}
+	return deps
 }
 
 // ---------------------------------------------------------------------------

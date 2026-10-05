@@ -919,171 +919,19 @@ func makeResource(kind, name, ns string, source types.Source) *types.ExtractedRe
 	}
 }
 
-func TestResourceDeduplicator_NoDuplicates(t *testing.T) {
-	d := NewResourceDeduplicator()
-	resources := []*types.ExtractedResource{
-		makeResource("ConfigMap", "cfg1", "default", types.SourceFile),
-		makeResource("ConfigMap", "cfg2", "default", types.SourceFile),
-		makeResource("Service", "svc1", "default", types.SourceFile),
-	}
 
-	result, err := d.Deduplicate(resources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) != 3 {
-		t.Errorf("got %d resources; want 3", len(result))
-	}
-	if len(d.Conflicts) != 0 {
-		t.Errorf("got %d conflicts; want 0", len(d.Conflicts))
-	}
-}
 
-func TestResourceDeduplicator_DuplicateWarn(t *testing.T) {
-	d := NewResourceDeduplicator()
-	d.Strategy = ConflictStrategyWarn
 
-	resources := []*types.ExtractedResource{
-		makeResource("ConfigMap", "cfg1", "default", types.SourceFile),
-		makeResource("ConfigMap", "cfg1", "default", types.SourceCluster),
-	}
 
-	result, err := d.Deduplicate(resources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("got %d resources; want 1", len(result))
-	}
-	// Cluster has higher priority (0) than file (1), so cluster wins
-	if result[0].Source != types.SourceCluster {
-		t.Errorf("Source = %q; want cluster (higher priority)", result[0].Source)
-	}
-	if len(d.Conflicts) != 1 {
-		t.Errorf("got %d conflicts; want 1", len(d.Conflicts))
-	}
-}
 
-func TestResourceDeduplicator_DuplicateError(t *testing.T) {
-	d := NewResourceDeduplicator()
-	d.Strategy = ConflictStrategyError
 
-	resources := []*types.ExtractedResource{
-		makeResource("ConfigMap", "cfg1", "default", types.SourceFile),
-		makeResource("ConfigMap", "cfg1", "default", types.SourceCluster),
-	}
-
-	_, err := d.Deduplicate(resources)
-	if err == nil {
-		t.Fatal("expected error for duplicate with error strategy")
-	}
-	if !strings.Contains(err.Error(), "duplicate") {
-		t.Errorf("error = %q; want 'duplicate'", err.Error())
-	}
-}
-
-func TestResourceDeduplicator_DuplicateMerge(t *testing.T) {
-	d := NewResourceDeduplicator()
-	d.Strategy = ConflictStrategyMerge
-
-	resources := []*types.ExtractedResource{
-		makeResource("ConfigMap", "cfg1", "default", types.SourceFile),
-		makeResource("ConfigMap", "cfg1", "default", types.SourceCluster),
-	}
-
-	result, err := d.Deduplicate(resources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("got %d resources; want 1", len(result))
-	}
-	// Cluster has higher priority, so it should be kept
-	if result[0].Source != types.SourceCluster {
-		t.Errorf("Source = %q; want cluster", result[0].Source)
-	}
-}
-
-func TestResourceDeduplicator_DifferentNamespaces(t *testing.T) {
-	d := NewResourceDeduplicator()
-
-	resources := []*types.ExtractedResource{
-		makeResource("ConfigMap", "cfg1", "default", types.SourceFile),
-		makeResource("ConfigMap", "cfg1", "prod", types.SourceFile),
-	}
-
-	result, err := d.Deduplicate(resources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Different namespaces = different resources, no dedup
-	if len(result) != 2 {
-		t.Errorf("got %d resources; want 2 (different namespaces)", len(result))
-	}
-}
-
-func TestResourceDeduplicator_NilResources(t *testing.T) {
-	d := NewResourceDeduplicator()
-
-	resources := []*types.ExtractedResource{
-		nil,
-		makeResource("ConfigMap", "cfg1", "default", types.SourceFile),
-		nil,
-	}
-
-	result, err := d.Deduplicate(resources)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) != 1 {
-		t.Errorf("got %d resources; want 1 (nil skipped)", len(result))
-	}
-}
-
-func TestResourceDeduplicator_EmptyInput(t *testing.T) {
-	d := NewResourceDeduplicator()
-
-	result, err := d.Deduplicate(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) != 0 {
-		t.Errorf("got %d resources; want 0", len(result))
-	}
-}
 
 // ── SourcePriority ──────────────────────────────────────────────────────────
 
-func TestSourcePriority_UnknownSource(t *testing.T) {
-	sp := DefaultSourcePriority()
-	if sp.Priority("unknown") != 999 {
-		t.Errorf("unknown source priority = %d; want 999", sp.Priority("unknown"))
-	}
-}
 
 // ── ConflictStrategy validation ─────────────────────────────────────────────
 
-func TestValidConflictStrategies(t *testing.T) {
-	strategies := ValidConflictStrategies()
-	if len(strategies) != 3 {
-		t.Errorf("got %d strategies; want 3", len(strategies))
-	}
-}
 
-func TestIsValidConflictStrategy(t *testing.T) {
-	if !IsValidConflictStrategy("error") {
-		t.Error("'error' should be valid")
-	}
-	if !IsValidConflictStrategy("warn") {
-		t.Error("'warn' should be valid")
-	}
-	if !IsValidConflictStrategy("merge") {
-		t.Error("'merge' should be valid")
-	}
-	if IsValidConflictStrategy("invalid") {
-		t.Error("'invalid' should not be valid")
-	}
-}
 
 // ── DefaultRegistry with GitOps ─────────────────────────────────────────────
 

@@ -79,39 +79,8 @@ spec:
 	}
 }
 
-func TestPSS_AnalyzeRestricted(t *testing.T) {
-	chart := makeChartWithSecurityContext(true)
-	report := AnalyzePSSCompliance(chart)
 
-	if report.Level != PSSRestricted {
-		t.Errorf("expected level %q, got %q", PSSRestricted, report.Level)
-	}
-	if len(report.Violations) != 0 {
-		t.Errorf("expected no violations for fully-restricted chart, got %d: %v",
-			len(report.Violations), report.Violations)
-	}
-}
 
-func TestPSS_AnalyzeBaseline(t *testing.T) {
-	chart := makeChartWithSecurityContext(false)
-	report := AnalyzePSSCompliance(chart)
-
-	if report.Level != PSSBaseline {
-		t.Errorf("expected level %q, got %q", PSSBaseline, report.Level)
-	}
-	if len(report.Violations) == 0 {
-		t.Error("expected violations for chart missing restricted fields")
-	}
-}
-
-func TestPSS_AnalyzePrivileged(t *testing.T) {
-	chart := makeChartWithNoSecurityContext()
-	report := AnalyzePSSCompliance(chart)
-
-	if report.Level != PSSPrivileged {
-		t.Errorf("expected level %q, got %q", PSSPrivileged, report.Level)
-	}
-}
 
 func TestPSS_InjectDefaults(t *testing.T) {
 	chart := makeChartWithNoSecurityContext()

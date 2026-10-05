@@ -388,8 +388,8 @@ func TestAnalyzeDecomposition_TwoGroups_WithCoupling(t *testing.T) {
 	cKey := c.Original.ResourceKey()
 
 	rels := []types.Relationship{
-		{From: bKey, To: aKey, Type: types.RelationLabelSelector},     // intra
-		{From: cKey, To: bKey, Type: types.RelationNameReference},      // inter
+		{From: bKey, To: aKey, Type: types.RelationLabelSelector}, // intra
+		{From: cKey, To: bKey, Type: types.RelationNameReference}, // inter
 	}
 
 	graph := buildTestGraph([]*types.ProcessedResource{a, b, c}, rels)
@@ -495,5 +495,24 @@ func TestAnalyzeDecomposition_GroupResourceKeys(t *testing.T) {
 	}
 	if len(apiGroup.Resources) != 2 {
 		t.Errorf("Expected 2 resources in api group, got %d", len(apiGroup.Resources))
+	}
+}
+
+func TestGenerateMermaidGraph(t *testing.T) {
+	if GenerateMermaidGraph(nil) != "" {
+		t.Error("nil graph must render nothing")
+	}
+	deploy := makeTestResource("Deployment", "web", "default", "web")
+	svc := makeTestResource("Service", "web", "default", "web")
+	graph := buildTestGraph([]*types.ProcessedResource{deploy, svc}, []types.Relationship{
+		{From: svc.Original.ResourceKey(), To: deploy.Original.ResourceKey(), Type: types.RelationLabelSelector},
+	})
+	graph.Groups = []*types.ResourceGroup{{Name: "web", Resources: []*types.ProcessedResource{deploy, svc}}}
+
+	out := GenerateMermaidGraph(graph)
+	for _, want := range []string{"flowchart LR", `subgraph g0["web"]`, `Deployment<br/>web`, "-->|label_selector|"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
 	}
 }

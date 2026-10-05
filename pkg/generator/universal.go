@@ -147,6 +147,11 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 		ExternalFiles: externalFiles,
 	}
 
+	if opts.IncludeREADME {
+		chart.ExternalFiles = append(chart.ExternalFiles, types.ExternalFileInfo{
+			Path: "README.md", Content: helm.GenerateREADME(chartMeta, valuesBuilder.BuildMap()),
+		})
+	}
 	addTestsAndHooks(chart, opts)
 
 	return []*types.GeneratedChart{chart}, nil

@@ -9,19 +9,13 @@ import (
 	"sort"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer/detector"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer/pattern"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/extractor"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/generator"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor/k8s"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor/value"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
@@ -73,6 +67,7 @@ It supports extracting resources from:
 	rootCmd.AddCommand(newFixCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newFeaturesCmd())
+	rootCmd.AddCommand(newGraphCmd())
 
 	return rootCmd
 }
@@ -377,17 +372,6 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		}
 	}
 
-	// Step 1: Extract resources
-	if opts.verbose {
-		fmt.Printf("\n[1/5] Extracting resources from source...\n")
-	}
-
-	extractorRegistry := extractor.DefaultRegistry()
-	ext, ok := extractorRegistry.Get(sourceType)
-	if !ok {
-		return fmt.Errorf("no extractor available for source type: %s", sourceType)
-	}
-
 	extractOpts := extractor.Options{
 		Paths:          opts.paths,
 		Namespace:      opts.namespace,
@@ -407,138 +391,22 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		extractOpts.GitAuth = &extractor.GitAuthOptions{SSHKeyPath: opts.sshKey}
 	}
 
-	if err := ext.Validate(ctx, extractOpts); err != nil {
-		return fmt.Errorf("extractor validation failed: %w", err)
-	}
-
-	resourceChan, errChan := ext.Extract(ctx, extractOpts)
-
-	var extractedResources []*types.ExtractedResource
-	extractErrors := make([]error, 0)
-
-drain:
-	for {
-		select {
-		case resource, ok := <-resourceChan:
-			if !ok {
-				resourceChan = nil
-				if errChan == nil {
-					break drain
-				}
-				continue
-			}
-			extractedResources = append(extractedResources, resource)
-			if opts.verbose {
-				fmt.Printf("  Extracted: %s\n", resource.ResourceKey().String())
-			}
-		case err, ok := <-errChan:
-			if !ok {
-				errChan = nil
-				if resourceChan == nil {
-					break drain
-				}
-				continue
-			}
-			extractErrors = append(extractErrors, err)
-			fmt.Fprintf(os.Stderr, "  Warning: %v\n", err)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	if len(extractedResources) == 0 {
-		return fmt.Errorf("no resources extracted")
-	}
-	warnDeprecatedAPIs(extractedResources)
-
-	if opts.verbose {
-		fmt.Printf("  Total extracted: %d resources\n", len(extractedResources))
-		if len(extractErrors) > 0 {
-			fmt.Printf("  Warnings: %d\n", len(extractErrors))
-		}
-	}
-
-	// Step 2: Process resources
-	if opts.verbose {
-		fmt.Printf("\n[2/5] Processing resources...\n")
-	}
-
-	processorRegistry := processor.NewRegistry()
-	k8s.RegisterAll(processorRegistry)
-	for _, spec := range opts.plugins {
-		path, gvks, err := processor.ParsePluginSpec(spec)
-		if err != nil {
-			return err
-		}
-		processorRegistry.Register(processor.NewPluginProcessor(path, 30*time.Second, gvks...))
-	}
-
-	// Initialize value processor and external file manager
-	valueProcessor := value.DefaultProcessor()
-	externalFileManager := value.NewExternalFileManager()
-
-	var processedResources []*types.ProcessedResource
-	allResourcesMap := make(map[types.ResourceKey]*types.ExtractedResource)
-	for _, r := range extractedResources {
-		allResourcesMap[r.ResourceKey()] = r
-	}
-
-	for _, extracted := range extractedResources {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		procCtx := processor.Context{
-			Ctx:                 ctx,
-			ChartName:           opts.chartName,
-			OutputMode:          outputMode,
-			Namespace:           extracted.Object.GetNamespace(),
-			AllResources:        allResourcesMap,
-			ExternalFileManager: externalFileManager,
-			ValueProcessor:      valueProcessor,
-		}
-
-		result, err := processorRegistry.Process(procCtx, extracted.Object)
-		if err != nil {
-			return fmt.Errorf("failed to process %s: %w", extracted.ResourceKey().String(), err)
-		}
-
-		processed := &types.ProcessedResource{
-			Original:        extracted,
-			ServiceName:     result.ServiceName,
-			TemplatePath:    result.TemplatePath,
-			TemplateContent: result.TemplateContent,
-			ValuesPath:      result.ValuesPath,
-			Values:          result.Values,
-			Dependencies:    result.Dependencies,
-		}
-
-		processedResources = append(processedResources, processed)
-
-		if opts.verbose {
-			fmt.Printf("  Processed: %s -> service: %s\n", extracted.ResourceKey().String(), result.ServiceName)
-		}
-	}
-
-	if opts.verbose {
-		fmt.Printf("  Total processed: %d resources\n", len(processedResources))
-	}
-
-	// Step 3: Analyze relationships
-	if opts.verbose {
-		fmt.Printf("\n[3/5] Analyzing relationships...\n")
-	}
-
-	analyzer := analyzer.NewDefaultAnalyzer()
-	detector.RegisterAll(analyzer)
-
-	graph, err := analyzer.Analyze(ctx, processedResources)
+	pipeline, err := runPipeline(ctx, pipelineOptions{
+		source:     sourceType,
+		extract:    extractOpts,
+		chartName:  opts.chartName,
+		outputMode: outputMode,
+		plugins:    opts.plugins,
+		verbose:    opts.verbose,
+	})
 	if err != nil {
-		return fmt.Errorf("analysis failed: %w", err)
+		return err
 	}
+	graph := pipeline.graph
+	processedResources := pipeline.processed
+	externalFileManager := pipeline.externalFiles
 
 	if opts.verbose {
-		fmt.Printf("  Detected relationships: %d\n", len(graph.Relationships))
-		fmt.Printf("  Service groups: %d\n", len(graph.Groups))
 		for _, group := range graph.Groups {
 			fmt.Printf("    - %s (%d resources)\n", group.Name, len(group.Resources))
 		}
@@ -1033,134 +901,25 @@ type analyzeOptions struct {
 }
 
 func runAnalyze(ctx context.Context, opts analyzeOptions) error {
-	// Step 1: Extract resources
-	if opts.verbose {
-		fmt.Printf("[1/4] Extracting resources...\n")
-	}
-
-	extractorRegistry := extractor.DefaultRegistry()
-	ext, ok := extractorRegistry.Get(types.SourceFile)
-	if !ok {
-		return fmt.Errorf("file extractor not available")
-	}
-
-	extractOpts := extractor.Options{
-		Paths:        opts.paths,
-		Namespace:    opts.namespace,
-		Namespaces:   opts.namespaces,
-		IncludeKinds: opts.includeKinds,
-		ExcludeKinds: opts.excludeKinds,
-		Recursive:    opts.recursive,
-	}
-
-	if err := ext.Validate(ctx, extractOpts); err != nil {
-		return fmt.Errorf("validation failed: %w", err)
-	}
-
-	resourceChan, errChan := ext.Extract(ctx, extractOpts)
-
-	var extractedResources []*types.ExtractedResource
-
-drainExtract:
-	for {
-		select {
-		case resource, ok := <-resourceChan:
-			if !ok {
-				resourceChan = nil
-				if errChan == nil {
-					break drainExtract
-				}
-				continue
-			}
-			extractedResources = append(extractedResources, resource)
-			if opts.verbose {
-				fmt.Printf("  Extracted: %s\n", resource.ResourceKey().String())
-			}
-		case err, ok := <-errChan:
-			if !ok {
-				errChan = nil
-				if resourceChan == nil {
-					break drainExtract
-				}
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "  Warning: %v\n", err)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	if len(extractedResources) == 0 {
-		return fmt.Errorf("no resources extracted")
-	}
-	warnDeprecatedAPIs(extractedResources)
-
-	if opts.verbose {
-		fmt.Printf("  Total: %d resources\n", len(extractedResources))
-	}
-
-	// Step 2: Process resources
-	if opts.verbose {
-		fmt.Printf("\n[2/4] Processing resources...\n")
-	}
-
-	processorRegistry := processor.NewRegistry()
-	k8s.RegisterAll(processorRegistry)
-
-	var processedResources []*types.ProcessedResource
-	allResourcesMap := make(map[types.ResourceKey]*types.ExtractedResource)
-	for _, r := range extractedResources {
-		allResourcesMap[r.ResourceKey()] = r
-	}
-
-	for _, extracted := range extractedResources {
-		procCtx := processor.Context{
-			Ctx:          ctx,
-			ChartName:    "analysis",
-			OutputMode:   types.OutputModeUniversal,
-			Namespace:    extracted.Object.GetNamespace(),
-			AllResources: allResourcesMap,
-		}
-
-		result, err := processorRegistry.Process(procCtx, extracted.Object)
-		if err != nil {
-			if opts.verbose {
-				fmt.Fprintf(os.Stderr, "  Warning: Failed to process %s: %v\n", extracted.ResourceKey(), err)
-			}
-			continue
-		}
-
-		processed := &types.ProcessedResource{
-			Original:        extracted,
-			ServiceName:     result.ServiceName,
-			TemplatePath:    result.TemplatePath,
-			TemplateContent: result.TemplateContent,
-			ValuesPath:      result.ValuesPath,
-			Values:          result.Values,
-		}
-		processedResources = append(processedResources, processed)
-
-		if opts.verbose {
-			fmt.Printf("  Processed: %s\n", extracted.ResourceKey().String())
-		}
-	}
-
-	if opts.verbose {
-		fmt.Printf("  Total: %d processed\n", len(processedResources))
-	}
-
-	// Step 3: Analyze relationships
-	if opts.verbose {
-		fmt.Printf("\n[3/4] Analyzing relationships...\n")
-	}
-
-	relationshipAnalyzer := analyzer.NewDefaultAnalyzer()
-	detector.RegisterAll(relationshipAnalyzer)
-
-	resourceGraph, err := relationshipAnalyzer.Analyze(ctx, processedResources)
+	pipeline, err := runPipeline(ctx, pipelineOptions{
+		source: types.SourceFile,
+		extract: extractor.Options{
+			Paths:        opts.paths,
+			Namespace:    opts.namespace,
+			Namespaces:   opts.namespaces,
+			IncludeKinds: opts.includeKinds,
+			ExcludeKinds: opts.excludeKinds,
+			Recursive:    opts.recursive,
+		},
+		chartName:  "analysis",
+		outputMode: types.OutputModeUniversal,
+		lenient:    true,
+		verbose:    opts.verbose,
+	})
 	if err != nil {
-		return fmt.Errorf("analysis failed: %w", err)
+		return err
 	}
+	resourceGraph := pipeline.graph
 
 	if opts.verbose {
 		fmt.Printf("  Detected: %d relationships\n", len(resourceGraph.Relationships))
@@ -1312,101 +1071,16 @@ func runMigrate(ctx context.Context, opts migrateOptions) error {
 		return fmt.Errorf("invalid mode: %s", opts.mode)
 	}
 
-	// Extract resources
-	extractorRegistry := extractor.DefaultRegistry()
-	ext, ok := extractorRegistry.Get(types.SourceFile)
-	if !ok {
-		return fmt.Errorf("no extractor available for file source")
-	}
-
-	extractOpts := extractor.Options{
-		Paths:     opts.sourceFiles,
-		Recursive: true,
-	}
-
-	if err := ext.Validate(ctx, extractOpts); err != nil {
-		return fmt.Errorf("extractor validation failed: %w", err)
-	}
-
-	resourceChan, errChan := ext.Extract(ctx, extractOpts)
-
-	var extractedResources []*types.ExtractedResource
-drain:
-	for {
-		select {
-		case resource, ok := <-resourceChan:
-			if !ok {
-				resourceChan = nil
-				if errChan == nil {
-					break drain
-				}
-				continue
-			}
-			extractedResources = append(extractedResources, resource)
-		case err, ok := <-errChan:
-			if !ok {
-				errChan = nil
-				if resourceChan == nil {
-					break drain
-				}
-				continue
-			}
-			if opts.verbose {
-				fmt.Fprintf(os.Stderr, "  Warning: %v\n", err)
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	if len(extractedResources) == 0 {
-		return fmt.Errorf("no resources extracted from source files")
-	}
-
-	// Process resources
-	processorRegistry := processor.NewRegistry()
-	k8s.RegisterAll(processorRegistry)
-	valueProcessor := value.DefaultProcessor()
-	externalFileManager := value.NewExternalFileManager()
-
-	allResourcesMap := make(map[types.ResourceKey]*types.ExtractedResource)
-	for _, r := range extractedResources {
-		allResourcesMap[r.ResourceKey()] = r
-	}
-
-	var processedResources []*types.ProcessedResource
-	for _, extracted := range extractedResources {
-		procCtx := processor.Context{
-			Ctx:                 ctx,
-			ChartName:           opts.chartName,
-			OutputMode:          outputMode,
-			Namespace:           extracted.Object.GetNamespace(),
-			AllResources:        allResourcesMap,
-			ExternalFileManager: externalFileManager,
-			ValueProcessor:      valueProcessor,
-		}
-		result, err := processorRegistry.Process(procCtx, extracted.Object)
-		if err != nil {
-			return fmt.Errorf("failed to process %s: %w", extracted.ResourceKey().String(), err)
-		}
-		processedResources = append(processedResources, &types.ProcessedResource{
-			Original:        extracted,
-			ServiceName:     result.ServiceName,
-			TemplatePath:    result.TemplatePath,
-			TemplateContent: result.TemplateContent,
-			ValuesPath:      result.ValuesPath,
-			Values:          result.Values,
-			Dependencies:    result.Dependencies,
-		})
-	}
-
-	// Analyze relationships
-	a := analyzer.NewDefaultAnalyzer()
-	detector.RegisterAll(a)
-	graph, err := a.Analyze(ctx, processedResources)
+	pipeline, err := runPipeline(ctx, pipelineOptions{
+		source:     types.SourceFile,
+		extract:    extractor.Options{Paths: opts.sourceFiles, Recursive: true},
+		chartName:  opts.chartName,
+		outputMode: outputMode,
+	})
 	if err != nil {
-		return fmt.Errorf("analysis failed: %w", err)
+		return err
 	}
+	graph := pipeline.graph
 
 	// Generate new chart
 	generatorRegistry := generator.DefaultRegistry()
@@ -1802,107 +1476,16 @@ func runFix(ctx context.Context, opts fixOptions) error {
 		fmt.Printf("Auto-fix: reading manifests from %v\n", opts.paths)
 	}
 
-	// Step 1: Extract resources
-	extractorRegistry := extractor.DefaultRegistry()
-	ext, ok := extractorRegistry.Get(types.SourceFile)
-	if !ok {
-		return fmt.Errorf("file extractor not available")
-	}
-
-	extractOpts := extractor.Options{
-		Paths:     opts.paths,
-		Recursive: opts.recursive,
-	}
-
-	if err := ext.Validate(ctx, extractOpts); err != nil {
-		return fmt.Errorf("validation failed: %w", err)
-	}
-
-	resourceChan, errChan := ext.Extract(ctx, extractOpts)
-
-	var extractedResources []*types.ExtractedResource
-drainFix:
-	for {
-		select {
-		case resource, ok := <-resourceChan:
-			if !ok {
-				resourceChan = nil
-				if errChan == nil {
-					break drainFix
-				}
-				continue
-			}
-			extractedResources = append(extractedResources, resource)
-		case err, ok := <-errChan:
-			if !ok {
-				errChan = nil
-				if resourceChan == nil {
-					break drainFix
-				}
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	if len(extractedResources) == 0 {
-		return fmt.Errorf("no resources extracted from %v", opts.paths)
-	}
-
-	if opts.verbose {
-		fmt.Printf("Extracted %d resources\n", len(extractedResources))
-	}
-
-	// Step 2: Process resources
-	processorRegistry := processor.NewRegistry()
-	k8s.RegisterAll(processorRegistry)
-
-	valueProcessor := value.DefaultProcessor()
-	externalFileManager := value.NewExternalFileManager()
-
-	allResourcesMap := make(map[types.ResourceKey]*types.ExtractedResource)
-	for _, r := range extractedResources {
-		allResourcesMap[r.ResourceKey()] = r
-	}
-
-	var processedResources []*types.ProcessedResource
-	for _, extracted := range extractedResources {
-		procCtx := processor.Context{
-			Ctx:                 ctx,
-			ChartName:           opts.chartName,
-			OutputMode:          types.OutputModeUniversal,
-			Namespace:           extracted.Object.GetNamespace(),
-			AllResources:        allResourcesMap,
-			ExternalFileManager: externalFileManager,
-			ValueProcessor:      valueProcessor,
-		}
-
-		result, err := processorRegistry.Process(procCtx, extracted.Object)
-		if err != nil {
-			return fmt.Errorf("failed to process %s: %w", extracted.ResourceKey().String(), err)
-		}
-
-		processedResources = append(processedResources, &types.ProcessedResource{
-			Original:        extracted,
-			ServiceName:     result.ServiceName,
-			TemplatePath:    result.TemplatePath,
-			TemplateContent: result.TemplateContent,
-			ValuesPath:      result.ValuesPath,
-			Values:          result.Values,
-			Dependencies:    result.Dependencies,
-		})
-	}
-
-	// Step 3: Analyze relationships
-	anlzr := analyzer.NewDefaultAnalyzer()
-	detector.RegisterAll(anlzr)
-
-	graph, err := anlzr.Analyze(ctx, processedResources)
+	pipeline, err := runPipeline(ctx, pipelineOptions{
+		source:     types.SourceFile,
+		extract:    extractor.Options{Paths: opts.paths, Recursive: opts.recursive},
+		chartName:  opts.chartName,
+		outputMode: types.OutputModeUniversal,
+	})
 	if err != nil {
-		return fmt.Errorf("analysis failed: %w", err)
+		return err
 	}
+	graph := pipeline.graph
 
 	// Step 4: Generate chart
 	generatorRegistry := generator.DefaultRegistry()

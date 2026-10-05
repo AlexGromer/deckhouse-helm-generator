@@ -131,14 +131,22 @@ func (g *UmbrellaGenerator) generateParentChart(
 	}
 	valuesYAML := "# Umbrella chart — override subchart values per-service here\n" + string(valuesBytes)
 
+	var externalFiles []types.ExternalFileInfo
+	if opts.IncludeREADME {
+		externalFiles = append(externalFiles, types.ExternalFileInfo{
+			Path: "README.md", Content: helm.GenerateREADME(chartMeta, allValues),
+		})
+	}
+
 	return &types.GeneratedChart{
-		Name:       chartName,
-		Path:       opts.OutputDir,
-		ChartYAML:  helm.GenerateChartYAML(chartMeta),
-		ValuesYAML: valuesYAML,
-		Templates:  map[string]string{},
-		Helpers:    helm.GenerateHelpers(chartName),
-		Notes:      umbrellaNotes(chartName, deps),
+		ExternalFiles: externalFiles,
+		Name:          chartName,
+		Path:          opts.OutputDir,
+		ChartYAML:     helm.GenerateChartYAML(chartMeta),
+		ValuesYAML:    valuesYAML,
+		Templates:     map[string]string{},
+		Helpers:       helm.GenerateHelpers(chartName),
+		Notes:         umbrellaNotes(chartName, deps),
 		ValuesSchema: func() string {
 			if !opts.IncludeSchema {
 				return ""

@@ -114,6 +114,11 @@ func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Opti
 		Notes:        notes,
 		ValuesSchema: valuesSchema,
 	}
+	if opts.IncludeREADME {
+		chart.ExternalFiles = append(chart.ExternalFiles, types.ExternalFileInfo{
+			Path: "README.md", Content: helm.GenerateREADME(chartMeta, values),
+		})
+	}
 	addTestsAndHooks(chart, opts)
 	return chart, nil
 }

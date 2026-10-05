@@ -10,21 +10,21 @@ import (
 
 // kindColors maps resource kinds to DOT graph colors.
 var kindColors = map[string]string{
-	"Deployment":  "#4A90D9",
-	"StatefulSet": "#7B68EE",
-	"DaemonSet":   "#9370DB",
-	"Service":     "#50C878",
-	"Ingress":     "#FFD700",
-	"ConfigMap":   "#87CEEB",
-	"Secret":      "#FF6B6B",
-	"Job":         "#FFA500",
-	"CronJob":     "#FF8C00",
-	"PersistentVolumeClaim": "#DDA0DD",
-	"ServiceAccount":        "#98FB98",
-	"Role":                  "#F0E68C",
-	"ClusterRole":           "#F0E68C",
-	"RoleBinding":           "#FAFAD2",
-	"ClusterRoleBinding":    "#FAFAD2",
+	"Deployment":              "#4A90D9",
+	"StatefulSet":             "#7B68EE",
+	"DaemonSet":               "#9370DB",
+	"Service":                 "#50C878",
+	"Ingress":                 "#FFD700",
+	"ConfigMap":               "#87CEEB",
+	"Secret":                  "#FF6B6B",
+	"Job":                     "#FFA500",
+	"CronJob":                 "#FF8C00",
+	"PersistentVolumeClaim":   "#DDA0DD",
+	"ServiceAccount":          "#98FB98",
+	"Role":                    "#F0E68C",
+	"ClusterRole":             "#F0E68C",
+	"RoleBinding":             "#FAFAD2",
+	"ClusterRoleBinding":      "#FAFAD2",
 	"HorizontalPodAutoscaler": "#FF69B4",
 	"PodDisruptionBudget":     "#DEB887",
 	"NetworkPolicy":           "#CD853F",
@@ -32,20 +32,20 @@ var kindColors = map[string]string{
 
 // edgeStyles maps relationship types to DOT edge styles.
 var edgeStyles = map[types.RelationshipType]string{
-	types.RelationLabelSelector:    "solid",
-	types.RelationNameReference:    "dashed",
-	types.RelationVolumeMount:      "dotted",
-	types.RelationEnvFrom:          "dotted",
-	types.RelationEnvValueFrom:     "dotted",
-	types.RelationAnnotation:       "dashed",
-	types.RelationServiceAccount:   "bold",
-	types.RelationOwnerReference:   "bold",
-	types.RelationRoleBinding:      "dashed",
+	types.RelationLabelSelector:      "solid",
+	types.RelationNameReference:      "dashed",
+	types.RelationVolumeMount:        "dotted",
+	types.RelationEnvFrom:            "dotted",
+	types.RelationEnvValueFrom:       "dotted",
+	types.RelationAnnotation:         "dashed",
+	types.RelationServiceAccount:     "bold",
+	types.RelationOwnerReference:     "bold",
+	types.RelationRoleBinding:        "dashed",
 	types.RelationClusterRoleBinding: "dashed",
-	types.RelationPVC:              "dotted",
-	types.RelationGatewayRoute:     "solid",
-	types.RelationScaleTarget:      "bold",
-	types.RelationCustomDependency: "solid",
+	types.RelationPVC:                "dotted",
+	types.RelationGatewayRoute:       "solid",
+	types.RelationScaleTarget:        "bold",
+	types.RelationCustomDependency:   "solid",
 }
 
 // GenerateDOTGraph produces a Graphviz DOT format string from a ResourceGraph.
@@ -113,6 +113,71 @@ func GenerateDOTGraph(graph *types.ResourceGraph) string {
 	}
 
 	b.WriteString("}\n")
+	return b.String()
+}
+
+// GenerateMermaidGraph renders the resource graph as a Mermaid flowchart,
+// grouped into one subgraph per service group (renders in GitHub/GitLab
+// Markdown inside a ```mermaid block).
+func GenerateMermaidGraph(graph *types.ResourceGraph) string {
+	if graph == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("flowchart LR\n")
+
+	ids := map[types.ResourceKey]string{}
+	keys := make([]types.ResourceKey, 0, len(graph.Resources))
+	for k := range graph.Resources {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
+	for i, k := range keys {
+		ids[k] = fmt.Sprintf("n%d", i)
+	}
+	node := func(k types.ResourceKey) string {
+		label := k.GVK.Kind + "<br/>" + k.Name
+		if k.Namespace != "" {
+			label += "<br/>(" + k.Namespace + ")"
+		}
+		return fmt.Sprintf("%s[\"%s\"]", ids[k], strings.ReplaceAll(label, `"`, "'"))
+	}
+
+	grouped := map[types.ResourceKey]bool{}
+	for gi, g := range graph.Groups {
+		fmt.Fprintf(&b, "  subgraph g%d[\"%s\"]\n", gi, strings.ReplaceAll(g.Name, `"`, "'"))
+		for _, r := range g.Resources {
+			k := r.Original.ResourceKey()
+			if _, ok := ids[k]; !ok || grouped[k] {
+				continue
+			}
+			grouped[k] = true
+			fmt.Fprintf(&b, "    %s\n", node(k))
+		}
+		b.WriteString("  end\n")
+	}
+	for _, k := range keys {
+		if !grouped[k] {
+			fmt.Fprintf(&b, "  %s\n", node(k))
+		}
+	}
+
+	rels := make([]types.Relationship, len(graph.Relationships))
+	copy(rels, graph.Relationships)
+	sort.Slice(rels, func(i, j int) bool {
+		if rels[i].From.String() != rels[j].From.String() {
+			return rels[i].From.String() < rels[j].From.String()
+		}
+		return rels[i].To.String() < rels[j].To.String()
+	})
+	for _, rel := range rels {
+		from, okFrom := ids[rel.From]
+		to, okTo := ids[rel.To]
+		if !okFrom || !okTo {
+			continue
+		}
+		fmt.Fprintf(&b, "  %s -->|%s| %s\n", from, rel.Type, to)
+	}
 	return b.String()
 }
 
