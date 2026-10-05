@@ -605,62 +605,12 @@ drain:
 			LimitRange:    true,
 			NetworkPolicy: true,
 		}
-		nsTemplates := generator.GenerateNamespaceResources(groupingResult.Groups, nsOpts)
-
-		// Also generate auto-NetworkPolicies from service analysis.
-		// NOTE: If --multi-tenant is also active, GenerateMultiTenantOverlay (applied later)
-		// adds tenant-networkpolicies.yaml. Auto-NP uses per-group paths
-		// (<group>-networkpolicy.yaml), so there is no key collision, but both
-		// sets of policies will coexist in the final chart. This is intentional:
-		// auto-NP handles service-level ingress/egress while tenant-NP handles
-		// cross-tenant isolation.
-		autoNP := generator.GenerateAutoNetworkPolicies(graph, groupingResult.Groups)
-
-		// Build a set of group names that have fine-grained auto-NP policies.
-		// When a group has a fine-grained NP (e.g. templates/<group>-networkpolicy.yaml),
-		// we skip the broad default NP from namespace resources
-		// (templates/<group>-networkpolicy-default.yaml) to avoid conflicting policies.
-		autoNPGroups := make(map[string]struct{}, len(autoNP))
-		for path := range autoNP {
-			// Extract group name from "templates/<group>-networkpolicy.yaml"
-			name := strings.TrimPrefix(path, "templates/")
-			name = strings.TrimSuffix(name, "-networkpolicy.yaml")
-			if name != path { // successfully trimmed both
-				autoNPGroups[name] = struct{}{}
-			}
-		}
-
-		// Copy-on-write: build a new Templates map instead of mutating in place.
 		for i, chart := range charts {
-			templates := make(map[string]string, len(chart.Templates)+len(nsTemplates)+len(autoNP))
-			for k, v := range chart.Templates {
-				templates[k] = v
+			updated, err := generator.ApplyNamespaceResources(chart, graph, groupingResult.Groups, nsOpts)
+			if err != nil {
+				return fmt.Errorf("namespace resources for %s: %w", chart.Name, err)
 			}
-			for path, content := range nsTemplates {
-				// Skip default NP for groups that have fine-grained auto-NP
-				if strings.HasSuffix(path, "-networkpolicy-default.yaml") {
-					groupName := strings.TrimPrefix(path, "templates/")
-					groupName = strings.TrimSuffix(groupName, "-networkpolicy-default.yaml")
-					if _, has := autoNPGroups[groupName]; has {
-						continue
-					}
-				}
-				templates[path] = content
-			}
-			for path, content := range autoNP {
-				templates[path] = content
-			}
-			charts[i] = &types.GeneratedChart{
-				Name:          chart.Name,
-				Path:          chart.Path,
-				ChartYAML:     chart.ChartYAML,
-				ValuesYAML:    chart.ValuesYAML,
-				Templates:     templates,
-				Helpers:       chart.Helpers,
-				Notes:         chart.Notes,
-				ValuesSchema:  chart.ValuesSchema,
-				ExternalFiles: chart.ExternalFiles,
-			}
+			charts[i] = updated
 		}
 	}
 
@@ -741,7 +691,11 @@ drain:
 			spotConfig.Provider = generator.SpotAzure
 		}
 		for i, chart := range charts {
-			charts[i] = generator.InjectSpotConfig(chart, spotConfig)
+			updated, err := generator.InjectSpotConfig(chart, spotConfig)
+			if err != nil {
+				return fmt.Errorf("spot configuration for %s: %w", chart.Name, err)
+			}
+			charts[i] = updated
 		}
 	}
 

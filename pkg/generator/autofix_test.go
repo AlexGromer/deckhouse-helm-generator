@@ -14,6 +14,9 @@ metadata:
 spec:
   replicas: 3
   template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: testApp
     spec:
       containers:
       - name: app
@@ -28,6 +31,9 @@ metadata:
 spec:
   replicas: 2
   template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: testDb
     spec:
       containers:
       - name: db
@@ -209,7 +215,7 @@ func TestInjectHealthProbes_Idempotent(t *testing.T) {
 
 func TestInjectPDB(t *testing.T) {
 	chart := newTestChart(map[string]string{
-		"templates/deployment.yaml":  testDeploymentTemplate, // replicas: 3
+		"templates/deployment.yaml":  testDeploymentTemplate,  // replicas: 3
 		"templates/statefulset.yaml": testStatefulSetTemplate, // replicas: 2
 	})
 
@@ -219,22 +225,23 @@ func TestInjectPDB(t *testing.T) {
 		t.Errorf("expected 2 PDBs generated, got %d", count)
 	}
 
-	pdb1 := result.Templates["templates/deployment-pdb.yaml"]
-	if !strings.Contains(pdb1, "PodDisruptionBudget") {
-		t.Error("expected PDB for deployment")
-	}
-	// replicas=3 → "50%"
-	if !strings.Contains(pdb1, `"50%"`) {
-		t.Errorf("expected 50%% minAvailable for 3 replicas, got:\n%s", pdb1)
+	// Each PDB selects only its own workload and always allows one disruption,
+	// so node drains are never blocked regardless of the replica count.
+	for path, component := range map[string]string{
+		"templates/deployment-pdb.yaml":  "testApp",
+		"templates/statefulset-pdb.yaml": "testDb",
+	} {
+		pdb := result.Templates[path]
+		for _, want := range []string{"kind: PodDisruptionBudget", "maxUnavailable: 1", "app.kubernetes.io/component: " + component} {
+			if !strings.Contains(pdb, want) {
+				t.Errorf("%s missing %q:\n%s", path, want, pdb)
+			}
+		}
 	}
 
-	pdb2 := result.Templates["templates/statefulset-pdb.yaml"]
-	if !strings.Contains(pdb2, "PodDisruptionBudget") {
-		t.Error("expected PDB for statefulset")
-	}
-	// replicas=2 → minAvailable: 1
-	if !strings.Contains(pdb2, "minAvailable: 1") {
-		t.Errorf("expected minAvailable: 1 for 2 replicas, got:\n%s", pdb2)
+	// Idempotent: a second pass adds nothing.
+	if _, again := InjectPDB(result); again != 0 {
+		t.Errorf("expected no PDBs on second pass, got %d", again)
 	}
 }
 

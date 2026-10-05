@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
@@ -19,7 +20,9 @@ const (
 
 // SpotConfig holds the configuration for spot/preemptible instance support.
 type SpotConfig struct {
-	Provider    SpotProvider
+	Provider SpotProvider
+	// GracePeriod becomes the pods' terminationGracePeriodSeconds, so in-flight
+	// work can drain before a reclaimed node goes away.
 	GracePeriod int
 	Enabled     bool
 }
@@ -60,204 +63,152 @@ func GenerateSpotTolerations(provider SpotProvider) []map[string]interface{} {
 	}
 }
 
-// GenerateSpotPreStopHook returns a lifecycle preStop hook configuration that sleeps
-// for the specified grace period, allowing in-flight requests to drain before termination.
-func GenerateSpotPreStopHook(gracePeriod int) map[string]interface{} {
-	return map[string]interface{}{
-		"lifecycle": map[string]interface{}{
-			"preStop": map[string]interface{}{
-				"exec": map[string]interface{}{
-					"command": []string{"sh", "-c", fmt.Sprintf("sleep %d", gracePeriod)},
-				},
-			},
-		},
-	}
-}
-
-// GenerateSpotPDB returns a PodDisruptionBudget YAML string for the given application.
-// For low replica counts (<=2), minAvailable is set to 1.
-// For higher replica counts (>2), minAvailable is set to "50%".
-func GenerateSpotPDB(appName string, replicas int) string {
-	if replicas <= 0 {
-		replicas = 1 // safe default for invalid input
-	}
-
-	var minAvailable string
-	if replicas <= 2 {
-		minAvailable = "minAvailable: 1"
-	} else {
-		minAvailable = `minAvailable: "50%"`
-	}
-
-	appName = safeChartName.ReplaceAllString(strings.ToLower(appName), "")
-
-	return fmt.Sprintf(`apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: %s-pdb
-spec:
-  %s
-  selector:
-    matchLabels:
-      app: %s
-`, appName, minAvailable, appName)
-}
-
-// GenerateSpotPDBHelm returns a PodDisruptionBudget YAML string using Helm template
-// syntax for the name and selector labels, suitable for inclusion in a Helm chart.
-// For low replica counts (<=2), minAvailable is set to 1.
-// For higher replica counts (>2), minAvailable is set to "50%".
-func GenerateSpotPDBHelm(chartName string, replicas int) string {
-	if replicas <= 0 {
-		replicas = 1 // safe default for invalid input
-	}
-
-	var minAvailable string
-	if replicas <= 2 {
-		minAvailable = "minAvailable: 1"
-	} else {
-		minAvailable = `minAvailable: "50%"`
-	}
-
-	return fmt.Sprintf(`apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: {{ include "%s.fullname" . }}-pdb
-  labels:
-    {{- include "%s.labels" . | nindent 4 }}
-spec:
-  %s
-  selector:
-    matchLabels:
-      {{- include "%s.selectorLabels" . | nindent 6 }}
-`, chartName, chartName, minAvailable, chartName)
-}
-
-// GenerateSpotValues returns a values map containing spot instance configuration
-// suitable for inclusion in a Helm chart's values.yaml.
+// GenerateSpotValues returns the `spot` values section the injected templates
+// read; `spot.enabled: false` switches everything off at install time.
 func GenerateSpotValues(config SpotConfig) map[string]interface{} {
+	tolerations := make([]interface{}, 0)
+	for _, t := range GenerateSpotTolerations(config.Provider) {
+		tolerations = append(tolerations, t)
+	}
 	return map[string]interface{}{
-		"spot": map[string]interface{}{
-			"enabled":     config.Enabled,
-			"provider":    string(config.Provider),
-			"gracePeriod": config.GracePeriod,
-		},
+		"enabled":                       config.Enabled,
+		"provider":                      string(config.Provider),
+		"terminationGracePeriodSeconds": config.GracePeriod,
+		"tolerations":                   tolerations,
 	}
 }
 
-// InjectSpotConfig injects spot/preemptible tolerations into Deployment and StatefulSet
-// templates within the chart. Job and CronJob templates are left unmodified since spot
-// termination handling is typically not appropriate for batch workloads.
-// Returns nil if chart is nil. The original chart is not mutated.
-func InjectSpotConfig(chart *types.GeneratedChart, config SpotConfig) *types.GeneratedChart {
+// GenerateSpotPDBHelm returns the PodDisruptionBudget template for one
+// workload of the chart, rendered only while spot is enabled.
+func GenerateSpotPDBHelm(chartName, component string) string {
+	return workloadPDBTemplate(chartName, component, "spot", "and .Values.spot .Values.spot.enabled")
+}
+
+// workloadPDBTemplate returns a PodDisruptionBudget template for one workload
+// of the chart, selected by its app.kubernetes.io/component label (a
+// chart-wide selector would put several PDBs on the same pods, which blocks
+// eviction). maxUnavailable: 1 keeps node drains possible at any replica
+// count. condition, when not empty, guards the template.
+func workloadPDBTemplate(chartName, component, nameSuffix, condition string) string {
+	body := fmt.Sprintf(`apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "%[1]s.fullname" . }}-%[2]s-%[4]s
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "%[1]s.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "%[1]s.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: %[3]s
+`, chartName, processor.ResourceNameSuffix(component), component, nameSuffix)
+	if condition == "" {
+		return body
+	}
+	return "{{- if " + condition + " }}\n" + body + "{{- end }}\n"
+}
+
+// valuesTolerationsBlock matches the pod-spec tolerations block dhg's workload
+// templates emit (tolerations taken from values).
+var valuesTolerationsBlock = regexp.MustCompile(
+	`(?m)^([ \t]*)\{\{- with \.tolerations \}\}\n[ \t]*tolerations:\n[ \t]*\{\{- toYaml \. \| nindent (\d+) \}\}\n[ \t]*\{\{- end \}\}\n`)
+
+var componentLabelRegex = regexp.MustCompile(`app\.kubernetes\.io/component: ([A-Za-z0-9._-]+)`)
+
+// InjectSpotConfig makes the chart's Deployments and StatefulSets schedulable
+// on spot/preemptible nodes: spot tolerations are added to the tolerations from
+// values, terminationGracePeriodSeconds is set, and each workload without a
+// PodDisruptionBudget gets one. Everything is controlled by the `spot` values
+// section added to values.yaml. Jobs and CronJobs are left unmodified since
+// spot termination handling is typically not appropriate for batch workloads.
+// The original chart is not mutated.
+func InjectSpotConfig(chart *types.GeneratedChart, config SpotConfig) (*types.GeneratedChart, error) {
 	if chart == nil {
-		return nil
+		return nil, nil
 	}
 
-	tolerations := GenerateSpotTolerations(config.Provider)
+	out := cloneChart(chart)
+	name := chartNameOf(chart)
+	injected := false
 
-	// Copy templates map — do not mutate the original.
-	templates := make(map[string]string, len(chart.Templates))
-	for k, v := range chart.Templates {
-		templates[k] = v
-	}
-
-	// defaultReplicas is used when replica count cannot be parsed from the template.
-	const defaultReplicas = 2
-
-	for name, content := range templates {
-		// Only inject into Deployments and StatefulSets.
-		if strings.Contains(content, "kind: Deployment") || strings.Contains(content, "kind: StatefulSet") {
-			// Skip Jobs and CronJobs that might also match.
-			if strings.Contains(content, "kind: Job") || strings.Contains(content, "kind: CronJob") {
-				continue
-			}
-			templates[name] = injectTolerationsIntoTemplate(content, tolerations)
-
-			// Generate a PDB template for each Deployment/StatefulSet.
-			replicas := extractReplicas(content, defaultReplicas)
-			pdbKey := spotPDBTemplateKey(name)
-			templates[pdbKey] = GenerateSpotPDBHelm(chart.Name, replicas)
+	for path, content := range chart.Templates {
+		if kind := extractKind(content); kind != "Deployment" && kind != "StatefulSet" {
+			continue
 		}
+		patched, ok := injectSpotIntoPodSpec(content)
+		if !ok {
+			continue
+		}
+		out.Templates[path] = patched
+		injected = true
+
+		m := componentLabelRegex.FindStringSubmatch(content)
+		if m == nil || hasPDBForComponent(chart.Templates, m[1]) {
+			continue
+		}
+		out.Templates[spotPDBTemplateKey(path)] = GenerateSpotPDBHelm(name, m[1])
 	}
 
-	return &types.GeneratedChart{
-		Name:          chart.Name,
-		Path:          chart.Path,
-		ChartYAML:     chart.ChartYAML,
-		ValuesYAML:    chart.ValuesYAML,
-		Templates:     templates,
-		Helpers:       chart.Helpers,
-		Notes:         chart.Notes,
-		ValuesSchema:  chart.ValuesSchema,
-		ExternalFiles: chart.ExternalFiles,
+	if !injected {
+		return out, nil
 	}
+	values, err := appendTopLevelValues(out.ValuesYAML, "spot", GenerateSpotValues(config))
+	if err != nil {
+		return nil, err
+	}
+	out.ValuesYAML = values
+	return out, nil
 }
 
-// injectTolerationsIntoTemplate inserts a tolerations section into the pod spec
-// of a Kubernetes workload template YAML string. It finds the `containers:` key
-// inside the pod spec and inserts tolerations just before it at the same indentation.
-// If tolerations already exist in the template, the function is idempotent and returns
-// the template unchanged. If `containers:` is not found, falls back to appending at the end.
-func injectTolerationsIntoTemplate(template string, tolerations []map[string]interface{}) string {
-	if len(tolerations) == 0 {
-		return template
+// injectSpotIntoPodSpec rewrites the values-driven tolerations block of a
+// workload template so that spot tolerations are appended when spot is
+// enabled. It reports false when the template has no such block.
+func injectSpotIntoPodSpec(template string) (string, bool) {
+	loc := valuesTolerationsBlock.FindStringSubmatchIndex(template)
+	if loc == nil {
+		return template, false
 	}
+	indent := template[loc[2]:loc[3]]
+	nindent := template[loc[4]:loc[5]]
 
-	// Idempotency: skip if tolerations already present.
-	if strings.Contains(template, "tolerations:") {
-		return template
+	lines := []string{
+		`{{- $dhgTolerations := .tolerations | default list }}`,
+		`{{- if and $.Values.spot $.Values.spot.enabled }}`,
+		`{{- $dhgTolerations = concat $dhgTolerations $.Values.spot.tolerations }}`,
+		`terminationGracePeriodSeconds: {{ $.Values.spot.terminationGracePeriodSeconds }}`,
+		`{{- end }}`,
+		`{{- with $dhgTolerations }}`,
+		`tolerations:`,
+		`  {{- toYaml . | nindent ` + nindent + ` }}`,
+		`{{- end }}`,
 	}
+	var sb strings.Builder
+	for _, l := range lines {
+		sb.WriteString(indent + l + "\n")
+	}
+	return template[:loc[0]] + sb.String() + template[loc[1]:], true
+}
 
-	// Find `containers:` in the pod spec to determine insertion point and indentation.
-	// The regex captures the newline, leading whitespace, and the containers key.
-	// Note: matches the FIRST occurrence, which is correct for Deployment/StatefulSet/DaemonSet
-	// (spec.template.spec.containers). `initContainers:` does not match this pattern.
-	// For CronJob (nested jobTemplate.spec.template.spec.containers), only the first is patched.
-	re := regexp.MustCompile(`(\n)([ \t]+)(containers:\s*\n)`)
-	loc := re.FindStringIndex(template)
-	match := re.FindStringSubmatch(template)
-
-	if loc != nil && match != nil {
-		indent := match[2] // indentation of `containers:`
-
-		// Build tolerations block at the same indentation level.
-		var lines []string
-		lines = append(lines, indent+"tolerations:")
-		for _, tol := range tolerations {
-			key, _ := tol["key"].(string)
-			value, _ := tol["value"].(string)
-			effect, _ := tol["effect"].(string)
-			operator, _ := tol["operator"].(string)
-			lines = append(lines, indent+"- key: "+key)
-			lines = append(lines, indent+"  operator: "+operator)
-			lines = append(lines, indent+"  value: "+value)
-			lines = append(lines, indent+"  effect: "+effect)
+// hasPDBForComponent reports whether the chart already has a
+// PodDisruptionBudget for the given component.
+func hasPDBForComponent(templates map[string]string, component string) bool {
+	for _, content := range templates {
+		if extractKind(content) == "PodDisruptionBudget" &&
+			strings.Contains(content, "app.kubernetes.io/component: "+component+"\n") {
+			return true
 		}
-
-		tolerationsBlock := strings.Join(lines, "\n")
-		// Insert before `containers:` (after the preceding newline).
-		insertPos := loc[0] + 1 // after the \n
-		return template[:insertPos] + tolerationsBlock + "\n" + template[insertPos:]
 	}
+	return false
+}
 
-	// Fallback: containers: not found — append at end (may produce invalid YAML).
-	var lines []string
-	lines = append(lines, "      # FALLBACK: containers: not found in pod spec")
-	lines = append(lines, "      tolerations:")
-	for _, tol := range tolerations {
-		key, _ := tol["key"].(string)
-		value, _ := tol["value"].(string)
-		effect, _ := tol["effect"].(string)
-		operator, _ := tol["operator"].(string)
-		lines = append(lines, fmt.Sprintf("      - key: %s", key))
-		lines = append(lines, fmt.Sprintf("        operator: %s", operator))
-		lines = append(lines, fmt.Sprintf("        value: %s", value))
-		lines = append(lines, fmt.Sprintf("        effect: %s", effect))
-	}
-
-	tolerationsBlock := strings.Join(lines, "\n")
-	return template + "\n" + tolerationsBlock
+// spotPDBTemplateKey derives a PDB template map key from the source template key.
+// For example, "templates/deployment.yaml" → "templates/deployment-spot-pdb.yaml".
+func spotPDBTemplateKey(templateKey string) string {
+	ext := ".yaml"
+	base := strings.TrimSuffix(templateKey, ext)
+	return base + "-spot-pdb" + ext
 }
 
 // extractReplicas parses the `replicas:` value from a Kubernetes workload template.
@@ -273,12 +224,4 @@ func extractReplicas(content string, defaultVal int) int {
 		return defaultVal
 	}
 	return n
-}
-
-// spotPDBTemplateKey derives a PDB template map key from the source template key.
-// For example, "templates/deployment.yaml" → "templates/deployment-spot-pdb.yaml".
-func spotPDBTemplateKey(templateKey string) string {
-	ext := ".yaml"
-	base := strings.TrimSuffix(templateKey, ext)
-	return base + "-spot-pdb" + ext
 }

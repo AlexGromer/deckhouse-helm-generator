@@ -189,28 +189,33 @@ startupProbe:
   periodSeconds: 10`, port, port, port)
 }
 
-// InjectPDB generates a PodDisruptionBudget template for workloads with replicas >= 2.
-// Reuses GenerateSpotPDBHelm logic. Copy-on-write.
+// InjectPDB adds a PodDisruptionBudget (maxUnavailable: 1) for every
+// Deployment and StatefulSet that does not have one yet. Workloads with a
+// literal single replica are skipped (a PDB cannot protect them); a templated
+// replica count is assumed to be scalable. Copy-on-write.
 func InjectPDB(chart *types.GeneratedChart) (*types.GeneratedChart, int) {
 	result := copyChartTemplates(chart)
 	count := 0
+	name := chartNameOf(chart)
 
-	for name, content := range chart.Templates {
-		if !strings.Contains(content, "kind: Deployment") && !strings.Contains(content, "kind: StatefulSet") {
+	for path, content := range chart.Templates {
+		if kind := extractKind(content); kind != "Deployment" && kind != "StatefulSet" {
+			continue
+		}
+		if extractReplicas(content, 2) < 2 {
+			continue
+		}
+		m := componentLabelRegex.FindStringSubmatch(content)
+		if m == nil || hasPDBForComponent(result.Templates, m[1]) {
 			continue
 		}
 
-		replicas := extractReplicas(content, 1)
-		if replicas < 2 {
-			continue
-		}
-
-		pdbKey := strings.TrimSuffix(name, ".yaml") + "-pdb.yaml"
+		pdbKey := strings.TrimSuffix(path, ".yaml") + "-pdb.yaml"
 		if _, exists := result.Templates[pdbKey]; exists {
 			continue
 		}
 
-		result.Templates[pdbKey] = GenerateSpotPDBHelm(chart.Name, replicas)
+		result.Templates[pdbKey] = workloadPDBTemplate(name, m[1], "pdb", "")
 		count++
 	}
 

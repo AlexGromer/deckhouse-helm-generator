@@ -8,23 +8,6 @@ import (
 )
 
 // ============================================================
-// Test Plan
-//
-//  1. TestSpot_AWS_Tolerations              — happy   AWS → key="node.kubernetes.io/lifecycle", value="spot"
-//  2. TestSpot_GCP_Tolerations              — happy   GCP → key="cloud.google.com/gke-preemptible"
-//  3. TestSpot_Azure_Tolerations            — happy   Azure → key="kubernetes.azure.com/scalesetpriority"
-//  4. TestSpot_PreStopHook_Default15s       — happy   gracePeriod=15 → command contains "sleep 15"
-//  5. TestSpot_PreStopHook_Custom30s        — happy   gracePeriod=30 → command contains "sleep 30"
-//  6. TestSpot_PDB_LowReplicas_MinAvailable1    — boundary replicas=1 → PDB YAML contains "minAvailable: 1"
-//  7. TestSpot_PDB_HighReplicas_MinAvailable50Pct — boundary replicas=5 → PDB YAML contains minAvailable: "50%"
-//  8. TestSpot_Values_Structure             — happy   SpotValues has spot.enabled, spot.provider, spot.gracePeriod
-//  9. TestSpot_Values_ExplicitGracePeriod   — happy   explicit GracePeriod=15 preserved
-// 10. TestSpot_InjectIntoDeployment_AddsTolerations — integration Deployment → after inject, template contains "tolerations"
-// 11. TestSpot_InjectIntoJob_NoChanges      — integration Job → after inject, template unchanged (no tolerations)
-// 12. TestSpot_NilChart_ReturnsNil          — error   nil chart → returns nil
-// ============================================================
-
-// ============================================================
 // Section 1: GenerateSpotTolerations — provider-specific keys
 // ============================================================
 
@@ -117,640 +100,115 @@ func TestSpot_Azure_Tolerations(t *testing.T) {
 }
 
 // ============================================================
-// Section 2: GenerateSpotPreStopHook — gracePeriod values
+// InjectSpotConfig on dhg workload templates
 // ============================================================
 
-func TestSpot_PreStopHook_Default15s(t *testing.T) {
-	hook := GenerateSpotPreStopHook(15)
-
-	if hook == nil {
-		t.Fatal("GenerateSpotPreStopHook must not return nil")
-	}
-
-	// Expect structure: lifecycle.preStop.exec.command contains "sleep 15"
-	lifecycle, ok := hook["lifecycle"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected hook to contain 'lifecycle' map, got %T", hook["lifecycle"])
-	}
-
-	preStop, ok := lifecycle["preStop"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected 'lifecycle.preStop' map, got %T", lifecycle["preStop"])
-	}
-
-	exec, ok := preStop["exec"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected 'lifecycle.preStop.exec' map, got %T", preStop["exec"])
-	}
-
-	commands, ok := exec["command"].([]string)
-	if !ok {
-		t.Fatalf("expected 'lifecycle.preStop.exec.command' to be []string, got %T", exec["command"])
-	}
-
-	found := false
-	for _, cmd := range commands {
-		if strings.Contains(cmd, "sleep 15") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("preStop command must contain 'sleep 15', got: %v", commands)
-	}
-}
-
-func TestSpot_PreStopHook_Custom30s(t *testing.T) {
-	hook := GenerateSpotPreStopHook(30)
-
-	if hook == nil {
-		t.Fatal("GenerateSpotPreStopHook must not return nil")
-	}
-
-	lifecycle, ok := hook["lifecycle"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected hook to contain 'lifecycle' map, got %T", hook["lifecycle"])
-	}
-
-	preStop, ok := lifecycle["preStop"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected 'lifecycle.preStop' map, got %T", lifecycle["preStop"])
-	}
-
-	exec, ok := preStop["exec"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected 'lifecycle.preStop.exec' map, got %T", preStop["exec"])
-	}
-
-	commands, ok := exec["command"].([]string)
-	if !ok {
-		t.Fatalf("expected 'lifecycle.preStop.exec.command' to be []string, got %T", exec["command"])
-	}
-
-	found := false
-	for _, cmd := range commands {
-		if strings.Contains(cmd, "sleep 30") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("preStop command must contain 'sleep 30', got: %v", commands)
-	}
-}
-
-// ============================================================
-// Section 3: GenerateSpotPDB — minAvailable boundary logic
-// ============================================================
-
-func TestSpot_PDB_LowReplicas_MinAvailable1(t *testing.T) {
-	// replicas <= 2 → minAvailable: 1
-	pdb := GenerateSpotPDB("myapp", 1)
-
-	if pdb == "" {
-		t.Fatal("GenerateSpotPDB must return a non-empty YAML string")
-	}
-
-	if !strings.Contains(pdb, "minAvailable: 1") {
-		t.Errorf("expected 'minAvailable: 1' for replicas=1, got:\n%s", pdb)
-	}
-
-	// Must not use percentage notation for low-replica count
-	if strings.Contains(pdb, "50%") {
-		t.Error("expected no '50%' percentage in PDB for replicas=1")
-	}
-}
-
-func TestSpot_PDB_HighReplicas_MinAvailable50Pct(t *testing.T) {
-	// replicas > 2 → minAvailable: "50%"
-	pdb := GenerateSpotPDB("myapp", 5)
-
-	if pdb == "" {
-		t.Fatal("GenerateSpotPDB must return a non-empty YAML string")
-	}
-
-	if !strings.Contains(pdb, `"50%"`) {
-		t.Errorf(`expected minAvailable: "50%%" for replicas=5, got:\n%s`, pdb)
-	}
-}
-
-func TestSpot_PDB_ZeroReplicas(t *testing.T) {
-	// replicas=0 is invalid; should be clamped to 1, producing minAvailable: 1
-	pdb := GenerateSpotPDB("myapp", 0)
-
-	if pdb == "" {
-		t.Fatal("GenerateSpotPDB must return a non-empty YAML string for replicas=0")
-	}
-
-	if !strings.Contains(pdb, "kind: PodDisruptionBudget") {
-		t.Errorf("expected valid PDB YAML for replicas=0, got:\n%s", pdb)
-	}
-
-	if !strings.Contains(pdb, "minAvailable: 1") {
-		t.Errorf("expected 'minAvailable: 1' for replicas=0 (clamped to 1), got:\n%s", pdb)
-	}
-}
-
-func TestSpot_PDB_NegativeReplicas(t *testing.T) {
-	// replicas=-1 is invalid; should be clamped to 1, producing minAvailable: 1
-	pdb := GenerateSpotPDB("myapp", -1)
-
-	if pdb == "" {
-		t.Fatal("GenerateSpotPDB must return a non-empty YAML string for replicas=-1")
-	}
-
-	if !strings.Contains(pdb, "kind: PodDisruptionBudget") {
-		t.Errorf("expected valid PDB YAML for replicas=-1, got:\n%s", pdb)
-	}
-
-	if !strings.Contains(pdb, "minAvailable: 1") {
-		t.Errorf("expected 'minAvailable: 1' for replicas=-1 (clamped to 1), got:\n%s", pdb)
-	}
-}
-
-// ============================================================
-// Section 4: GenerateSpotValues — values map structure
-// ============================================================
-
-func TestSpot_Values_Structure(t *testing.T) {
-	config := SpotConfig{
-		Provider:    SpotAWS,
-		GracePeriod: 15,
-		Enabled:     false,
-	}
-
-	values := GenerateSpotValues(config)
-
-	if values == nil {
-		t.Fatal("GenerateSpotValues must return a non-nil map")
-	}
-
-	spot, ok := values["spot"]
-	if !ok {
-		t.Fatal("expected top-level 'spot' key in values map")
-	}
-
-	spotMap, ok := spot.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected 'spot' to be map[string]interface{}, got %T", spot)
-	}
-
-	if _, ok := spotMap["enabled"]; !ok {
-		t.Error("expected 'spot.enabled' key in values map")
-	}
-
-	if _, ok := spotMap["provider"]; !ok {
-		t.Error("expected 'spot.provider' key in values map")
-	}
-
-	if _, ok := spotMap["gracePeriod"]; !ok {
-		t.Error("expected 'spot.gracePeriod' key in values map")
-	}
-}
-
-func TestSpot_Values_ExplicitGracePeriod(t *testing.T) {
-	// Explicit GracePeriod=15 should be preserved in values
-	config := SpotConfig{
-		Provider:    SpotProvider(""),
-		GracePeriod: 15,
-		Enabled:     false,
-	}
-
-	values := GenerateSpotValues(config)
-
-	if values == nil {
-		t.Fatal("GenerateSpotValues must return a non-nil map")
-	}
-
-	spot, ok := values["spot"].(map[string]interface{})
-	if !ok {
-		t.Fatal("expected 'spot' map in values")
-	}
-
-	gp, ok := spot["gracePeriod"]
-	if !ok {
-		t.Fatal("expected 'spot.gracePeriod' key in values")
-	}
-
-	gpInt, ok := gp.(int)
-	if !ok {
-		t.Fatalf("expected 'spot.gracePeriod' to be int, got %T (%v)", gp, gp)
-	}
-
-	if gpInt != 15 {
-		t.Errorf("expected default gracePeriod=15, got %d", gpInt)
-	}
-}
-
-// ============================================================
-// Section 5: InjectSpotConfig — chart template patching
-// ============================================================
-
-func TestSpot_InjectIntoDeployment_AddsTolerations(t *testing.T) {
-	chart := makeChart("myapp", map[string]string{
-		"templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: myapp\nspec:\n  replicas: 3\n  template:\n    spec:\n      containers:\n        - name: app\n          image: nginx:1.21",
-	})
-
-	config := SpotConfig{
-		Provider:    SpotAWS,
-		GracePeriod: 15,
-		Enabled:     true,
-	}
-
-	result := InjectSpotConfig(chart, config)
-
-	if result == nil {
-		t.Fatal("InjectSpotConfig returned nil for a valid chart")
-	}
-
-	content, ok := result.Templates["templates/deployment.yaml"]
-	if !ok {
-		t.Fatal("templates/deployment.yaml missing after InjectSpotConfig")
-	}
-
-	if !strings.Contains(content, "tolerations") {
-		t.Errorf("expected 'tolerations' injected into Deployment template, got:\n%s", content)
-	}
-}
-
-func TestSpot_InjectIntoJob_NoChanges(t *testing.T) {
-	originalContent := "apiVersion: batch/v1\nkind: Job\nmetadata:\n  name: myapp-job\nspec:\n  template:\n    spec:\n      restartPolicy: Never\n      containers:\n        - name: job\n          image: busybox:1.36"
-
-	chart := makeChart("myapp", map[string]string{
-		"templates/job.yaml": originalContent,
-	})
-
-	config := SpotConfig{
-		Provider:    SpotAWS,
-		GracePeriod: 15,
-		Enabled:     true,
-	}
-
-	result := InjectSpotConfig(chart, config)
-
-	if result == nil {
-		t.Fatal("InjectSpotConfig returned nil for a valid chart with Job")
-	}
-
-	content, ok := result.Templates["templates/job.yaml"]
-	if !ok {
-		t.Fatal("templates/job.yaml missing after InjectSpotConfig")
-	}
-
-	if strings.Contains(content, "tolerations") {
-		t.Errorf("Job template must NOT have 'tolerations' injected by InjectSpotConfig, got:\n%s", content)
-	}
-}
-
-// ============================================================
-// Section 6: InjectSpotConfig — nil chart guard
-// ============================================================
-
-func TestSpot_InjectTolerations_InsidePodSpec(t *testing.T) {
-	deploymentYAML := `apiVersion: apps/v1
+const spotDeploymentTemplate = `{{- $svc := .Values.services.web -}}
+{{- with $svc.deployment }}
+apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: myapp
+  name: {{ include "app.fullname" $ }}-web
 spec:
-  replicas: 3
   template:
     metadata:
       labels:
-        app: myapp
+        app.kubernetes.io/component: web
     spec:
       containers:
-        - name: app
-          image: nginx:1.21
+        - name: web
+      {{- with .tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
 `
-	chart := makeChart("myapp", map[string]string{
-		"templates/deployment.yaml": deploymentYAML,
-	})
 
-	config := SpotConfig{
-		Provider:    SpotAWS,
-		GracePeriod: 15,
-		Enabled:     true,
+func spotTestChart(templates map[string]string) *types.GeneratedChart {
+	return &types.GeneratedChart{
+		Name:       "app",
+		ChartYAML:  "apiVersion: v2\nname: app\nversion: 0.1.0\n",
+		ValuesYAML: "services:\n  web:\n    enabled: true\n",
+		Templates:  templates,
 	}
+}
 
-	result := InjectSpotConfig(chart, config)
-	if result == nil {
-		t.Fatal("InjectSpotConfig returned nil")
+func TestInjectSpotConfig_MergesTolerationsFromValues(t *testing.T) {
+	chart := spotTestChart(map[string]string{"templates/web-deployment.yaml": spotDeploymentTemplate})
+	out, err := InjectSpotConfig(chart, SpotConfig{Provider: SpotGCP, GracePeriod: 45, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	content := result.Templates["templates/deployment.yaml"]
-
-	// tolerations: must appear BEFORE containers:
-	tolIdx := strings.Index(content, "tolerations:")
-	conIdx := strings.Index(content, "containers:")
-	if tolIdx == -1 {
-		t.Fatalf("tolerations: not found in output:\n%s", content)
-	}
-	if conIdx == -1 {
-		t.Fatalf("containers: not found in output:\n%s", content)
-	}
-	if tolIdx >= conIdx {
-		t.Errorf("tolerations: (pos %d) must appear BEFORE containers: (pos %d) in pod spec.\nOutput:\n%s", tolIdx, conIdx, content)
-	}
-
-	// Both tolerations: and containers: must be at the same indentation level.
-	lines := strings.Split(content, "\n")
-	var tolIndent, conIndent string
-	for _, line := range lines {
-		trimmed := strings.TrimLeft(line, " \t")
-		if strings.HasPrefix(trimmed, "tolerations:") {
-			tolIndent = line[:len(line)-len(trimmed)]
-		}
-		if strings.HasPrefix(trimmed, "containers:") {
-			conIndent = line[:len(line)-len(trimmed)]
+	tmpl := out.Templates["templates/web-deployment.yaml"]
+	for _, want := range []string{
+		"{{- $dhgTolerations := .tolerations | default list }}",
+		"concat $dhgTolerations $.Values.spot.tolerations",
+		"terminationGracePeriodSeconds: {{ $.Values.spot.terminationGracePeriodSeconds }}",
+		"{{- toYaml . | nindent 8 }}",
+	} {
+		if !strings.Contains(tmpl, want) {
+			t.Errorf("missing %q in:\n%s", want, tmpl)
 		}
 	}
-	if tolIndent != conIndent {
-		t.Errorf("tolerations indent %q != containers indent %q", tolIndent, conIndent)
+	if n := strings.Count(tmpl, "tolerations:"); n != 1 {
+		t.Errorf("expected exactly one tolerations key, got %d", n)
 	}
-
-	// tolerations: must NOT be at document root (zero indentation).
-	if tolIndent == "" {
-		t.Error("tolerations: is at document root (no indentation) — must be inside pod spec")
-	}
-}
-
-func TestSpot_InjectTolerations_Idempotent(t *testing.T) {
-	deploymentYAML := `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: myapp
-spec:
-  replicas: 3
-  template:
-    spec:
-      containers:
-        - name: app
-          image: nginx:1.21
-`
-	chart := makeChart("myapp", map[string]string{
-		"templates/deployment.yaml": deploymentYAML,
-	})
-
-	config := SpotConfig{
-		Provider:    SpotAWS,
-		GracePeriod: 15,
-		Enabled:     true,
-	}
-
-	// Inject once.
-	result1 := InjectSpotConfig(chart, config)
-	content1 := result1.Templates["templates/deployment.yaml"]
-
-	// Inject again on the already-injected chart.
-	result2 := InjectSpotConfig(result1, config)
-	content2 := result2.Templates["templates/deployment.yaml"]
-
-	// Count occurrences of "tolerations:" — must be exactly 1.
-	count := strings.Count(content2, "tolerations:")
-	if count != 1 {
-		t.Errorf("expected exactly 1 'tolerations:' block after double injection, got %d.\nAfter first:\n%s\nAfter second:\n%s", count, content1, content2)
-	}
-}
-
-func TestSpot_NilChart_ReturnsNil(t *testing.T) {
-	config := SpotConfig{
-		Provider:    SpotAWS,
-		GracePeriod: 15,
-		Enabled:     true,
-	}
-
-	var chart *types.GeneratedChart
-	result := InjectSpotConfig(chart, config)
-
-	if result != nil {
-		t.Errorf("expected nil return for nil chart input, got %+v", result)
-	}
-}
-
-// ============================================================
-// Section 7: InjectSpotConfig — PDB generation
-// ============================================================
-
-func TestInjectSpotConfig_GeneratesPDB(t *testing.T) {
-	deploymentYAML := `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: myapp
-spec:
-  replicas: 3
-  template:
-    metadata:
-      labels:
-        app: myapp
-    spec:
-      containers:
-        - name: app
-          image: nginx:1.21
-`
-	chart := makeChart("myapp", map[string]string{
-		"templates/deployment.yaml": deploymentYAML,
-	})
-
-	config := SpotConfig{
-		Provider:    SpotAWS,
-		GracePeriod: 15,
-		Enabled:     true,
-	}
-
-	result := InjectSpotConfig(chart, config)
-	if result == nil {
-		t.Fatal("InjectSpotConfig returned nil for a valid chart")
-	}
-
-	// PDB template must exist under the derived key.
-	pdbKey := "templates/deployment-spot-pdb.yaml"
-	pdbContent, ok := result.Templates[pdbKey]
-	if !ok {
-		t.Fatalf("expected PDB template at key %q, available keys: %v", pdbKey, templateKeys(result))
-	}
-
-	// Must be a PodDisruptionBudget.
-	if !strings.Contains(pdbContent, "kind: PodDisruptionBudget") {
-		t.Errorf("PDB template must contain 'kind: PodDisruptionBudget', got:\n%s", pdbContent)
-	}
-
-	// With replicas=3, minAvailable should be "50%".
-	if !strings.Contains(pdbContent, `"50%"`) {
-		t.Errorf("PDB template for replicas=3 must contain '50%%', got:\n%s", pdbContent)
-	}
-
-	// Must use Helm template syntax for the name.
-	if !strings.Contains(pdbContent, `{{ include "myapp.fullname" . }}`) {
-		t.Errorf("PDB template must use Helm fullname helper, got:\n%s", pdbContent)
-	}
-
-	// Must use Helm template syntax for selector labels.
-	if !strings.Contains(pdbContent, `include "myapp.selectorLabels" .`) {
-		t.Errorf("PDB template must use Helm selectorLabels helper, got:\n%s", pdbContent)
-	}
-
-	// Original deployment template must still exist and be unaffected by PDB addition.
-	if _, ok := result.Templates["templates/deployment.yaml"]; !ok {
-		t.Error("original deployment template must still be present")
-	}
-}
-
-func TestInjectSpotConfig_GeneratesPDB_LowReplicas(t *testing.T) {
-	deploymentYAML := `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: myapp
-spec:
-  replicas: 1
-  template:
-    spec:
-      containers:
-        - name: app
-          image: nginx:1.21
-`
-	chart := makeChart("myapp", map[string]string{
-		"templates/deployment.yaml": deploymentYAML,
-	})
-
-	config := SpotConfig{
-		Provider:    SpotGCP,
-		GracePeriod: 15,
-		Enabled:     true,
-	}
-
-	result := InjectSpotConfig(chart, config)
-	if result == nil {
-		t.Fatal("InjectSpotConfig returned nil")
-	}
-
-	pdbContent, ok := result.Templates["templates/deployment-spot-pdb.yaml"]
-	if !ok {
-		t.Fatalf("expected PDB template, available keys: %v", templateKeys(result))
-	}
-
-	// With replicas=1 (<=2), minAvailable should be 1.
-	if !strings.Contains(pdbContent, "minAvailable: 1") {
-		t.Errorf("PDB template for replicas=1 must contain 'minAvailable: 1', got:\n%s", pdbContent)
-	}
-}
-
-func TestInjectSpotConfig_GeneratesPDB_StatefulSet(t *testing.T) {
-	stsYAML := `apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: mydb
-spec:
-  replicas: 5
-  template:
-    spec:
-      containers:
-        - name: db
-          image: postgres:15
-`
-	chart := makeChart("mydb", map[string]string{
-		"templates/statefulset.yaml": stsYAML,
-	})
-
-	config := SpotConfig{
-		Provider:    SpotAzure,
-		GracePeriod: 30,
-		Enabled:     true,
-	}
-
-	result := InjectSpotConfig(chart, config)
-	if result == nil {
-		t.Fatal("InjectSpotConfig returned nil")
-	}
-
-	pdbKey := "templates/statefulset-spot-pdb.yaml"
-	pdbContent, ok := result.Templates[pdbKey]
-	if !ok {
-		t.Fatalf("expected PDB template at key %q, available keys: %v", pdbKey, templateKeys(result))
-	}
-
-	if !strings.Contains(pdbContent, "kind: PodDisruptionBudget") {
-		t.Errorf("PDB template must contain 'kind: PodDisruptionBudget', got:\n%s", pdbContent)
-	}
-
-	// replicas=5 → 50%
-	if !strings.Contains(pdbContent, `"50%"`) {
-		t.Errorf("PDB template for replicas=5 must contain '50%%', got:\n%s", pdbContent)
-	}
-}
-
-func TestInjectSpotConfig_NoPDB_ForJob(t *testing.T) {
-	jobYAML := `apiVersion: batch/v1
-kind: Job
-metadata:
-  name: myjob
-spec:
-  template:
-    spec:
-      restartPolicy: Never
-      containers:
-        - name: job
-          image: busybox:1.36
-`
-	chart := makeChart("myapp", map[string]string{
-		"templates/job.yaml": jobYAML,
-	})
-
-	config := SpotConfig{
-		Provider:    SpotAWS,
-		GracePeriod: 15,
-		Enabled:     true,
-	}
-
-	result := InjectSpotConfig(chart, config)
-	if result == nil {
-		t.Fatal("InjectSpotConfig returned nil")
-	}
-
-	// No PDB should be generated for a Job.
-	for key := range result.Templates {
-		if strings.Contains(key, "spot-pdb") {
-			t.Errorf("Job must NOT produce a PDB template, but found key %q", key)
+	for _, want := range []string{"spot:", "enabled: true", "provider: gcp", "terminationGracePeriodSeconds: 45", "cloud.google.com/gke-preemptible"} {
+		if !strings.Contains(out.ValuesYAML, want) {
+			t.Errorf("values missing %q:\n%s", want, out.ValuesYAML)
 		}
 	}
-}
-
-// ============================================================
-// M-14: GenerateSpotPDB sanitizes appName
-// ============================================================
-
-func TestSpotPDB_SanitizesAppName(t *testing.T) {
-	pdb := GenerateSpotPDB("my;app\ninjection", 2)
-
-	if pdb == "" {
-		t.Fatal("GenerateSpotPDB must return a non-empty YAML string")
-	}
-
-	// After sanitization, only [a-z0-9-] should remain.
-	// The regex strips ';' and '\n' but keeps valid chars, so result is "myappinjection".
-	if strings.Contains(pdb, ";") {
-		t.Error("PDB output contains ';' — appName not sanitized")
-	}
-
-	// The sanitized name should be "myappinjection" (lowercase, stripped of ; and newline)
-	if !strings.Contains(pdb, "name: myappinjection-pdb") {
-		t.Errorf("expected sanitized name 'myappinjection-pdb' in PDB, got:\n%s", pdb)
-	}
-	if !strings.Contains(pdb, "app: myappinjection") {
-		t.Errorf("expected sanitized label 'app: myappinjection' in PDB, got:\n%s", pdb)
-	}
-
-	// Verify uppercase+special chars are also stripped
-	pdb2 := GenerateSpotPDB("My-App_V2!", 1)
-	if !strings.Contains(pdb2, "name: my-appv2-pdb") {
-		t.Errorf("expected 'my-appv2-pdb' for input 'My-App_V2!', got:\n%s", pdb2)
+	if chart.Templates["templates/web-deployment.yaml"] != spotDeploymentTemplate {
+		t.Error("input chart was mutated")
 	}
 }
 
-// templateKeys returns all template map keys for diagnostic output.
-func templateKeys(chart *types.GeneratedChart) []string {
-	keys := make([]string, 0, len(chart.Templates))
-	for k := range chart.Templates {
-		keys = append(keys, k)
+func TestInjectSpotConfig_PDBPerComponent(t *testing.T) {
+	chart := spotTestChart(map[string]string{"templates/web-deployment.yaml": spotDeploymentTemplate})
+	out, err := InjectSpotConfig(chart, SpotConfig{Provider: SpotAWS, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-	return keys
+	pdb, ok := out.Templates["templates/web-deployment-spot-pdb.yaml"]
+	if !ok {
+		t.Fatal("expected a spot PDB for the Deployment")
+	}
+	for _, want := range []string{"kind: PodDisruptionBudget", "maxUnavailable: 1", "app.kubernetes.io/component: web", `include "app.selectorLabels"`, "if and .Values.spot .Values.spot.enabled"} {
+		if !strings.Contains(pdb, want) {
+			t.Errorf("PDB missing %q:\n%s", want, pdb)
+		}
+	}
+
+	// A workload that already has a PDB does not get a second one.
+	chart.Templates["templates/web-pdb.yaml"] = "kind: PodDisruptionBudget\n    app.kubernetes.io/component: web\n"
+	out, err = InjectSpotConfig(chart, SpotConfig{Provider: SpotAWS, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out.Templates["templates/web-deployment-spot-pdb.yaml"]; ok {
+		t.Error("spot PDB must not duplicate an existing PDB")
+	}
+}
+
+func TestInjectSpotConfig_SkipsJobsAndForeignTemplates(t *testing.T) {
+	job := strings.Replace(spotDeploymentTemplate, "kind: Deployment", "kind: Job", 1)
+	foreign := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: x\nspec: {}\n"
+	chart := spotTestChart(map[string]string{"templates/job.yaml": job, "templates/foreign.yaml": foreign})
+	out, err := InjectSpotConfig(chart, SpotConfig{Provider: SpotAWS, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Templates["templates/job.yaml"] != job || out.Templates["templates/foreign.yaml"] != foreign {
+		t.Error("jobs and templates without a values tolerations block must be left unchanged")
+	}
+	if strings.Contains(out.ValuesYAML, "spot:") {
+		t.Error("spot values must not be added when nothing was injected")
+	}
+}
+
+func TestInjectSpotConfig_NilChart(t *testing.T) {
+	out, err := InjectSpotConfig(nil, SpotConfig{Provider: SpotAWS})
+	if out != nil || err != nil {
+		t.Errorf("expected nil, nil; got %v, %v", out, err)
+	}
 }

@@ -74,7 +74,7 @@ spec:
 
 	content := result.Templates["templates/ingress.yaml"]
 
-	if !strings.Contains(content, "cert-manager.io/cluster-issuer: letsencrypt-staging") {
+	if !strings.Contains(content, `cert-manager.io/cluster-issuer: "letsencrypt-staging"`) {
 		t.Error("expected cert-manager.io/cluster-issuer annotation")
 	}
 	if !strings.Contains(content, "force-ssl-redirect: \"true\"") && !strings.Contains(content, "force-ssl-redirect: 'true'") {

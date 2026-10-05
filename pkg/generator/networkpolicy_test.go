@@ -40,7 +40,7 @@ func TestAutoNP_NoServices(t *testing.T) {
 	group := makeGroup("myapp", "default", []*types.ProcessedResource{deploy})
 	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+	result := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})
 
 	if len(result) == 0 {
 		t.Fatal("expected at least 1 NetworkPolicy even without Services (deny-all + allow-dns)")
@@ -63,7 +63,7 @@ func TestAutoNP_SinglePort(t *testing.T) {
 	group := makeGroup("myapp", "default", []*types.ProcessedResource{deploy, svc})
 	graph := buildGraph([]*types.ProcessedResource{deploy, svc}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+	result := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})
 
 	found := false
 	for _, content := range result {
@@ -83,7 +83,7 @@ func TestAutoNP_MultiPort(t *testing.T) {
 	group := makeGroup("myapp", "default", []*types.ProcessedResource{deploy, svc})
 	graph := buildGraph([]*types.ProcessedResource{deploy, svc}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+	result := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})
 
 	has8080, has8443 := false, false
 	for _, content := range result {
@@ -110,7 +110,7 @@ func TestAutoNP_EnvBasedEgress_Postgres(t *testing.T) {
 	group := makeGroup("myapp", "default", []*types.ProcessedResource{deploy})
 	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+	result := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})
 
 	found := false
 	for _, content := range result {
@@ -131,7 +131,7 @@ func TestAutoNP_EnvBasedEgress_Redis(t *testing.T) {
 	group := makeGroup("myapp", "default", []*types.ProcessedResource{deploy})
 	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+	result := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})
 
 	found := false
 	for _, content := range result {
@@ -153,7 +153,7 @@ func TestAutoNP_EnvBasedEgress_Multiple(t *testing.T) {
 	group := makeGroup("myapp", "default", []*types.ProcessedResource{deploy})
 	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+	result := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})
 
 	hasPG, hasRedis := false, false
 	for _, content := range result {
@@ -178,7 +178,7 @@ func TestAutoNP_DenyAllPresent(t *testing.T) {
 	group := makeGroup("myapp", "default", []*types.ProcessedResource{deploy})
 	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+	result := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})
 
 	for _, content := range result {
 		if !strings.Contains(content, "policyTypes") {
@@ -192,7 +192,7 @@ func TestAutoNP_AllowDNSPresent(t *testing.T) {
 	group := makeGroup("myapp", "default", []*types.ProcessedResource{deploy})
 	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+	result := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})
 
 	hasDNS := false
 	for _, content := range result {
@@ -223,7 +223,7 @@ func TestAutoNP_OnePerGroup(t *testing.T) {
 
 	graph := buildGraph([]*types.ProcessedResource{deploy1, deploy2, deploy3}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, groups)
+	result := GenerateAutoNetworkPolicies("app", graph, groups)
 
 	if len(result) < 3 {
 		t.Errorf("expected at least 3 NetworkPolicy templates (one per group), got %d", len(result))
@@ -232,7 +232,7 @@ func TestAutoNP_OnePerGroup(t *testing.T) {
 
 func TestAutoNP_EmptyGraph(t *testing.T) {
 	graph := buildGraph(nil, nil)
-	result := GenerateAutoNetworkPolicies(graph, nil)
+	result := GenerateAutoNetworkPolicies("app", graph, nil)
 
 	if len(result) != 0 {
 		t.Errorf("expected 0 templates for empty graph, got %d", len(result))
@@ -331,7 +331,7 @@ func TestAutoNP_CrossNamespace(t *testing.T) {
 	}
 	graph := buildGraph([]*types.ProcessedResource{deploy, svc}, []types.Relationship{rel})
 
-	result := GenerateAutoNetworkPolicies(graph, groups)
+	result := GenerateAutoNetworkPolicies("app", graph, groups)
 
 	hasNsSelector := false
 	for _, content := range result {
@@ -354,7 +354,7 @@ func TestAutoNP_UsesHelmReleaseNamespace(t *testing.T) {
 	group := makeGroup("myapp", "hardcoded-ns", []*types.ProcessedResource{deploy})
 	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+	result := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})
 
 	for _, content := range result {
 		if !strings.Contains(content, "namespace: {{ .Release.Namespace }}") {
@@ -511,7 +511,7 @@ func TestAutoNP_GroupNameSpecialChars(t *testing.T) {
 	group := makeGroup("my-app_v2.test", "default", []*types.ProcessedResource{deploy, svc})
 	graph := buildGraph([]*types.ProcessedResource{deploy, svc}, nil)
 
-	result := GenerateAutoNetworkPolicies(graph, []*ServiceGroup{group})
+	result := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})
 
 	if len(result) == 0 {
 		t.Fatal("expected at least 1 NetworkPolicy for group with special chars")
@@ -524,68 +524,5 @@ func TestAutoNP_GroupNameSpecialChars(t *testing.T) {
 		if !strings.Contains(content, "my-app_v2.test") {
 			t.Error("generated content must contain the group name with special chars")
 		}
-	}
-}
-
-// ============================================================
-// 2.6.2: Default-Deny NetworkPolicy
-// ============================================================
-
-func TestDefaultDeny_HasDenyAllIngress(t *testing.T) {
-	result := GenerateDefaultDenyPolicy("default")
-
-	if !strings.Contains(result, "kind: NetworkPolicy") {
-		t.Error("expected kind: NetworkPolicy")
-	}
-	if !strings.Contains(result, "name: default-deny-all") {
-		t.Error("expected name: default-deny-all")
-	}
-	if !strings.Contains(result, "podSelector: {}") {
-		t.Error("expected empty podSelector (matches all pods)")
-	}
-	if !strings.Contains(result, "- Ingress") {
-		t.Error("expected Ingress in policyTypes")
-	}
-	if !strings.Contains(result, "- Egress") {
-		t.Error("expected Egress in policyTypes")
-	}
-}
-
-func TestDefaultDeny_AllowsDNS(t *testing.T) {
-	result := GenerateDefaultDenyPolicy("default")
-
-	if !strings.Contains(result, "port: 53") {
-		t.Error("expected DNS port 53 in egress rules")
-	}
-	if !strings.Contains(result, "protocol: UDP") {
-		t.Error("expected UDP protocol for DNS")
-	}
-	if !strings.Contains(result, "protocol: TCP") {
-		t.Error("expected TCP protocol for DNS")
-	}
-	if !strings.Contains(result, "kube-system") {
-		t.Error("expected kube-system namespace for DNS egress")
-	}
-}
-
-func TestDefaultDeny_UsesHelmNamespace(t *testing.T) {
-	result := GenerateDefaultDenyPolicy("my-namespace")
-
-	if !strings.Contains(result, "namespace: {{ .Release.Namespace }}") {
-		t.Error("expected Helm template for namespace")
-	}
-	if strings.Contains(result, "namespace: my-namespace") {
-		t.Error("must NOT contain literal namespace")
-	}
-}
-
-func TestDefaultDeny_EmptyNamespace(t *testing.T) {
-	result := GenerateDefaultDenyPolicy("")
-
-	if !strings.Contains(result, "kind: NetworkPolicy") {
-		t.Error("expected valid NetworkPolicy even with empty namespace")
-	}
-	if !strings.Contains(result, "{{ .Release.Namespace }}") {
-		t.Error("expected Helm template namespace even with empty input")
 	}
 }

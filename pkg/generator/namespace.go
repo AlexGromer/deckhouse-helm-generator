@@ -3,6 +3,9 @@ package generator
 import (
 	"fmt"
 	"strings"
+
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
 // NamespaceOpts configures namespace resource generation.
@@ -14,7 +17,8 @@ type NamespaceOpts struct {
 
 // GenerateNamespaceResources generates namespace-level governance templates.
 // Returns map of template path -> template content.
-func GenerateNamespaceResources(groups []*ServiceGroup, opts NamespaceOpts) map[string]string {
+// chartName is the name of the chart the templates are added to (helper prefix).
+func GenerateNamespaceResources(chartName string, groups []*ServiceGroup, opts NamespaceOpts) map[string]string {
 	if len(groups) == 0 {
 		return make(map[string]string)
 	}
@@ -27,15 +31,15 @@ func GenerateNamespaceResources(groups []*ServiceGroup, opts NamespaceOpts) map[
 		}
 		if opts.ResourceQuota {
 			path := fmt.Sprintf("templates/%s-resourcequota.yaml", group.Name)
-			result[path] = GenerateResourceQuotaTemplate(group)
+			result[path] = GenerateResourceQuotaTemplate(chartName, group)
 		}
 		if opts.LimitRange {
 			path := fmt.Sprintf("templates/%s-limitrange.yaml", group.Name)
-			result[path] = GenerateLimitRangeTemplate(group)
+			result[path] = GenerateLimitRangeTemplate(chartName, group)
 		}
 		if opts.NetworkPolicy {
 			path := fmt.Sprintf("templates/%s-networkpolicy-default.yaml", group.Name)
-			result[path] = GenerateNetworkPolicyTemplate(group)
+			result[path] = GenerateNetworkPolicyTemplate(chartName, group)
 		}
 	}
 
@@ -43,7 +47,7 @@ func GenerateNamespaceResources(groups []*ServiceGroup, opts NamespaceOpts) map[
 }
 
 // GenerateResourceQuotaTemplate generates a ResourceQuota template from aggregated resources.
-func GenerateResourceQuotaTemplate(group *ServiceGroup) string {
+func GenerateResourceQuotaTemplate(chartName string, group *ServiceGroup) string {
 	cpuReq, memReq, cpuLim, memLim := extractFirstResourceValues(group)
 
 	if cpuReq == "" {
@@ -64,10 +68,10 @@ func GenerateResourceQuotaTemplate(group *ServiceGroup) string {
 	sb.WriteString("apiVersion: v1\n")
 	sb.WriteString("kind: ResourceQuota\n")
 	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-quota\n", group.Name))
+	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-%s-quota\n", chartName, processor.ResourceNameSuffix(group.Name)))
 	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
 	sb.WriteString("  labels:\n")
-	sb.WriteString(fmt.Sprintf("    {{- include \"%s.labels\" . | nindent 4 }}\n", group.Name))
+	sb.WriteString(fmt.Sprintf("    {{- include \"%s.labels\" . | nindent 4 }}\n", chartName))
 	sb.WriteString("spec:\n")
 	sb.WriteString("  hard:\n")
 	sb.WriteString(fmt.Sprintf("    requests.cpu: \"%s\"\n", cpuReq))
@@ -80,7 +84,7 @@ func GenerateResourceQuotaTemplate(group *ServiceGroup) string {
 }
 
 // GenerateLimitRangeTemplate generates a LimitRange template with defaults from workload analysis.
-func GenerateLimitRangeTemplate(group *ServiceGroup) string {
+func GenerateLimitRangeTemplate(chartName string, group *ServiceGroup) string {
 	cpuReq, memReq, cpuLim, memLim := extractFirstResourceValues(group)
 
 	if cpuReq == "" {
@@ -101,10 +105,10 @@ func GenerateLimitRangeTemplate(group *ServiceGroup) string {
 	sb.WriteString("apiVersion: v1\n")
 	sb.WriteString("kind: LimitRange\n")
 	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-limits\n", group.Name))
+	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-%s-limits\n", chartName, processor.ResourceNameSuffix(group.Name)))
 	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
 	sb.WriteString("  labels:\n")
-	sb.WriteString(fmt.Sprintf("    {{- include \"%s.labels\" . | nindent 4 }}\n", group.Name))
+	sb.WriteString(fmt.Sprintf("    {{- include \"%s.labels\" . | nindent 4 }}\n", chartName))
 	sb.WriteString("spec:\n")
 	sb.WriteString("  limits:\n")
 	sb.WriteString("    - type: Container\n")
@@ -120,14 +124,14 @@ func GenerateLimitRangeTemplate(group *ServiceGroup) string {
 }
 
 // GenerateNetworkPolicyTemplate generates a default deny-all + allow same-namespace NetworkPolicy.
-func GenerateNetworkPolicyTemplate(group *ServiceGroup) string {
+func GenerateNetworkPolicyTemplate(chartName string, group *ServiceGroup) string {
 	var sb strings.Builder
 
 	sb.WriteString("{{- if .Values.namespace.networkPolicy.enabled }}\n")
 	sb.WriteString("apiVersion: networking.k8s.io/v1\n")
 	sb.WriteString("kind: NetworkPolicy\n")
 	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-default\n", group.Name))
+	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-%s-default\n", chartName, processor.ResourceNameSuffix(group.Name)))
 	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
 	sb.WriteString("spec:\n")
 	sb.WriteString("  podSelector: {}\n")
@@ -188,4 +192,69 @@ func extractFirstResourceValues(group *ServiceGroup) (cpuReq, memReq, cpuLim, me
 		}
 	}
 	return
+}
+
+// ApplyNamespaceResources adds namespace governance templates (ResourceQuota,
+// LimitRange, default NetworkPolicy) and relationship-derived NetworkPolicies
+// to a chart, together with the namespace.* values that toggle them.
+//
+// A chart generated for one service group (separate/library/umbrella modes)
+// gets the resources of that group only; a universal chart gets all groups.
+// Umbrella parent charts are left unchanged (their subcharts carry the
+// resources).
+func ApplyNamespaceResources(chart *types.GeneratedChart, graph *types.ResourceGraph, groups []*ServiceGroup, opts NamespaceOpts) (*types.GeneratedChart, error) {
+	if len(chart.Templates) == 0 && strings.Contains(chart.ChartYAML, "\ndependencies:") {
+		return chart, nil
+	}
+	name := chartNameOf(chart)
+	selected := groups
+	for _, g := range groups {
+		if g != nil && g.Name == name {
+			selected = []*ServiceGroup{g}
+			break
+		}
+	}
+
+	out := cloneChart(chart)
+	nsTemplates := GenerateNamespaceResources(name, selected, opts)
+	var autoNP map[string]string
+	if opts.NetworkPolicy {
+		autoNP = GenerateAutoNetworkPolicies(name, graph, selected)
+	}
+	for path, content := range nsTemplates {
+		// A group with a fine-grained policy does not also get the broad
+		// default policy, so the two never conflict.
+		if strings.HasSuffix(path, "-networkpolicy-default.yaml") {
+			fine := strings.TrimSuffix(path, "-default.yaml") + ".yaml"
+			if _, ok := autoNP[fine]; ok {
+				continue
+			}
+		}
+		out.Templates[path] = content
+	}
+	for path, content := range autoNP {
+		out.Templates[path] = content
+	}
+
+	values, err := appendTopLevelValues(out.ValuesYAML, "namespace", map[string]interface{}{
+		"resourceQuota": map[string]interface{}{"enabled": opts.ResourceQuota},
+		"limitRange":    map[string]interface{}{"enabled": opts.LimitRange},
+		"networkPolicy": map[string]interface{}{"enabled": opts.NetworkPolicy},
+	})
+	if err != nil {
+		return nil, err
+	}
+	out.ValuesYAML = values
+	return out, nil
+}
+
+// chartNameOf returns the name declared in Chart.yaml (chart.Name may be a
+// path such as "parent/charts/sub" for umbrella subcharts).
+func chartNameOf(chart *types.GeneratedChart) string {
+	for _, line := range strings.Split(chart.ChartYAML, "\n") {
+		if strings.HasPrefix(line, "name:") {
+			return strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "name:")), `"'`)
+		}
+	}
+	return chart.Name
 }
