@@ -1,261 +1,166 @@
 package generator
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// ============================================================
-// GenerateChecksumAnnotations Tests
-// ============================================================
-
-func TestChecksumAnnotations_NoDependencies_ReturnsEmpty(t *testing.T) {
-	annotations := GenerateChecksumAnnotations("myapp", nil)
-
-	if len(annotations) != 0 {
-		t.Errorf("expected 0 annotations, got %d", len(annotations))
+func checksumResource(kind, name, templatePath string, spec map[string]interface{}) *types.ProcessedResource {
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": gvkForKind(kind).GroupVersion().String(),
+		"kind":       kind,
+		"metadata":   map[string]interface{}{"name": name, "namespace": "prod"},
+	}}
+	if spec != nil {
+		obj.Object["spec"] = spec
+	}
+	gvk := gvkForKind(kind)
+	if kind == "Secret" || kind == "ConfigMap" {
+		gvk = schema.GroupVersionKind{Version: "v1", Kind: kind}
+	}
+	return &types.ProcessedResource{
+		Original:     &types.ExtractedResource{Object: obj, GVK: gvk},
+		TemplatePath: templatePath,
 	}
 }
 
-func TestChecksumAnnotations_EmptyDependencies_ReturnsEmpty(t *testing.T) {
-	annotations := GenerateChecksumAnnotations("myapp", []types.ResourceKey{})
+func podSpec(spec map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{"template": map[string]interface{}{"spec": spec}}
+}
 
-	if len(annotations) != 0 {
-		t.Errorf("expected 0 annotations, got %d", len(annotations))
+func TestConfigReferences(t *testing.T) {
+	w := checksumResource("Deployment", "web", "", podSpec(map[string]interface{}{
+		"volumes": []interface{}{
+			map[string]interface{}{"name": "a", "configMap": map[string]interface{}{"name": "cm-volume"}},
+			map[string]interface{}{"name": "b", "secret": map[string]interface{}{"secretName": "secret-volume"}},
+			map[string]interface{}{"name": "c", "projected": map[string]interface{}{"sources": []interface{}{
+				map[string]interface{}{"configMap": map[string]interface{}{"name": "cm-projected"}},
+				map[string]interface{}{"secret": map[string]interface{}{"name": "secret-projected"}},
+			}}},
+		},
+		"initContainers": []interface{}{
+			map[string]interface{}{"name": "init", "envFrom": []interface{}{
+				map[string]interface{}{"secretRef": map[string]interface{}{"name": "secret-envfrom"}},
+			}},
+		},
+		"containers": []interface{}{
+			map[string]interface{}{"name": "app",
+				"envFrom": []interface{}{map[string]interface{}{"configMapRef": map[string]interface{}{"name": "cm-envfrom"}}},
+				"env": []interface{}{
+					map[string]interface{}{"name": "A", "valueFrom": map[string]interface{}{"configMapKeyRef": map[string]interface{}{"name": "cm-key", "key": "k"}}},
+					map[string]interface{}{"name": "B", "valueFrom": map[string]interface{}{"secretKeyRef": map[string]interface{}{"name": "secret-key", "key": "k"}}},
+					map[string]interface{}{"name": "C", "valueFrom": map[string]interface{}{"configMapKeyRef": map[string]interface{}{"name": "cm-key", "key": "other"}}},
+				}},
+		},
+	}))
+
+	var got []string
+	for _, ref := range configReferences(w) {
+		if ref.Namespace != "prod" {
+			t.Errorf("reference %v must use the workload namespace", ref)
+		}
+		got = append(got, ref.GVK.Kind+"/"+ref.Name)
+	}
+	want := "ConfigMap/cm-volume Secret/secret-volume ConfigMap/cm-projected Secret/secret-projected " +
+		"Secret/secret-envfrom ConfigMap/cm-envfrom ConfigMap/cm-key Secret/secret-key"
+	if strings.Join(got, " ") != want {
+		t.Errorf("configReferences =\n%s\nwant\n%s", strings.Join(got, " "), want)
 	}
 }
 
-func TestChecksumAnnotations_ConfigMapDependency_GeneratesConfigChecksum(t *testing.T) {
-	deps := []types.ResourceKey{
-		{
-			GVK:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"},
-			Name: "myapp-config",
-		},
+func TestChecksumAnnotationKey(t *testing.T) {
+	if got := checksumAnnotationKey("ConfigMap", "app-config"); got != "checksum/configmap-app-config" {
+		t.Errorf("got %q", got)
 	}
-
-	annotations := GenerateChecksumAnnotations("myapp", deps)
-
-	if len(annotations) != 1 {
-		t.Fatalf("expected 1 annotation, got %d", len(annotations))
-	}
-
-	ann := annotations[0]
-	expectedKey := "checksum/config-myapp-config"
-	if ann.Key != expectedKey {
-		t.Errorf("expected key %q, got %q", expectedKey, ann.Key)
-	}
-
-	expectedTemplatePath := "myapp-configmap.yaml"
-	if ann.TemplatePath != expectedTemplatePath {
-		t.Errorf("expected template path %q, got %q", expectedTemplatePath, ann.TemplatePath)
-	}
-
-	expectedExpr := fmt.Sprintf(`{{ include (print $.Template.BasePath "/%s") . | sha256sum }}`, expectedTemplatePath)
-	if ann.Expression != expectedExpr {
-		t.Errorf("expected expression %q, got %q", expectedExpr, ann.Expression)
+	long := checksumAnnotationKey("Secret", strings.Repeat("a", 54)+"-"+strings.Repeat("b", 20))
+	if name := strings.TrimPrefix(long, "checksum/"); len(name) > 63 || strings.HasSuffix(name, "-") {
+		t.Errorf("annotation name %q exceeds 63 characters or ends with '-'", name)
 	}
 }
 
-func TestChecksumAnnotations_SecretDependency_GeneratesSecretChecksum(t *testing.T) {
-	deps := []types.ResourceKey{
-		{
-			GVK:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
-			Name: "myapp-creds",
+const checksumDeploymentTemplate = `{{- with .Values.deployment }}
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    metadata:
+      {{- with .podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      containers: []
+{{- end }}
+`
+
+func TestInjectConfigChecksums(t *testing.T) {
+	web := checksumResource("Deployment", "web", "templates/web-deployment.yaml", podSpec(map[string]interface{}{
+		"containers": []interface{}{map[string]interface{}{"name": "app",
+			"envFrom": []interface{}{
+				map[string]interface{}{"configMapRef": map[string]interface{}{"name": "web-config"}},
+				map[string]interface{}{"secretRef": map[string]interface{}{"name": "external-secret"}},
+			}}},
+	}))
+	cm := checksumResource("ConfigMap", "web-config", "templates/web-configmap.yaml", nil)
+	graph := types.NewResourceGraph()
+	graph.AddResource(web)
+	graph.AddResource(cm)
+
+	chart := &types.GeneratedChart{
+		Name:       "web",
+		ChartYAML:  "apiVersion: v2\nname: web\n",
+		ValuesYAML: "deployment: {}\n",
+		Templates: map[string]string{
+			"templates/web-deployment.yaml": checksumDeploymentTemplate,
+			"templates/web-configmap.yaml":  "apiVersion: v1\nkind: ConfigMap\n",
 		},
 	}
-
-	annotations := GenerateChecksumAnnotations("myapp", deps)
-
-	if len(annotations) != 1 {
-		t.Fatalf("expected 1 annotation, got %d", len(annotations))
+	out, changed, err := InjectConfigChecksums(chart, graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed) != 1 {
+		t.Fatalf("changed = %v", changed)
+	}
+	tpl := out.Templates["templates/web-deployment.yaml"]
+	want := `      {{- if or .podAnnotations $dhgConfigChecksums.enabled }}
+      annotations:
+        {{- if $dhgConfigChecksums.enabled }}
+        checksum/configmap-web-config: {{ include (print $.Template.BasePath "/web-configmap.yaml") $ | sha256sum | quote }}
+        {{- end }}
+        {{- with .podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+`
+	if !strings.Contains(tpl, want) {
+		t.Errorf("template:\n%s\nwant block:\n%s", tpl, want)
+	}
+	if strings.Contains(tpl, "external-secret") {
+		t.Error("objects that are not part of the chart must not be hashed")
+	}
+	if !strings.Contains(out.ValuesYAML, "configChecksums:\n  enabled: true\n") {
+		t.Errorf("values:\n%s", out.ValuesYAML)
 	}
 
-	ann := annotations[0]
-	expectedKey := "checksum/secret-myapp-creds"
-	if ann.Key != expectedKey {
-		t.Errorf("expected key %q, got %q", expectedKey, ann.Key)
+	// Already injected: unchanged.
+	again, changed, err := InjectConfigChecksums(out, graph)
+	if err != nil || again != out || len(changed) != 0 {
+		t.Errorf("second application changed the chart (err=%v, changed=%v)", err, changed)
 	}
 
-	expectedTemplatePath := "myapp-secret.yaml"
-	if ann.TemplatePath != expectedTemplatePath {
-		t.Errorf("expected template path %q, got %q", expectedTemplatePath, ann.TemplatePath)
+	// Customised annotations block: skipped rather than broken.
+	custom := *chart
+	custom.Templates = map[string]string{
+		"templates/web-deployment.yaml": strings.Replace(checksumDeploymentTemplate, "{{- with .podAnnotations }}", "{{- with .customAnnotations }}", 1),
+		"templates/web-configmap.yaml":  chart.Templates["templates/web-configmap.yaml"],
 	}
-
-	if !strings.Contains(ann.Expression, "sha256sum") {
-		t.Errorf("expression should contain 'sha256sum', got %q", ann.Expression)
-	}
-	if !strings.Contains(ann.Expression, expectedTemplatePath) {
-		t.Errorf("expression should reference template path %q, got %q", expectedTemplatePath, ann.Expression)
-	}
-}
-
-func TestChecksumAnnotations_BothConfigMapAndSecret_GeneratesBoth(t *testing.T) {
-	deps := []types.ResourceKey{
-		{
-			GVK:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"},
-			Name: "app-config",
-		},
-		{
-			GVK:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
-			Name: "app-secret",
-		},
-	}
-
-	annotations := GenerateChecksumAnnotations("myapp", deps)
-
-	if len(annotations) != 2 {
-		t.Fatalf("expected 2 annotations, got %d", len(annotations))
-	}
-
-	keys := make(map[string]bool)
-	for _, ann := range annotations {
-		keys[ann.Key] = true
-	}
-
-	if !keys["checksum/config-app-config"] {
-		t.Error("expected 'checksum/config-app-config' annotation")
-	}
-	if !keys["checksum/secret-app-secret"] {
-		t.Error("expected 'checksum/secret-app-secret' annotation")
-	}
-}
-
-func TestChecksumAnnotations_DuplicateDependencies_Deduplicated(t *testing.T) {
-	deps := []types.ResourceKey{
-		{
-			GVK:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"},
-			Name: "myapp-config",
-		},
-		{
-			GVK:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"},
-			Name: "myapp-config", // duplicate
-		},
-		{
-			GVK:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
-			Name: "myapp-secret",
-		},
-		{
-			GVK:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Secret"},
-			Name: "myapp-secret", // duplicate
-		},
-	}
-
-	annotations := GenerateChecksumAnnotations("myapp", deps)
-
-	if len(annotations) != 2 {
-		t.Errorf("expected 2 deduplicated annotations, got %d", len(annotations))
-	}
-}
-
-func TestChecksumAnnotations_UnrelatedKinds_Ignored(t *testing.T) {
-	deps := []types.ResourceKey{
-		{
-			GVK:  schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
-			Name: "myapp",
-		},
-		{
-			GVK:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Service"},
-			Name: "myapp-svc",
-		},
-	}
-
-	annotations := GenerateChecksumAnnotations("myapp", deps)
-
-	if len(annotations) != 0 {
-		t.Errorf("expected 0 annotations for non-ConfigMap/Secret kinds, got %d", len(annotations))
-	}
-}
-
-func TestChecksumAnnotations_ServiceNameUsedInTemplatePath(t *testing.T) {
-	deps := []types.ResourceKey{
-		{
-			GVK:  schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"},
-			Name: "config",
-		},
-	}
-
-	annotations := GenerateChecksumAnnotations("frontend", deps)
-
-	if len(annotations) != 1 {
-		t.Fatalf("expected 1 annotation, got %d", len(annotations))
-	}
-
-	if annotations[0].TemplatePath != "frontend-configmap.yaml" {
-		t.Errorf("expected template path 'frontend-configmap.yaml', got %q", annotations[0].TemplatePath)
-	}
-}
-
-// ============================================================
-// FormatChecksumAnnotations Tests
-// ============================================================
-
-func TestFormatChecksumAnnotations_Empty_ReturnsEmptyString(t *testing.T) {
-	result := FormatChecksumAnnotations(nil)
-	if result != "" {
-		t.Errorf("expected empty string, got %q", result)
-	}
-}
-
-func TestFormatChecksumAnnotations_EmptySlice_ReturnsEmptyString(t *testing.T) {
-	result := FormatChecksumAnnotations([]ChecksumAnnotation{})
-	if result != "" {
-		t.Errorf("expected empty string, got %q", result)
-	}
-}
-
-func TestFormatChecksumAnnotations_SingleAnnotation_CorrectYAML(t *testing.T) {
-	annotations := []ChecksumAnnotation{
-		{
-			Key:        "checksum/config-myapp",
-			Expression: `{{ include (print $.Template.BasePath "/myapp-configmap.yaml") . | sha256sum }}`,
-		},
-	}
-
-	result := FormatChecksumAnnotations(annotations)
-
-	if !strings.Contains(result, "checksum/config-myapp:") {
-		t.Errorf("result should contain annotation key, got: %q", result)
-	}
-	if !strings.Contains(result, "sha256sum") {
-		t.Errorf("result should contain sha256sum expression, got: %q", result)
-	}
-	if !strings.HasSuffix(result, "\n") {
-		t.Errorf("result should end with newline, got: %q", result)
-	}
-	// Check the 8-space indentation
-	if !strings.HasPrefix(result, "        checksum/") {
-		t.Errorf("result should start with 8-space indentation, got: %q", result)
-	}
-}
-
-func TestFormatChecksumAnnotations_MultipleAnnotations_AllIncluded(t *testing.T) {
-	annotations := []ChecksumAnnotation{
-		{
-			Key:        "checksum/config-myapp",
-			Expression: `{{ include (print $.Template.BasePath "/myapp-configmap.yaml") . | sha256sum }}`,
-		},
-		{
-			Key:        "checksum/secret-myapp",
-			Expression: `{{ include (print $.Template.BasePath "/myapp-secret.yaml") . | sha256sum }}`,
-		},
-	}
-
-	result := FormatChecksumAnnotations(annotations)
-
-	if !strings.Contains(result, "checksum/config-myapp:") {
-		t.Error("result should contain config annotation")
-	}
-	if !strings.Contains(result, "checksum/secret-myapp:") {
-		t.Error("result should contain secret annotation")
-	}
-
-	lines := strings.Split(strings.TrimRight(result, "\n"), "\n")
-	if len(lines) != 2 {
-		t.Errorf("expected 2 lines, got %d: %q", len(lines), result)
+	if got, changed, err := InjectConfigChecksums(&custom, graph); err != nil || got != &custom || len(changed) != 0 {
+		t.Errorf("customised template: err=%v changed=%v", err, changed)
 	}
 }
