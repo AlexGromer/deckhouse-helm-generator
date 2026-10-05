@@ -4,14 +4,21 @@ import (
 	"fmt"
 	"strings"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
 // GenerateDeckhouseModule transforms a standard Helm chart into a Deckhouse module structure.
 // It adds helm_lib dependency, OpenAPI schemas, images/ and hooks/ directories,
 // and injects helm_lib helpers into templates.
+// When values is nil, the config schema is derived from the chart's values.yaml.
 func GenerateDeckhouseModule(chart *types.GeneratedChart, values map[string]interface{}) *types.GeneratedChart {
 	result := *chart
+
+	if values == nil {
+		_ = yaml.Unmarshal([]byte(chart.ValuesYAML), &values)
+	}
 
 	// Modify Chart.yaml to add helm_lib dependency
 	result.ChartYAML = injectHelmLibDep(chart.ChartYAML)
@@ -20,7 +27,8 @@ func GenerateDeckhouseModule(chart *types.GeneratedChart, values map[string]inte
 	result.Templates = injectHelmLibIncludes(chart.Templates)
 
 	// Generate external files
-	result.ExternalFiles = generateModuleExternalFiles(chart.Name, values)
+	result.ExternalFiles = append(append([]types.ExternalFileInfo{}, chart.ExternalFiles...),
+		generateModuleExternalFiles(chart.Name, values)...)
 
 	return &result
 }

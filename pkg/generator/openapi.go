@@ -10,6 +10,10 @@ import (
 func GenerateOpenAPISchema(values map[string]interface{}) string {
 	var sb strings.Builder
 	sb.WriteString("type: object\n")
+	if len(values) == 0 {
+		sb.WriteString("properties: {}\n")
+		return sb.String()
+	}
 	sb.WriteString("properties:\n")
 	writeProperties(&sb, values, 2)
 	return sb.String()
@@ -32,6 +36,10 @@ func writeProperties(sb *strings.Builder, values map[string]interface{}, indent 
 		switch v := val.(type) {
 		case map[string]interface{}:
 			sb.WriteString(fmt.Sprintf("%s  type: object\n", prefix))
+			if len(v) == 0 {
+				sb.WriteString(fmt.Sprintf("%s  properties: {}\n", prefix))
+				continue
+			}
 			sb.WriteString(fmt.Sprintf("%s  properties:\n", prefix))
 			writeProperties(sb, v, indent+4)
 		case []interface{}:
