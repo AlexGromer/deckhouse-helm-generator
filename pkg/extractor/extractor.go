@@ -37,6 +37,10 @@ type Options struct {
 	// KubeContext is the kubeconfig context to use.
 	KubeContext string
 
+	// ClusterSecrets controls Secrets in cluster extraction: "skip" (default),
+	// "mask" (values replaced with REDACTED) or "include".
+	ClusterSecrets string
+
 	// GitURL is the git repository URL for gitops extraction.
 	GitURL string
 
@@ -52,17 +56,9 @@ type Options struct {
 
 // GitAuthOptions contains git authentication options.
 type GitAuthOptions struct {
-	// Username for HTTPS authentication.
-	Username string
-
-	// Password or token for HTTPS authentication.
-	Password string
-
-	// SSHKeyPath is the path to SSH private key.
+	// SSHKeyPath is the SSH private key used for ssh:// and git@ URLs. HTTPS
+	// credentials come from the user's git configuration (credential helper).
 	SSHKeyPath string
-
-	// SSHKeyPassword is the passphrase for encrypted SSH keys.
-	SSHKeyPassword string
 }
 
 // Extractor defines the interface for extracting Kubernetes resources.
@@ -106,6 +102,7 @@ func (r *Registry) Get(source types.Source) (Extractor, bool) {
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	r.Register(NewFileExtractor())
+	r.Register(NewClusterExtractor())
 	r.Register(NewGitOpsExtractor())
 	return r
 }

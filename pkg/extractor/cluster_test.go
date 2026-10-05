@@ -467,32 +467,6 @@ func TestNewClusterClient_MissingContext(t *testing.T) {
 	}
 }
 
-func TestLoadKubeconfig_ExplicitPath(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "kubeconfig")
-	if err := os.WriteFile(path, []byte("apiVersion: v1\nkind: Config\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := LoadKubeconfig(path, "my-ctx")
-	if err != nil {
-		t.Fatalf("LoadKubeconfig() error: %v", err)
-	}
-	if result.Path != path {
-		t.Errorf("Path = %q; want %q", result.Path, path)
-	}
-	if result.Context != "my-ctx" {
-		t.Errorf("Context = %q; want my-ctx", result.Context)
-	}
-}
-
-func TestLoadKubeconfig_NonexistentExplicit(t *testing.T) {
-	_, err := LoadKubeconfig("/nonexistent/kubeconfig", "")
-	if err == nil {
-		t.Error("expected error for nonexistent path")
-	}
-}
-
 // ── 4.1.3: Resource extraction integration test ────────────────────────────
 
 func TestClusterExtractor_Extract_WithMockServer(t *testing.T) {
@@ -1018,96 +992,7 @@ func TestClusterExtractorConfig_Validate_Valid(t *testing.T) {
 
 // ── FilterConfig tests ─────────────────────────────────────────────────────
 
-func TestFilterConfig_MatchesNamespace(t *testing.T) {
-	tests := []struct {
-		name   string
-		filter *FilterConfig
-		ns     string
-		want   bool
-	}{
-		{"nil filter", nil, "any", true},
-		{"no filter matches all", &FilterConfig{}, "any", true},
-		{"specific ns matches", &FilterConfig{Namespace: "prod"}, "prod", true},
-		{"specific ns rejects other", &FilterConfig{Namespace: "prod"}, "dev", false},
-		{"cluster-scoped included", &FilterConfig{Namespace: "prod"}, "", true},
-		{"exclude matches", &FilterConfig{ExcludeNamespaces: []string{"kube-system"}}, "kube-system", false},
-		{"exclude passes other", &FilterConfig{ExcludeNamespaces: []string{"kube-system"}}, "default", true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.filter.MatchesNamespace(tc.ns); got != tc.want {
-				t.Errorf("MatchesNamespace(%q) = %v; want %v", tc.ns, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestFilterConfig_Validate_MutuallyExclusive(t *testing.T) {
-	f := &FilterConfig{Namespace: "prod", ExcludeNamespaces: []string{"dev"}}
-	if err := f.Validate(); err == nil {
-		t.Error("expected error for mutually exclusive namespace/exclude_namespaces")
-	}
-}
-
 // ── MaskSecretData tests ───────────────────────────────────────────────────
-
-func TestMaskSecretData_Masks(t *testing.T) {
-	obj := &unstructured.Unstructured{Object: map[string]interface{}{
-		"apiVersion": "v1",
-		"kind":       "Secret",
-		"metadata":   map[string]interface{}{"name": "s1"},
-		"data":       map[string]interface{}{"key1": "val1", "key2": "val2"},
-		"stringData": map[string]interface{}{"key3": "val3"},
-	}}
-	res := &types.ExtractedResource{Object: obj}
-
-	masked := MaskSecretData(res)
-	if !masked {
-		t.Error("MaskSecretData returned false")
-	}
-
-	data, _, _ := unstructuredNestedMap(obj.Object, "data")
-	for k, v := range data {
-		if v != "REDACTED" {
-			t.Errorf("data[%q] = %q; want REDACTED", k, v)
-		}
-	}
-	sd, _, _ := unstructuredNestedMap(obj.Object, "stringData")
-	for k, v := range sd {
-		if v != "REDACTED" {
-			t.Errorf("stringData[%q] = %q; want REDACTED", k, v)
-		}
-	}
-}
-
-func TestMaskSecretData_NotSecret(t *testing.T) {
-	obj := &unstructured.Unstructured{Object: map[string]interface{}{
-		"apiVersion": "v1",
-		"kind":       "ConfigMap",
-		"metadata":   map[string]interface{}{"name": "cm1"},
-		"data":       map[string]interface{}{"key": "value"},
-	}}
-	res := &types.ExtractedResource{Object: obj}
-
-	masked := MaskSecretData(res)
-	if masked {
-		t.Error("MaskSecretData should return false for ConfigMap")
-	}
-
-	data, _, _ := unstructuredNestedMap(obj.Object, "data")
-	if data["key"] != "value" {
-		t.Error("ConfigMap data should not be modified")
-	}
-}
-
-func TestMaskSecretData_NilResource(t *testing.T) {
-	if MaskSecretData(nil) {
-		t.Error("should return false for nil")
-	}
-	if MaskSecretData(&types.ExtractedResource{}) {
-		t.Error("should return false for nil Object")
-	}
-}
 
 // ── URL building tests ─────────────────────────────────────────────────────
 

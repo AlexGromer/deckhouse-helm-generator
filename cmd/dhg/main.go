@@ -94,7 +94,8 @@ func newGenerateCmd() *cobra.Command {
 		recursive          bool
 		kubeConfig         string
 		kubeContext        string
-		clusterNamespace   string
+		clusterSecrets     string
+		gitPath            string
 		gitRepo            string
 		gitBranch          string
 		sshKey             string
@@ -138,8 +139,11 @@ Examples:
   # Generate from YAML files
   dhg generate -f ./manifests -o ./chart --chart-name myapp
 
-  # Generate from live cluster
-  dhg generate -s cluster -n production --kubeconfig ~/.kube/config
+  # Generate from a live cluster (system namespaces kube-*/d8-* are skipped)
+  dhg generate -s cluster -n production --kubeconfig ~/.kube/config --chart-name myapp
+
+  # Generate from a Git repository
+  dhg generate -s gitops --git-repo https://github.com/org/manifests --git-path apps/web --chart-name web
 
   # Generate with filtering
   dhg generate -f ./manifests --include-kinds Deployment,Service,Ingress`,
@@ -160,7 +164,8 @@ Examples:
 				recursive:          recursive,
 				kubeConfig:         kubeConfig,
 				kubeContext:        kubeContext,
-				clusterNamespace:   clusterNamespace,
+				clusterSecrets:     clusterSecrets,
+				gitPath:            gitPath,
 				gitRepo:            gitRepo,
 				gitBranch:          gitBranch,
 				sshKey:             sshKey,
@@ -202,7 +207,7 @@ Examples:
 	cmd.Flags().StringVar(&chartVersion, "chart-version", "0.1.0", "Chart version")
 	cmd.Flags().StringVar(&appVersion, "app-version", "1.0.0", "Application version")
 	cmd.Flags().StringVar(&mode, "mode", "universal", "Output mode: universal, separate, library, umbrella")
-	cmd.Flags().StringVarP(&source, "source", "s", "file", "Source type: file (default). cluster and gitops are not yet implemented.")
+	cmd.Flags().StringVarP(&source, "source", "s", "file", "Source type: file, cluster (live cluster via kubeconfig) or gitops (shallow git clone)")
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
 	cmd.Flags().StringSliceVar(&namespaces, "namespaces", []string{}, "Filter by multiple namespaces")
 	cmd.Flags().StringVarP(&labelSelector, "selector", "l", "", "Label selector filter")
@@ -211,10 +216,11 @@ Examples:
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", true, "Recursively scan directories")
 	cmd.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to kubeconfig file")
 	cmd.Flags().StringVar(&kubeContext, "context", "", "Kubeconfig context to use")
-	cmd.Flags().StringVar(&clusterNamespace, "cluster-namespace", "", "Namespace for cluster extraction (not yet implemented)")
-	cmd.Flags().StringVar(&gitRepo, "git-repo", "", "Git repository URL for gitops extraction (not yet implemented)")
-	cmd.Flags().StringVar(&gitBranch, "git-branch", "main", "Git branch for gitops extraction (not yet implemented)")
-	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "Path to SSH key for git authentication (not yet implemented)")
+	cmd.Flags().StringVar(&clusterSecrets, "cluster-secrets", "skip", "Secrets in cluster extraction: skip, mask (values replaced with REDACTED) or include")
+	cmd.Flags().StringVar(&gitRepo, "git-repo", "", "Git repository URL for gitops extraction (any URL git clone accepts)")
+	cmd.Flags().StringVar(&gitBranch, "git-branch", "", "Git branch or tag for gitops extraction (default: the remote's default branch)")
+	cmd.Flags().StringVar(&gitPath, "git-path", "", "Directory inside the repository to read manifests from (default: repository root)")
+	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key for gitops extraction over ssh")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Generate test templates")
 	cmd.Flags().BoolVar(&includeREADME, "include-readme", true, "Generate README.md")
 	cmd.Flags().BoolVar(&includeSchema, "include-schema", false, "Generate values.schema.json")
@@ -275,7 +281,8 @@ type generateOptions struct {
 	recursive          bool
 	kubeConfig         string
 	kubeContext        string
-	clusterNamespace   string
+	clusterSecrets     string
+	gitPath            string
 	gitRepo            string
 	gitBranch          string
 	sshKey             string
@@ -342,10 +349,8 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		}
 	case "cluster":
 		sourceType = types.SourceCluster
-		fmt.Fprintln(os.Stderr, "WARNING: cluster extraction is not yet implemented. Use --source=file instead.")
 	case "gitops":
 		sourceType = types.SourceGitOps
-		fmt.Fprintln(os.Stderr, "WARNING: gitops extraction is not yet implemented. Use --source=file instead.")
 	default:
 		return fmt.Errorf("invalid source: %s (must be file, cluster, or gitops)", opts.source)
 	}
@@ -384,15 +389,22 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	}
 
 	extractOpts := extractor.Options{
-		Paths:         opts.paths,
-		Namespace:     opts.namespace,
-		Namespaces:    opts.namespaces,
-		LabelSelector: opts.labelSelector,
-		IncludeKinds:  opts.includeKinds,
-		ExcludeKinds:  opts.excludeKinds,
-		Recursive:     opts.recursive,
-		KubeConfig:    opts.kubeConfig,
-		KubeContext:   opts.kubeContext,
+		Paths:          opts.paths,
+		Namespace:      opts.namespace,
+		Namespaces:     opts.namespaces,
+		LabelSelector:  opts.labelSelector,
+		IncludeKinds:   opts.includeKinds,
+		ExcludeKinds:   opts.excludeKinds,
+		Recursive:      opts.recursive,
+		KubeConfig:     opts.kubeConfig,
+		KubeContext:    opts.kubeContext,
+		ClusterSecrets: opts.clusterSecrets,
+		GitURL:         opts.gitRepo,
+		GitBranch:      opts.gitBranch,
+		GitPath:        opts.gitPath,
+	}
+	if opts.sshKey != "" {
+		extractOpts.GitAuth = &extractor.GitAuthOptions{SSHKeyPath: opts.sshKey}
 	}
 
 	if err := ext.Validate(ctx, extractOpts); err != nil {

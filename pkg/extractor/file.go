@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 
@@ -34,6 +35,9 @@ func (e *FileExtractor) Source() types.Source {
 func (e *FileExtractor) Validate(ctx context.Context, opts Options) error {
 	if len(opts.Paths) == 0 {
 		return fmt.Errorf("at least one path is required")
+	}
+	if _, err := labels.Parse(opts.LabelSelector); err != nil {
+		return fmt.Errorf("invalid label selector %q: %w", opts.LabelSelector, err)
 	}
 
 	for _, path := range opts.Paths {
@@ -152,6 +156,13 @@ func (e *FileExtractor) parseYAMLStream(ctx context.Context, reader io.Reader, s
 	// Split by YAML document separator
 	documents := splitYAMLDocuments(content)
 
+	var selector labels.Selector
+	if opts.LabelSelector != "" {
+		if selector, err = labels.Parse(opts.LabelSelector); err != nil {
+			return fmt.Errorf("invalid label selector %q: %w", opts.LabelSelector, err)
+		}
+	}
+
 	for _, doc := range documents {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -192,6 +203,11 @@ func (e *FileExtractor) parseYAMLStream(ctx context.Context, reader io.Reader, s
 
 		// Filter by namespace if specified
 		if !e.matchesNamespaceFilters(obj.GetNamespace(), opts) {
+			continue
+		}
+
+		// Filter by label selector (kubectl syntax) if specified
+		if selector != nil && !selector.Matches(labels.Set(obj.GetLabels())) {
 			continue
 		}
 
