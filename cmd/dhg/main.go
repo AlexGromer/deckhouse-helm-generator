@@ -418,6 +418,7 @@ drain:
 	if len(extractedResources) == 0 {
 		return fmt.Errorf("no resources extracted")
 	}
+	warnDeprecatedAPIs(extractedResources)
 
 	if opts.verbose {
 		fmt.Printf("  Total extracted: %d resources\n", len(extractedResources))
@@ -1042,6 +1043,7 @@ drainExtract:
 	if len(extractedResources) == 0 {
 		return fmt.Errorf("no resources extracted")
 	}
+	warnDeprecatedAPIs(extractedResources)
 
 	if opts.verbose {
 		fmt.Printf("  Total: %d resources\n", len(extractedResources))
@@ -1158,145 +1160,6 @@ drainExtract:
 		fmt.Print(output)
 	}
 
-	return nil
-}
-
-func newValidateCmd() *cobra.Command {
-	var (
-		paths   []string
-		verbose bool
-	)
-
-	cmd := &cobra.Command{
-		Use:   "validate",
-		Short: "Validate Helm chart structure and templates",
-		Long: `Validate Helm chart for common issues:
-  - Chart.yaml presence and required fields
-  - values.yaml syntax
-  - Template syntax (Go template parsing)
-  - Required files presence`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runValidate(cmd.Context(), validateOptions{
-				paths:   paths,
-				verbose: verbose,
-			})
-		},
-	}
-
-	cmd.Flags().StringSliceVarP(&paths, "file", "f", []string{"."}, "Path(s) to chart directories to validate")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
-
-	return cmd
-}
-
-type validateOptions struct {
-	paths   []string
-	verbose bool
-}
-
-func runValidate(_ context.Context, opts validateOptions) error {
-	totalErrors := 0
-	totalWarnings := 0
-
-	for _, chartPath := range opts.paths {
-		fmt.Printf("Validating chart at: %s\n", chartPath)
-
-		// Check Chart.yaml
-		chartYAMLPath := filepath.Join(chartPath, "Chart.yaml")
-		if _, err := os.Stat(chartYAMLPath); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "  ERROR: Chart.yaml not found at %s\n", chartYAMLPath)
-			totalErrors++
-		} else {
-			data, err := os.ReadFile(chartYAMLPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  ERROR: Cannot read Chart.yaml: %v\n", err)
-				totalErrors++
-			} else {
-				if opts.verbose {
-					fmt.Printf("  OK: Chart.yaml found (%d bytes)\n", len(data))
-				}
-				// Check required fields
-				content := string(data)
-				requiredFields := []string{"apiVersion:", "name:", "version:"}
-				for _, field := range requiredFields {
-					if !strings.Contains(content, field) {
-						fmt.Fprintf(os.Stderr, "  ERROR: Chart.yaml missing required field: %s\n", strings.TrimSuffix(field, ":"))
-						totalErrors++
-					}
-				}
-			}
-		}
-
-		// Check values.yaml
-		valuesPath := filepath.Join(chartPath, "values.yaml")
-		if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "  WARNING: values.yaml not found\n")
-			totalWarnings++
-		} else {
-			data, err := os.ReadFile(valuesPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  ERROR: Cannot read values.yaml: %v\n", err)
-				totalErrors++
-			} else {
-				// Try to parse YAML
-				var values map[string]interface{}
-				if err := yaml.Unmarshal(data, &values); err != nil {
-					fmt.Fprintf(os.Stderr, "  ERROR: Invalid YAML in values.yaml: %v\n", err)
-					totalErrors++
-				} else if opts.verbose {
-					fmt.Printf("  OK: values.yaml valid (%d bytes)\n", len(data))
-				}
-			}
-		}
-
-		// Check templates directory
-		templatesDir := filepath.Join(chartPath, "templates")
-		if _, err := os.Stat(templatesDir); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "  WARNING: templates/ directory not found\n")
-			totalWarnings++
-		} else {
-			// Parse templates for syntax
-			entries, err := os.ReadDir(templatesDir)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  ERROR: Cannot read templates directory: %v\n", err)
-				totalErrors++
-			} else {
-				templateCount := 0
-				for _, entry := range entries {
-					if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-						continue
-					}
-					templateCount++
-					tmplPath := filepath.Join(templatesDir, entry.Name())
-					data, err := os.ReadFile(tmplPath)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "  ERROR: Cannot read template %s: %v\n", entry.Name(), err)
-						totalErrors++
-						continue
-					}
-					// Basic Go template syntax check (check balanced {{ }})
-					content := string(data)
-					opens := strings.Count(content, "{{")
-					closes := strings.Count(content, "}}")
-					if opens != closes {
-						fmt.Fprintf(os.Stderr, "  ERROR: Unbalanced template delimiters in %s ({{ count: %d, }} count: %d)\n", entry.Name(), opens, closes)
-						totalErrors++
-					} else if opts.verbose {
-						fmt.Printf("  OK: %s (%d template expressions)\n", entry.Name(), opens)
-					}
-				}
-				if opts.verbose {
-					fmt.Printf("  Templates: %d files checked\n", templateCount)
-				}
-			}
-		}
-	}
-
-	// Summary
-	fmt.Printf("\nValidation complete: %d error(s), %d warning(s)\n", totalErrors, totalWarnings)
-	if totalErrors > 0 {
-		return fmt.Errorf("validation failed with %d error(s)", totalErrors)
-	}
 	return nil
 }
 

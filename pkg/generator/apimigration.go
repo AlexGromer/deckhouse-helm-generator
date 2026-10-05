@@ -85,22 +85,6 @@ var apiMigrations = []APIMigration{
 	},
 }
 
-// MigrateAPIVersion checks if the given apiVersion+kind is deprecated and returns
-// the new API version and kind if migration is available.
-// Returns (newAPI, newKind, migrated bool).
-func MigrateAPIVersion(apiVersion, kind string) (string, string, bool) {
-	for _, m := range apiMigrations {
-		if m.OldAPIVersion == apiVersion && m.OldKind == kind {
-			if m.NewAPIVersion == "" {
-				// Removed API with no replacement
-				return "", "", false
-			}
-			return m.NewAPIVersion, m.NewKind, true
-		}
-	}
-	return apiVersion, kind, false
-}
-
 // GetMigrationInfo returns full migration details for a deprecated API.
 // Returns nil if no migration exists.
 func GetMigrationInfo(apiVersion, kind string) *APIMigration {
@@ -110,11 +94,4 @@ func GetMigrationInfo(apiVersion, kind string) *APIMigration {
 		}
 	}
 	return nil
-}
-
-// ListDeprecatedAPIs returns all known deprecated API migrations.
-func ListDeprecatedAPIs() []APIMigration {
-	result := make([]APIMigration, len(apiMigrations))
-	copy(result, apiMigrations)
-	return result
 }

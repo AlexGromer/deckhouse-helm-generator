@@ -5,11 +5,25 @@ import (
 )
 
 // ============================================================
-// MigrateAPIVersion Tests
+// Migration table tests (via GetMigrationInfo)
 // ============================================================
 
-func TestMigrateAPIVersion_DeprecatedExtensionsIngress_MigratesCorrectly(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("extensions/v1beta1", "Ingress")
+// migrateAPIVersion resolves the replacement for apiVersion/kind from the
+// migration table: (newAPI, newKind, true) or (inputs, false) when current,
+// ("", "", false) when removed without replacement.
+func migrateAPIVersion(apiVersion, kind string) (string, string, bool) {
+	m := GetMigrationInfo(apiVersion, kind)
+	if m == nil {
+		return apiVersion, kind, false
+	}
+	if m.NewAPIVersion == "" {
+		return "", "", false
+	}
+	return m.NewAPIVersion, m.NewKind, true
+}
+
+func TestMigrationTable_DeprecatedExtensionsIngress_MigratesCorrectly(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("extensions/v1beta1", "Ingress")
 
 	if !migrated {
 		t.Fatal("expected migration to be available for extensions/v1beta1 Ingress")
@@ -22,8 +36,8 @@ func TestMigrateAPIVersion_DeprecatedExtensionsIngress_MigratesCorrectly(t *test
 	}
 }
 
-func TestMigrateAPIVersion_DeprecatedNetworkingIngress_MigratesCorrectly(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("networking.k8s.io/v1beta1", "Ingress")
+func TestMigrationTable_DeprecatedNetworkingIngress_MigratesCorrectly(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("networking.k8s.io/v1beta1", "Ingress")
 
 	if !migrated {
 		t.Fatal("expected migration to be available for networking.k8s.io/v1beta1 Ingress")
@@ -36,8 +50,8 @@ func TestMigrateAPIVersion_DeprecatedNetworkingIngress_MigratesCorrectly(t *test
 	}
 }
 
-func TestMigrateAPIVersion_CurrentAPI_NoMigration(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("networking.k8s.io/v1", "Ingress")
+func TestMigrationTable_CurrentAPI_NoMigration(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("networking.k8s.io/v1", "Ingress")
 
 	if migrated {
 		t.Fatal("expected no migration for current API networking.k8s.io/v1 Ingress")
@@ -51,8 +65,8 @@ func TestMigrateAPIVersion_CurrentAPI_NoMigration(t *testing.T) {
 	}
 }
 
-func TestMigrateAPIVersion_UnknownAPI_NoMigration(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("apps/v1", "Deployment")
+func TestMigrationTable_UnknownAPI_NoMigration(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("apps/v1", "Deployment")
 
 	if migrated {
 		t.Fatal("expected no migration for unknown API apps/v1 Deployment")
@@ -65,8 +79,8 @@ func TestMigrateAPIVersion_UnknownAPI_NoMigration(t *testing.T) {
 	}
 }
 
-func TestMigrateAPIVersion_RemovedAPINoReplacement_ReturnsFalse(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("policy/v1beta1", "PodSecurityPolicy")
+func TestMigrationTable_RemovedAPINoReplacement_ReturnsFalse(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("policy/v1beta1", "PodSecurityPolicy")
 
 	// PodSecurityPolicy was removed with no direct replacement
 	if migrated {
@@ -80,8 +94,8 @@ func TestMigrateAPIVersion_RemovedAPINoReplacement_ReturnsFalse(t *testing.T) {
 	}
 }
 
-func TestMigrateAPIVersion_BatchCronJob_MigratesCorrectly(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("batch/v1beta1", "CronJob")
+func TestMigrationTable_BatchCronJob_MigratesCorrectly(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("batch/v1beta1", "CronJob")
 
 	if !migrated {
 		t.Fatal("expected migration to be available for batch/v1beta1 CronJob")
@@ -94,8 +108,8 @@ func TestMigrateAPIVersion_BatchCronJob_MigratesCorrectly(t *testing.T) {
 	}
 }
 
-func TestMigrateAPIVersion_AutoscalingV2Beta2HPA_MigratesCorrectly(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("autoscaling/v2beta2", "HorizontalPodAutoscaler")
+func TestMigrationTable_AutoscalingV2Beta2HPA_MigratesCorrectly(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("autoscaling/v2beta2", "HorizontalPodAutoscaler")
 
 	if !migrated {
 		t.Fatal("expected migration to be available for autoscaling/v2beta2 HPA")
@@ -108,8 +122,8 @@ func TestMigrateAPIVersion_AutoscalingV2Beta2HPA_MigratesCorrectly(t *testing.T)
 	}
 }
 
-func TestMigrateAPIVersion_AutoscalingV2Beta1HPA_MigratesCorrectly(t *testing.T) {
-	newAPI, _, migrated := MigrateAPIVersion("autoscaling/v2beta1", "HorizontalPodAutoscaler")
+func TestMigrationTable_AutoscalingV2Beta1HPA_MigratesCorrectly(t *testing.T) {
+	newAPI, _, migrated := migrateAPIVersion("autoscaling/v2beta1", "HorizontalPodAutoscaler")
 
 	if !migrated {
 		t.Fatal("expected migration to be available for autoscaling/v2beta1 HPA")
@@ -119,8 +133,8 @@ func TestMigrateAPIVersion_AutoscalingV2Beta1HPA_MigratesCorrectly(t *testing.T)
 	}
 }
 
-func TestMigrateAPIVersion_RBACv1beta1ClusterRole_MigratesCorrectly(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("rbac.authorization.k8s.io/v1beta1", "ClusterRole")
+func TestMigrationTable_RBACv1beta1ClusterRole_MigratesCorrectly(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("rbac.authorization.k8s.io/v1beta1", "ClusterRole")
 
 	if !migrated {
 		t.Fatal("expected migration for rbac.authorization.k8s.io/v1beta1 ClusterRole")
@@ -133,8 +147,8 @@ func TestMigrateAPIVersion_RBACv1beta1ClusterRole_MigratesCorrectly(t *testing.T
 	}
 }
 
-func TestMigrateAPIVersion_RBACv1beta1ClusterRoleBinding_MigratesCorrectly(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("rbac.authorization.k8s.io/v1beta1", "ClusterRoleBinding")
+func TestMigrationTable_RBACv1beta1ClusterRoleBinding_MigratesCorrectly(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("rbac.authorization.k8s.io/v1beta1", "ClusterRoleBinding")
 
 	if !migrated {
 		t.Fatal("expected migration for rbac.authorization.k8s.io/v1beta1 ClusterRoleBinding")
@@ -147,8 +161,8 @@ func TestMigrateAPIVersion_RBACv1beta1ClusterRoleBinding_MigratesCorrectly(t *te
 	}
 }
 
-func TestMigrateAPIVersion_RBACv1beta1Role_MigratesCorrectly(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("rbac.authorization.k8s.io/v1beta1", "Role")
+func TestMigrationTable_RBACv1beta1Role_MigratesCorrectly(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("rbac.authorization.k8s.io/v1beta1", "Role")
 
 	if !migrated {
 		t.Fatal("expected migration for rbac.authorization.k8s.io/v1beta1 Role")
@@ -161,8 +175,8 @@ func TestMigrateAPIVersion_RBACv1beta1Role_MigratesCorrectly(t *testing.T) {
 	}
 }
 
-func TestMigrateAPIVersion_RBACv1beta1RoleBinding_MigratesCorrectly(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("rbac.authorization.k8s.io/v1beta1", "RoleBinding")
+func TestMigrationTable_RBACv1beta1RoleBinding_MigratesCorrectly(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("rbac.authorization.k8s.io/v1beta1", "RoleBinding")
 
 	if !migrated {
 		t.Fatal("expected migration for rbac.authorization.k8s.io/v1beta1 RoleBinding")
@@ -175,8 +189,8 @@ func TestMigrateAPIVersion_RBACv1beta1RoleBinding_MigratesCorrectly(t *testing.T
 	}
 }
 
-func TestMigrateAPIVersion_PolicyPDB_MigratesCorrectly(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("policy/v1beta1", "PodDisruptionBudget")
+func TestMigrationTable_PolicyPDB_MigratesCorrectly(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("policy/v1beta1", "PodDisruptionBudget")
 
 	if !migrated {
 		t.Fatal("expected migration for policy/v1beta1 PodDisruptionBudget")
@@ -189,8 +203,8 @@ func TestMigrateAPIVersion_PolicyPDB_MigratesCorrectly(t *testing.T) {
 	}
 }
 
-func TestMigrateAPIVersion_ExtensionsNetworkPolicy_MigratesCorrectly(t *testing.T) {
-	newAPI, newKind, migrated := MigrateAPIVersion("extensions/v1beta1", "NetworkPolicy")
+func TestMigrationTable_ExtensionsNetworkPolicy_MigratesCorrectly(t *testing.T) {
+	newAPI, newKind, migrated := migrateAPIVersion("extensions/v1beta1", "NetworkPolicy")
 
 	if !migrated {
 		t.Fatal("expected migration for extensions/v1beta1 NetworkPolicy")
@@ -281,11 +295,11 @@ func TestGetMigrationInfo_CronJob_DeprecationVersionsPopulated(t *testing.T) {
 }
 
 // ============================================================
-// ListDeprecatedAPIs Tests
+// Migration table contents
 // ============================================================
 
-func TestListDeprecatedAPIs_ReturnsAllEntries(t *testing.T) {
-	list := ListDeprecatedAPIs()
+func TestMigrationTable_AllEntries(t *testing.T) {
+	list := apiMigrations
 
 	// We have 12 entries in the migration table
 	if len(list) != 12 {
@@ -293,20 +307,8 @@ func TestListDeprecatedAPIs_ReturnsAllEntries(t *testing.T) {
 	}
 }
 
-func TestListDeprecatedAPIs_ReturnsCopy(t *testing.T) {
-	list1 := ListDeprecatedAPIs()
-	list2 := ListDeprecatedAPIs()
-
-	// Modifying one should not affect the other
-	list1[0].OldAPIVersion = "modified"
-
-	if list2[0].OldAPIVersion == "modified" {
-		t.Error("ListDeprecatedAPIs should return an independent copy")
-	}
-}
-
-func TestListDeprecatedAPIs_ContainsAllExpectedAPIs(t *testing.T) {
-	list := ListDeprecatedAPIs()
+func TestMigrationTable_ContainsAllExpectedAPIs(t *testing.T) {
+	list := apiMigrations
 
 	type apiKey struct {
 		api  string

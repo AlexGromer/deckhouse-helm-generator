@@ -69,20 +69,19 @@ var apiVersionGAMatrix = map[string]int{
 	"rbac.authorization.k8s.io/v1/RoleBinding":        8,
 }
 
-// apiVersionRemovedMatrix maps apiVersion+kind to the K8s minor version where it was REMOVED.
-var apiVersionRemovedMatrix = map[string]int{
-	"extensions/v1beta1/Ingress":                       22,
-	"networking.k8s.io/v1beta1/Ingress":                22,
-	"extensions/v1beta1/NetworkPolicy":                 16,
-	"policy/v1beta1/PodDisruptionBudget":               25,
-	"policy/v1beta1/PodSecurityPolicy":                 25,
-	"rbac.authorization.k8s.io/v1beta1/ClusterRole":    22,
-	"rbac.authorization.k8s.io/v1beta1/ClusterRoleBinding": 22,
-	"rbac.authorization.k8s.io/v1beta1/Role":           22,
-	"rbac.authorization.k8s.io/v1beta1/RoleBinding":    22,
-	"autoscaling/v2beta1/HorizontalPodAutoscaler":      26,
-	"autoscaling/v2beta2/HorizontalPodAutoscaler":      26,
-	"batch/v1beta1/CronJob":                            25,
+// removedInMinor returns the minor version in which apiVersion/kind was
+// removed, from the apiMigrations table (the single source of truth for
+// deprecations), or false if it was never removed.
+func removedInMinor(apiVersion, kind string) (int, bool) {
+	info := GetMigrationInfo(apiVersion, kind)
+	if info == nil || info.RemovedIn == "" {
+		return 0, false
+	}
+	minor, err := parseMinorVersion(info.RemovedIn)
+	if err != nil {
+		return 0, false
+	}
+	return minor, true
 }
 
 // parseMinorVersion parses a version string like "1.29" or "1.29.0" into minor int (29).
@@ -190,7 +189,7 @@ func ValidateK8sVersionMatrix(chart *types.GeneratedChart, opts K8sVersionOption
 			key := fmt.Sprintf("%s/%s", res.apiVersion, res.kind)
 
 			// Check if removed in this version
-			if removedIn, ok := apiVersionRemovedMatrix[key]; ok {
+			if removedIn, ok := removedInMinor(res.apiVersion, res.kind); ok {
 				if minor >= removedIn {
 					issues = append(issues, fmt.Sprintf(
 						"%s/%s was removed in K8s 1.%d (template: %s)",
