@@ -145,8 +145,40 @@ func TestGeneratedChartsPassHelm(t *testing.T) {
 				if want := countInputObjects(t, input); complete && rendered < want {
 					t.Errorf("rendered %d objects, want at least %d (one per input manifest)", rendered, want)
 				}
+				if complete {
+					checkReleaseIntegrity(t, helm, input, out)
+				}
 			})
 		}
+	}
+}
+
+// checkReleaseIntegrity renders every top-level chart and checks references
+// and selectors against the input manifests.
+func checkReleaseIntegrity(t *testing.T, helm, input, out string) {
+	t.Helper()
+	var rendered []object
+	for _, chart := range findCharts(t, out) {
+		data, err := os.ReadFile(filepath.Join(chart, "Chart.yaml"))
+		if err != nil || bytes.Contains(data, []byte("type: library")) {
+			continue
+		}
+		stream, err := run(helm, "template", "golden", chart)
+		if err != nil {
+			return // reported by checkCharts
+		}
+		rendered = append(rendered, parseStream(stream)...)
+	}
+	var inputs []object
+	_ = filepath.Walk(input, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && (filepath.Ext(path) == ".yaml" || filepath.Ext(path) == ".yml") {
+			data, _ := os.ReadFile(path)
+			inputs = append(inputs, parseStream(string(data))...)
+		}
+		return nil
+	})
+	for _, p := range checkIntegrity(inputs, rendered) {
+		t.Errorf("integrity: %s", p)
 	}
 }
 
