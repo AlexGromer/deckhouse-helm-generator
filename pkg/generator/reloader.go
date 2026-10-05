@@ -32,56 +32,22 @@ func DetectReloaderCandidates(graph *types.ResourceGraph) []ReloaderCandidate {
 		if r == nil || r.Original == nil || r.Original.Object == nil || !podWorkloadKinds[r.Original.GVK.Kind] {
 			continue
 		}
-		cms, secrets := configReferences(r.Original.Object.Object)
+		var cms, secrets []string
+		for _, ref := range configReferences(r) {
+			if ref.GVK.Kind == "ConfigMap" {
+				cms = append(cms, ref.Name)
+			} else {
+				secrets = append(secrets, ref.Name)
+			}
+		}
+		sort.Strings(cms)
+		sort.Strings(secrets)
 		if len(cms) > 0 || len(secrets) > 0 {
 			out = append(out, ReloaderCandidate{Key: key, ConfigMaps: cms, Secrets: secrets})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key.String() < out[j].Key.String() })
 	return out
-}
-
-// configReferences lists the ConfigMaps and Secrets a workload's pod template
-// references, without duplicates.
-func configReferences(obj map[string]interface{}) (configMaps, secrets []string) {
-	podSpec := nestedMap(obj, "spec", "template", "spec")
-	if podSpec == nil {
-		return nil, nil
-	}
-	cmSet, secSet := map[string]bool{}, map[string]bool{}
-	addName := func(set map[string]bool, m map[string]interface{}, field string) {
-		if m == nil {
-			return
-		}
-		if name, ok := m[field].(string); ok && name != "" {
-			set[name] = true
-		}
-	}
-	for _, v := range asList(podSpec["volumes"]) {
-		vol, _ := v.(map[string]interface{})
-		addName(cmSet, nestedMap(vol, "configMap"), "name")
-		addName(secSet, nestedMap(vol, "secret"), "secretName")
-		for _, s := range asList(nestedMap(vol, "projected")["sources"]) {
-			src, _ := s.(map[string]interface{})
-			addName(cmSet, nestedMap(src, "configMap"), "name")
-			addName(secSet, nestedMap(src, "secret"), "name")
-		}
-	}
-	containers := append(asList(podSpec["initContainers"]), asList(podSpec["containers"])...)
-	for _, c := range containers {
-		container, _ := c.(map[string]interface{})
-		for _, e := range asList(container["env"]) {
-			env, _ := e.(map[string]interface{})
-			addName(cmSet, nestedMap(env, "valueFrom", "configMapKeyRef"), "name")
-			addName(secSet, nestedMap(env, "valueFrom", "secretKeyRef"), "name")
-		}
-		for _, e := range asList(container["envFrom"]) {
-			env, _ := e.(map[string]interface{})
-			addName(cmSet, nestedMap(env, "configMapRef"), "name")
-			addName(secSet, nestedMap(env, "secretRef"), "name")
-		}
-	}
-	return sortedSet(cmSet), sortedSet(secSet)
 }
 
 func nestedMap(obj map[string]interface{}, path ...string) map[string]interface{} {

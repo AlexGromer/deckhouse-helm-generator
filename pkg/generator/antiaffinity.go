@@ -2,6 +2,8 @@ package generator
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -11,185 +13,233 @@ import (
 type AffinityMode string
 
 const (
+	// AffinityModePreferred uses preferredDuringSchedulingIgnoredDuringExecution:
+	// replicas are spread when possible but still schedule on a single node.
 	AffinityModePreferred AffinityMode = "preferred"
-	AffinityModeStrict    AffinityMode = "strict"
+	// AffinityModeRequired uses requiredDuringSchedulingIgnoredDuringExecution:
+	// a replica stays Pending rather than share a topology domain.
+	AffinityModeRequired AffinityMode = "required"
 )
-
-// TopologyKey represents a Kubernetes topology spread key.
-type TopologyKey string
 
 const (
-	TopologyKeyHostname TopologyKey = "kubernetes.io/hostname"
-	TopologyKeyZone     TopologyKey = "topology.kubernetes.io/zone"
+	defaultAntiAffinityTopologyKey = "kubernetes.io/hostname"
+	zoneTopologyKey                = "topology.kubernetes.io/zone"
+	antiAffinityValuesKey          = "antiAffinity"
 )
 
-// AntiAffinityOptions configures anti-affinity injection.
+// AntiAffinityOptions configures the defaults written to values.yaml
+// (antiAffinity.*). All of them can be changed at install time.
 type AntiAffinityOptions struct {
-	Mode                        AffinityMode
-	TopologyKeys                []TopologyKey
-	AddTopologySpreadConstraints bool
-	MaxSkew                     int
-	SkipSingleReplica           bool
-	LabelSelector               string
+	// Mode is "preferred" (default) or "required".
+	Mode AffinityMode
+	// TopologyKey is the node label replicas are spread across
+	// (default kubernetes.io/hostname).
+	TopologyKey string
+	// ZoneSpread additionally adds a topologySpreadConstraint across
+	// topology.kubernetes.io/zone.
+	ZoneSpread bool
 }
 
 // AntiAffinityResult tracks the result of InjectAntiAffinity.
 type AntiAffinityResult struct {
-	Injected int
-	Skipped  int
+	// Injected lists the template paths that received the anti-affinity block.
+	Injected []string
+	// Skipped lists workload templates left unchanged (affinity already set,
+	// or a template shape the injector does not recognise).
+	Skipped []string
 }
 
-// InjectAntiAffinity injects pod anti-affinity rules into workload templates.
-func InjectAntiAffinity(chart *types.GeneratedChart, opts AntiAffinityOptions) (*types.GeneratedChart, AntiAffinityResult) {
-	if chart == nil {
-		return nil, AntiAffinityResult{}
-	}
-
-	// Default topology key.
-	keys := opts.TopologyKeys
-	if len(keys) == 0 {
-		keys = []TopologyKey{TopologyKeyHostname}
-	}
-
-	// Default label selector.
-	labelSelector := opts.LabelSelector
-	if labelSelector == "" {
-		labelSelector = "app.kubernetes.io/name"
-	}
-
-	// helmFullname is the Helm template expression for the chart's fullname helper.
-	helmFullname := fmt.Sprintf(`{{ include "%s.fullname" . }}`, chart.Name)
-
-	result := copyChartTemplates(chart)
+// InjectAntiAffinity adds a values-controlled podAntiAffinity (and an optional
+// zone topologySpreadConstraint) to every Deployment and StatefulSet template
+// of the chart. The label selector is copied from the workload's own
+// spec.selector, so it matches exactly the workload's pods in every output
+// mode. A workload whose values set `affinity` keeps it: the injected block
+// renders only when `.affinity` is empty. Templates that already declare
+// affinity or topology spread outside the generated values block are skipped.
+//
+// The chart is not modified; the values toggle `antiAffinity` is appended to
+// values.yaml when at least one template was changed.
+func InjectAntiAffinity(chart *types.GeneratedChart, opts AntiAffinityOptions) (*types.GeneratedChart, AntiAffinityResult, error) {
 	var res AntiAffinityResult
-
-	for path, content := range result.Templates {
-		kind := detectKindFromContent(content)
-		// Only inject into Deployment, StatefulSet, DaemonSet.
-		if kind != "Deployment" && kind != "StatefulSet" && kind != "DaemonSet" {
-			continue
-		}
-
-		// Skip if affinity already present.
-		if strings.Contains(content, "affinity:") {
-			res.Skipped++
-			continue
-		}
-
-		// Skip single-replica workloads if requested.
-		if opts.SkipSingleReplica {
-			replicas := extractReplicas(content, 1)
-			if replicas <= 1 {
-				res.Skipped++
-				continue
-			}
-		}
-
-		// Build affinity block.
-		var sb strings.Builder
-		if opts.Mode == AffinityModeStrict {
-			sb.WriteString("      affinity:\n")
-			sb.WriteString("        podAntiAffinity:\n")
-			sb.WriteString("          requiredDuringSchedulingIgnoredDuringExecution:\n")
-			for _, key := range keys {
-				sb.WriteString("          - labelSelector:\n")
-				sb.WriteString("              matchExpressions:\n")
-				sb.WriteString(fmt.Sprintf("              - key: %s\n", labelSelector))
-				sb.WriteString("                operator: In\n")
-				sb.WriteString("                values:\n")
-				sb.WriteString(fmt.Sprintf("                - %s\n", helmFullname))
-				sb.WriteString(fmt.Sprintf("            topologyKey: %s\n", key))
-			}
-		} else {
-			sb.WriteString("      affinity:\n")
-			sb.WriteString("        podAntiAffinity:\n")
-			sb.WriteString("          preferredDuringSchedulingIgnoredDuringExecution:\n")
-			for _, key := range keys {
-				sb.WriteString("          - weight: 100\n")
-				sb.WriteString("            podAffinityTerm:\n")
-				sb.WriteString("              labelSelector:\n")
-				sb.WriteString("                matchExpressions:\n")
-				sb.WriteString(fmt.Sprintf("                - key: %s\n", labelSelector))
-				sb.WriteString("                  operator: In\n")
-				sb.WriteString("                  values:\n")
-				sb.WriteString(fmt.Sprintf("                  - %s\n", helmFullname))
-				sb.WriteString(fmt.Sprintf("              topologyKey: %s\n", key))
-			}
-		}
-
-		// Add topology spread constraints if requested.
-		if opts.AddTopologySpreadConstraints {
-			maxSkew := opts.MaxSkew
-			if maxSkew <= 0 {
-				maxSkew = 1
-			}
-			sb.WriteString("      topologySpreadConstraints:\n")
-			for _, key := range keys {
-				sb.WriteString(fmt.Sprintf("      - maxSkew: %d\n", maxSkew))
-				sb.WriteString(fmt.Sprintf("        topologyKey: %s\n", key))
-				sb.WriteString("        whenUnsatisfiable: DoNotSchedule\n")
-				sb.WriteString("        labelSelector:\n")
-				sb.WriteString("          matchLabels:\n")
-				sb.WriteString(fmt.Sprintf("            %s: %s\n", labelSelector, helmFullname))
-			}
-		}
-
-		affinityBlock := sb.String()
-
-		// Insert before containers:.
-		updated := insertBeforeContainers(content, affinityBlock)
-		result.Templates[path] = updated
-		res.Injected++
+	if chart == nil {
+		return nil, res, nil
+	}
+	if opts.Mode == "" {
+		opts.Mode = AffinityModePreferred
+	}
+	if opts.Mode != AffinityModePreferred && opts.Mode != AffinityModeRequired {
+		return nil, res, fmt.Errorf("invalid anti-affinity mode %q (want preferred or required)", opts.Mode)
+	}
+	if opts.TopologyKey == "" {
+		opts.TopologyKey = defaultAntiAffinityTopologyKey
 	}
 
-	return result, res
+	out := cloneChart(chart)
+	for _, path := range opsSortedTemplatePaths(chart) {
+		content := chart.Templates[path]
+		kind := opsTemplateKind(content)
+		if kind != "Deployment" && kind != "StatefulSet" {
+			continue
+		}
+		updated, ok := injectAntiAffinityBlock(content)
+		if !ok {
+			res.Skipped = append(res.Skipped, path)
+			continue
+		}
+		out.Templates[path] = updated
+		res.Injected = append(res.Injected, path)
+	}
+	if len(res.Injected) == 0 {
+		return chart, res, nil
+	}
+
+	values, err := appendTopLevelValues(out.ValuesYAML, antiAffinityValuesKey, map[string]interface{}{
+		"enabled":     true,
+		"mode":        string(opts.Mode),
+		"topologyKey": opts.TopologyKey,
+		"weight":      100,
+		"zoneSpread": map[string]interface{}{
+			"enabled":           opts.ZoneSpread,
+			"maxSkew":           1,
+			"whenUnsatisfiable": "ScheduleAnyway",
+		},
+	})
+	if err != nil {
+		return nil, res, err
+	}
+	out.ValuesYAML = values
+	return out, res, nil
 }
 
-// insertBeforeContainers inserts a block before the containers: line in a template.
-func insertBeforeContainers(content, block string) string {
+// standardAffinityBlockRe matches the values-driven affinity block that the
+// processors render; any other "affinity:" key means the template already
+// carries hand-made affinity.
+var standardAffinityBlockRe = regexp.MustCompile(`(?m)^ *\{\{- with \.affinity \}\}\n *affinity:\n *\{\{- toYaml \. \| nindent \d+ \}\}\n *\{\{- end \}\}\n`)
+
+var nindentRe = regexp.MustCompile(`nindent (\d+)`)
+
+// injectAntiAffinityBlock inserts the anti-affinity block in front of the pod
+// spec's containers list. It returns false when the template already declares
+// affinity/topology spread or its shape is not recognised.
+func injectAntiAffinityBlock(content string) (string, bool) {
+	rest := standardAffinityBlockRe.ReplaceAllString(content, "")
+	if strings.Contains(rest, "affinity:") || strings.Contains(content, "topologySpreadConstraints") {
+		return content, false
+	}
+
 	lines := strings.Split(content, "\n")
+	selector, ok := extractSelectorMatchLabels(lines)
+	if !ok {
+		return content, false
+	}
+	idx := podContainersLine(lines)
+	if idx < 0 {
+		return content, false
+	}
+	ind := strings.Repeat(" ", opsIndentWidth(lines[idx]))
+	n := opsIndentWidth(lines[idx])
+
+	var b strings.Builder
+	w := func(s string) { b.WriteString(ind + s + "\n") }
+	w(`{{- $dhgAntiAffinity := $.Values.antiAffinity | default dict }}`)
+	w(`{{- if and $dhgAntiAffinity.enabled (not .affinity) }}`)
+	w(`affinity:`)
+	w(`  podAntiAffinity:`)
+	w(`    {{- if eq ($dhgAntiAffinity.mode | default "preferred") "required" }}`)
+	w(`    requiredDuringSchedulingIgnoredDuringExecution:`)
+	w(`      - topologyKey: {{ $dhgAntiAffinity.topologyKey | default "` + defaultAntiAffinityTopologyKey + `" | quote }}`)
+	w(`        labelSelector:`)
+	w(`          matchLabels:`)
+	b.WriteString(reindentBlock(selector, n+12))
+	w(`    {{- else }}`)
+	w(`    preferredDuringSchedulingIgnoredDuringExecution:`)
+	w(`      - weight: {{ $dhgAntiAffinity.weight | default 100 | int }}`)
+	w(`        podAffinityTerm:`)
+	w(`          topologyKey: {{ $dhgAntiAffinity.topologyKey | default "` + defaultAntiAffinityTopologyKey + `" | quote }}`)
+	w(`          labelSelector:`)
+	w(`            matchLabels:`)
+	b.WriteString(reindentBlock(selector, n+14))
+	w(`    {{- end }}`)
+	w(`{{- end }}`)
+	w(`{{- $dhgZoneSpread := $dhgAntiAffinity.zoneSpread | default dict }}`)
+	w(`{{- if and $dhgAntiAffinity.enabled $dhgZoneSpread.enabled }}`)
+	w(`topologySpreadConstraints:`)
+	w(`  - maxSkew: {{ $dhgZoneSpread.maxSkew | default 1 | int }}`)
+	w(`    topologyKey: ` + zoneTopologyKey)
+	w(`    whenUnsatisfiable: {{ $dhgZoneSpread.whenUnsatisfiable | default "ScheduleAnyway" }}`)
+	w(`    labelSelector:`)
+	w(`      matchLabels:`)
+	b.WriteString(reindentBlock(selector, n+8))
+	w(`{{- end }}`)
+
+	block := strings.TrimSuffix(b.String(), "\n")
+	out := make([]string, 0, len(lines)+1)
+	out = append(out, lines[:idx]...)
+	out = append(out, block)
+	out = append(out, lines[idx:]...)
+	return strings.Join(out, "\n"), true
+}
+
+// extractSelectorMatchLabels returns the lines under the workload's
+// spec.selector.matchLabels (the first selector of the template).
+func extractSelectorMatchLabels(lines []string) ([]string, bool) {
+	for i := 0; i+1 < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) != "selector:" || strings.TrimSpace(lines[i+1]) != "matchLabels:" {
+			continue
+		}
+		base := opsIndentWidth(lines[i+1])
+		if base <= opsIndentWidth(lines[i]) {
+			return nil, false
+		}
+		var body []string
+		for j := i + 2; j < len(lines); j++ {
+			if strings.TrimSpace(lines[j]) == "" || opsIndentWidth(lines[j]) <= base {
+				break
+			}
+			body = append(body, lines[j])
+		}
+		return body, len(body) > 0
+	}
+	return nil, false
+}
+
+// podContainersLine returns the index of the pod spec's "containers:" line
+// (the first one after "template:"), or -1.
+func podContainersLine(lines []string) int {
+	inTemplate := false
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "containers:" {
-			result := strings.Join(lines[:i], "\n") + "\n" + block + strings.Join(lines[i:], "\n")
-			return result
+		if trimmed == "template:" {
+			inTemplate = true
+		}
+		if inTemplate && trimmed == "containers:" {
+			return i
 		}
 	}
-	return content + "\n" + block
+	return -1
 }
 
-// detectKindFromContent extracts the kind from a YAML template string.
-func detectKindFromContent(content string) string {
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "kind:") {
-			return strings.TrimSpace(strings.TrimPrefix(trimmed, "kind:"))
+// reindentBlock moves a block of lines to the given indentation, adjusting
+// `nindent N` arguments by the same offset so included helpers line up.
+func reindentBlock(block []string, indent int) string {
+	if len(block) == 0 {
+		return ""
+	}
+	base := opsIndentWidth(block[0])
+	for _, l := range block[1:] {
+		if s := opsIndentWidth(l); s < base {
+			base = s
 		}
 	}
-	return ""
-}
-
-// GenerateAntiAffinity returns per-template affinity YAML snippets for resources in the graph.
-func GenerateAntiAffinity(graph *types.ResourceGraph, opts AntiAffinityOptions) map[string]string {
-	result := make(map[string]string)
-	if graph == nil {
-		return result
+	delta := indent - base
+	var b strings.Builder
+	for _, l := range block {
+		l = strings.Repeat(" ", indent) + l[base:]
+		l = nindentRe.ReplaceAllStringFunc(l, func(m string) string {
+			n, _ := strconv.Atoi(strings.TrimPrefix(m, "nindent "))
+			return "nindent " + strconv.Itoa(n+delta)
+		})
+		b.WriteString(l + "\n")
 	}
-	return result
-}
-
-// GenerateAntiAffinityValues returns a values map for anti-affinity configuration.
-func GenerateAntiAffinityValues(opts AntiAffinityOptions) map[string]interface{} {
-	keys := make([]string, len(opts.TopologyKeys))
-	for i, k := range opts.TopologyKeys {
-		keys[i] = string(k)
-	}
-	return map[string]interface{}{
-		"antiAffinity": map[string]interface{}{
-			"enabled":      true,
-			"mode":         string(opts.Mode),
-			"topologyKeys": keys,
-			"maxSkew":      opts.MaxSkew,
-		},
-	}
+	return b.String()
 }

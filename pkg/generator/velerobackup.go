@@ -7,210 +7,159 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// VeleroBackupOptions configures Velero backup schedule generation.
+const (
+	defaultVeleroSchedule  = "0 2 * * *"
+	defaultVeleroTTL       = "720h0m0s"
+	defaultVeleroNamespace = "velero"
+	veleroValuesKey        = "veleroBackup"
+	// VeleroScheduleTemplatePath is the template added by InjectVeleroBackup.
+	VeleroScheduleTemplatePath = "templates/velero-schedule.yaml"
+)
+
+// VeleroBackupOptions configures the defaults written to values.yaml
+// (veleroBackup.*). All of them can be changed at install time.
 type VeleroBackupOptions struct {
-	Namespace               string
-	ScheduleCron            string
-	TTL                     string
-	IncludeNamespaces       []string
-	StorageLocation         string
+	// Namespace is where Velero runs; Schedules must live there (default "velero").
+	Namespace string
+	// Schedule is the cron expression of the backup (default "0 2 * * *").
+	Schedule string
+	// TTL is how long backups are kept, as a Go duration (default 720h0m0s).
+	TTL string
+	// StorageLocation is the BackupStorageLocation; empty uses Velero's default.
+	StorageLocation string
+	// VolumeSnapshotLocations restricts the VolumeSnapshotLocations used.
 	VolumeSnapshotLocations []string
+	// SnapshotVolumes takes volume snapshots of the release's PVs.
+	SnapshotVolumes bool
+	// DefaultVolumesToFsBackup backs up all pod volumes with file-system backup
+	// (Kopia/Restic) instead of snapshots.
+	DefaultVolumesToFsBackup bool
 }
 
-// VeleroBackupResult holds the generated Velero backup resources.
-type VeleroBackupResult struct {
-	// Schedules maps StatefulSet name → Velero Schedule CRD YAML.
-	Schedules map[string]string
-	// Annotations maps annotation key → value for pods/StatefulSets with PVCs.
-	Annotations map[string]string
-	// NOTESTxt is a human-readable notes string.
-	NOTESTxt string
+// normalize applies defaults and validates the options.
+func (opts *VeleroBackupOptions) normalize() error {
+	if opts.Namespace == "" {
+		opts.Namespace = defaultVeleroNamespace
+	}
+	if opts.Schedule == "" {
+		opts.Schedule = defaultVeleroSchedule
+	}
+	if opts.TTL == "" {
+		opts.TTL = defaultVeleroTTL
+	}
+	if err := opsValidateDuration(opts.TTL); err != nil {
+		return fmt.Errorf("velero ttl: %w", err)
+	}
+	if fields := strings.Fields(opts.Schedule); len(fields) != 5 && !strings.HasPrefix(opts.Schedule, "@") {
+		return fmt.Errorf("velero schedule %q is not a 5-field cron expression", opts.Schedule)
+	}
+	return nil
 }
 
-// GenerateVeleroBackup inspects the resource graph for StatefulSets with PVCs
-// and produces a VeleroBackupResult with Schedule CRDs and backup annotations.
-func GenerateVeleroBackup(graph *types.ResourceGraph, opts VeleroBackupOptions) *VeleroBackupResult {
-	result := &VeleroBackupResult{
-		Schedules:   make(map[string]string),
-		Annotations: make(map[string]string),
+// GenerateVeleroScheduleTemplate returns a Helm template for a Velero
+// Schedule (velero.io/v1) that backs up the release: every object carrying
+// the chart's selector labels in the release namespace, together with the
+// volumes of its pods. prefix is the prefix of the chart's
+// "<prefix>.fullname" helpers.
+func GenerateVeleroScheduleTemplate(prefix string) string {
+	v := ".Values." + veleroValuesKey
+	var b strings.Builder
+	w := func(s string) { b.WriteString(s + "\n") }
+	w(`{{- if ` + v + `.enabled }}`)
+	w(`apiVersion: velero.io/v1`)
+	w(`kind: Schedule`)
+	w(`metadata:`)
+	w(fmt.Sprintf(`  name: {{ include %q . | trunc 56 | trimSuffix "-" }}-backup`, prefix+".fullname"))
+	w(`  namespace: {{ ` + v + `.namespace | default "` + defaultVeleroNamespace + `" }}`)
+	w(`  labels:`)
+	w(fmt.Sprintf(`    {{- include %q . | nindent 4 }}`, prefix+".labels"))
+	w(`spec:`)
+	w(`  schedule: {{ ` + v + `.schedule | default "` + defaultVeleroSchedule + `" | quote }}`)
+	w(`  template:`)
+	w(`    includedNamespaces:`)
+	w(`      - {{ .Release.Namespace | quote }}`)
+	w(`    labelSelector:`)
+	w(`      matchLabels:`)
+	w(fmt.Sprintf(`        {{- include %q . | nindent 8 }}`, prefix+".selectorLabels"))
+	w(`    ttl: {{ ` + v + `.ttl | default "` + defaultVeleroTTL + `" | quote }}`)
+	w(`    {{- with ` + v + `.storageLocation }}`)
+	w(`    storageLocation: {{ . | quote }}`)
+	w(`    {{- end }}`)
+	w(`    {{- with ` + v + `.volumeSnapshotLocations }}`)
+	w(`    volumeSnapshotLocations:`)
+	w(`      {{- toYaml . | nindent 6 }}`)
+	w(`    {{- end }}`)
+	w(`    {{- if kindIs "bool" ` + v + `.snapshotVolumes }}`)
+	w(`    snapshotVolumes: {{ ` + v + `.snapshotVolumes }}`)
+	w(`    {{- end }}`)
+	w(`    {{- if kindIs "bool" ` + v + `.defaultVolumesToFsBackup }}`)
+	w(`    defaultVolumesToFsBackup: {{ ` + v + `.defaultVolumesToFsBackup }}`)
+	w(`    {{- end }}`)
+	w(`{{- end }}`)
+	return b.String()
+}
+
+// InjectVeleroBackup adds the Velero Schedule template and its values
+// (veleroBackup.*) to the chart. It returns the chart unchanged if the
+// template is already present. The input chart is not modified.
+func InjectVeleroBackup(chart *types.GeneratedChart, opts VeleroBackupOptions) (*types.GeneratedChart, bool, error) {
+	if chart == nil {
+		return nil, false, nil
+	}
+	if _, exists := chart.Templates[VeleroScheduleTemplatePath]; exists {
+		return chart, false, nil
+	}
+	if err := opts.normalize(); err != nil {
+		return nil, false, err
 	}
 
-	if graph == nil {
-		result.NOTESTxt = buildVeleroNotes(0)
-		return result
+	locations := make([]interface{}, 0, len(opts.VolumeSnapshotLocations))
+	for _, l := range opts.VolumeSnapshotLocations {
+		locations = append(locations, l)
+	}
+	values, err := appendTopLevelValues(chart.ValuesYAML, veleroValuesKey, map[string]interface{}{
+		"enabled":                  true,
+		"namespace":                opts.Namespace,
+		"schedule":                 opts.Schedule,
+		"ttl":                      opts.TTL,
+		"storageLocation":          opts.StorageLocation,
+		"volumeSnapshotLocations":  locations,
+		"snapshotVolumes":          opts.SnapshotVolumes,
+		"defaultVolumesToFsBackup": opts.DefaultVolumesToFsBackup,
+	})
+	if err != nil {
+		return nil, false, err
 	}
 
-	// Apply defaults.
-	cron := opts.ScheduleCron
-	if cron == "" {
-		cron = "0 2 * * *"
-	}
-	ttl := opts.TTL
-	if ttl == "" {
-		ttl = "720h"
-	}
-	storageLoc := opts.StorageLocation
-	if storageLoc == "" {
-		storageLoc = "default"
-	}
-
-	statefulSets := graph.GetResourcesByKind("StatefulSet")
-	for _, r := range statefulSets {
-		if r == nil || r.Original == nil || r.Original.Object == nil {
-			continue
-		}
-
-		name := r.ServiceName
-		if name == "" {
-			name = r.Original.Object.GetName()
-		}
-		ns := opts.Namespace
-		if ns == "" {
-			ns = r.Original.Object.GetNamespace()
-		}
-		if ns == "" {
-			ns = "default"
-		}
-
-		// Check for volumeClaimTemplates.
-		hasPVC := hasVolumeClaimTemplates(r)
-
-		// Build Schedule YAML.
-		scheduleYAML := buildVeleroScheduleYAML(name, ns, cron, ttl, storageLoc, opts.IncludeNamespaces, opts.VolumeSnapshotLocations)
-		result.Schedules[name] = scheduleYAML
-
-		// Emit backup-volumes annotation if StatefulSet has PVCs.
-		if hasPVC {
-			annotKey := fmt.Sprintf("backup.velero.io/backup-volumes-%s", name)
-			result.Annotations[annotKey] = "true"
-		}
-	}
-
-	result.NOTESTxt = buildVeleroNotes(len(result.Schedules))
-	return result
+	out := cloneChart(chart)
+	out.ValuesYAML = values
+	out.Templates[VeleroScheduleTemplatePath] = GenerateVeleroScheduleTemplate(opsHelperPrefix(chart))
+	return out, true, nil
 }
 
 // hasVolumeClaimTemplates returns true if the StatefulSet resource has volumeClaimTemplates.
 func hasVolumeClaimTemplates(r *types.ProcessedResource) bool {
-	obj := r.Original.Object.Object
-	spec, ok := obj["spec"].(map[string]interface{})
+	return len(volumeClaimTemplates(r)) > 0
+}
+
+// volumeClaimTemplates returns the volumeClaimTemplates of a StatefulSet.
+func volumeClaimTemplates(r *types.ProcessedResource) []map[string]interface{} {
+	if r == nil || r.Original == nil || r.Original.Object == nil {
+		return nil
+	}
+	spec, ok := r.Original.Object.Object["spec"].(map[string]interface{})
 	if !ok {
-		return false
+		return nil
 	}
-	vcts, ok := spec["volumeClaimTemplates"]
+	list, ok := spec["volumeClaimTemplates"].([]interface{})
 	if !ok {
-		return false
+		return nil
 	}
-	list, ok := vcts.([]interface{})
-	return ok && len(list) > 0
-}
-
-// sanitizeYAMLScalar strips newline and carriage-return characters from a string
-// to prevent YAML structure injection. This is a conservative guard until a
-// full yamlScalarQuote helper is introduced in the project.
-func sanitizeYAMLScalar(s string) string {
-	s = strings.ReplaceAll(s, "\r", "")
-	s = strings.ReplaceAll(s, "\n", "")
-	return s
-}
-
-// buildVeleroScheduleYAML renders a Velero Schedule CRD as YAML string.
-func buildVeleroScheduleYAML(name, namespace, cron, ttl, storageLocation string, includeNamespaces, volumeSnapshotLocations []string) string {
-	var sb strings.Builder
-
-	// Sanitize all user-supplied scalar values before YAML interpolation.
-	name = sanitizeYAMLScalar(name)
-	namespace = sanitizeYAMLScalar(namespace)
-	cron = sanitizeYAMLScalar(cron)
-	ttl = sanitizeYAMLScalar(ttl)
-	storageLocation = sanitizeYAMLScalar(storageLocation)
-
-	sb.WriteString("apiVersion: velero.io/v1\n")
-	sb.WriteString("kind: Schedule\n")
-	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: %s-backup\n", name))
-	sb.WriteString(fmt.Sprintf("  namespace: %s\n", namespace))
-	sb.WriteString("spec:\n")
-	sb.WriteString(fmt.Sprintf("  schedule: \"%s\"\n", cron))
-	sb.WriteString("  template:\n")
-	sb.WriteString(fmt.Sprintf("    ttl: %s\n", ttl))
-	sb.WriteString(fmt.Sprintf("    storageLocation: %s\n", storageLocation))
-
-	if len(includeNamespaces) > 0 {
-		sb.WriteString("    includedNamespaces:\n")
-		for _, ns := range includeNamespaces {
-			sb.WriteString(fmt.Sprintf("      - %s\n", sanitizeYAMLScalar(ns)))
+	var out []map[string]interface{}
+	for _, item := range list {
+		if m, ok := item.(map[string]interface{}); ok {
+			out = append(out, m)
 		}
 	}
-
-	if len(volumeSnapshotLocations) > 0 {
-		sb.WriteString("    volumeSnapshotLocations:\n")
-		for _, vsl := range volumeSnapshotLocations {
-			sb.WriteString(fmt.Sprintf("      - %s\n", sanitizeYAMLScalar(vsl)))
-		}
-	}
-
-	return sb.String()
-}
-
-// buildVeleroNotes returns a human-readable notes string for Velero backup.
-func buildVeleroNotes(scheduleCount int) string {
-	return fmt.Sprintf(
-		"Velero backup configured.\n"+
-			"Generated %d Velero Schedule CRD(s).\n"+
-			"Apply the generated schedules to enable automated backups.\n"+
-			"Ensure the velero CLI and server are installed in your cluster.",
-		scheduleCount,
-	)
-}
-
-// InjectVeleroBackup injects Velero Schedule CRDs into the chart's ExternalFiles.
-// It is copy-on-write (original chart is not modified) and idempotent.
-// Returns the updated chart and the number of files injected.
-func InjectVeleroBackup(chart *types.GeneratedChart, result *VeleroBackupResult) (*types.GeneratedChart, int) {
-	if chart == nil {
-		return nil, 0
-	}
-	if result == nil || len(result.Schedules) == 0 {
-		return chart, 0
-	}
-
-	// Build set of already-present external file paths for idempotency.
-	existing := make(map[string]struct{}, len(chart.ExternalFiles))
-	for _, ef := range chart.ExternalFiles {
-		existing[ef.Path] = struct{}{}
-	}
-
-	updated := copyChartTemplates(chart)
-	// Copy ExternalFiles slice (copyChartTemplates does not copy it).
-	updated.ExternalFiles = make([]types.ExternalFileInfo, len(chart.ExternalFiles))
-	copy(updated.ExternalFiles, chart.ExternalFiles)
-
-	count := 0
-	for stsName, scheduleYAML := range result.Schedules {
-		path := fmt.Sprintf("velero/schedules/%s-schedule.yaml", stsName)
-		// Idempotent: overwrite if already present, add if not.
-		if _, found := existing[path]; found {
-			// Overwrite in-place.
-			for i, ef := range updated.ExternalFiles {
-				if ef.Path == path {
-					updated.ExternalFiles[i].Content = scheduleYAML
-					break
-				}
-			}
-		} else {
-			updated.ExternalFiles = append(updated.ExternalFiles, types.ExternalFileInfo{
-				Path:    path,
-				Content: scheduleYAML,
-			})
-		}
-		count++
-	}
-
-	// Update NOTES.txt if provided.
-	if result.NOTESTxt != "" {
-		updated.Notes = result.NOTESTxt
-	}
-
-	return updated, count
+	return out
 }

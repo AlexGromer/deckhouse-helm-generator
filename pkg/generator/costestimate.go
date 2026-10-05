@@ -2,11 +2,13 @@ package generator
 
 import (
 	"fmt"
-	"strconv"
+	"sort"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
 // CostRegion is a cloud region identifier string.
@@ -36,20 +38,20 @@ type providerPricing struct {
 	StoragePerGiBPerMonth  float64 // USD per GiB-month
 }
 
-// cloudPrices contains realistic approximate pricing for each provider.
-// AWS: ~$0.048/vCPU-hour, ~$0.006/GB-hour for on-demand (us-east-1).
-// GCP: ~$0.044/vCPU-hour, ~$0.006/GB-hour (us-central1).
-// Azure: ~$0.052/vCPU-hour, ~$0.007/GB-hour (eastus).
+// cloudPrices contains approximate on-demand list prices per provider.
+// AWS: ~$0.048/vCPU-hour, ~$0.006/GiB-hour (us-east-1), gp3 $0.08/GiB-month.
+// GCP: ~$0.044/vCPU-hour, ~$0.006/GiB-hour (us-central1), pd-balanced $0.10/GiB-month.
+// Azure: ~$0.052/vCPU-hour, ~$0.007/GiB-hour (eastus), Standard SSD ~$0.095/GiB-month.
 var cloudPrices = map[CloudProvider]providerPricing{
 	CloudProviderAWS: {
 		CPUPerMillicorePerHour: 0.048 / 1000.0,
 		MemPerMiBPerHour:       0.006 / 1024.0,
-		StoragePerGiBPerMonth:  0.10,
+		StoragePerGiBPerMonth:  0.08,
 	},
 	CloudProviderGCP: {
 		CPUPerMillicorePerHour: 0.044 / 1000.0,
 		MemPerMiBPerHour:       0.006 / 1024.0,
-		StoragePerGiBPerMonth:  0.08,
+		StoragePerGiBPerMonth:  0.10,
 	},
 	CloudProviderAzure: {
 		CPUPerMillicorePerHour: 0.052 / 1000.0,
@@ -58,7 +60,7 @@ var cloudPrices = map[CloudProvider]providerPricing{
 	},
 }
 
-// defaultProviderRegions maps each provider to its default region.
+// defaultProviderRegions maps each provider to the region its prices are for.
 var defaultProviderRegions = map[CloudProvider]string{
 	CloudProviderAWS:   "us-east-1",
 	CloudProviderGCP:   "us-central1",
@@ -67,22 +69,41 @@ var defaultProviderRegions = map[CloudProvider]string{
 
 // CostEstimateOptions configures a cost estimation run.
 type CostEstimateOptions struct {
-	Provider       CloudProvider
-	Region         CostRegion
-	Unit           CostUnit
+	Provider CloudProvider
+	// Region is informational: prices are list prices of the provider's
+	// default region. Empty means that default region.
+	Region CostRegion
+	Unit   CostUnit
+	// IncludeStorage adds PersistentVolumeClaims and StatefulSet
+	// volumeClaimTemplates (one volume per replica).
 	IncludeStorage bool
 }
 
 // WorkloadCostEstimate holds per-workload cost breakdown.
 type WorkloadCostEstimate struct {
-	Name       string
-	Namespace  string
-	Kind       string
-	Replicas   int
+	Name      string
+	Namespace string
+	Kind      string
+	Replicas  int
+	// CPUMillis and MemoryMiB are the requests of one replica (all containers).
+	CPUMillis  int64
+	MemoryMiB  int64
 	CPUCost    float64
 	MemoryCost float64
 	TotalCost  float64
 	Warnings   []string
+}
+
+// StorageCostEstimate holds the cost of one persistent volume claim (or of
+// all claims of one StatefulSet volumeClaimTemplate).
+type StorageCostEstimate struct {
+	Name      string
+	Namespace string
+	// Owner is "StatefulSet/<name>" for volumeClaimTemplates, empty for PVCs.
+	Owner string
+	// SizeGiB is the total requested size (all replicas).
+	SizeGiB float64
+	Cost    float64
 }
 
 // CostEstimateReport holds the full cost estimation result.
@@ -91,94 +112,71 @@ type CostEstimateReport struct {
 	Region           CostRegion
 	Unit             CostUnit
 	Workloads        []WorkloadCostEstimate
+	Storage          []StorageCostEstimate
 	TotalStorageCost float64
 	GrandTotal       float64
 }
 
 // parseResourceQuantity parses a Kubernetes quantity string.
 // If isCPU is true, returns millicores; otherwise returns MiB.
-// Supports: "500m", "2" (CPU cores), "256Mi", "1Gi", "512M", "1G".
 func parseResourceQuantity(s string, isCPU bool) (int64, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0, fmt.Errorf("empty quantity string")
 	}
-
-	if isCPU {
-		// CPU: suffix "m" = millicores, no suffix = cores
-		if strings.HasSuffix(s, "m") {
-			val, err := strconv.ParseFloat(strings.TrimSuffix(s, "m"), 64)
-			if err != nil {
-				return 0, fmt.Errorf("invalid CPU quantity %q: %w", s, err)
-			}
-			return int64(val), nil
-		}
-		// Whole cores
-		val, err := strconv.ParseFloat(s, 64)
-		if err != nil {
-			return 0, fmt.Errorf("invalid CPU quantity %q: %w", s, err)
-		}
-		return int64(val * 1000), nil
-	}
-
-	// Memory: parse suffixes Ki, Mi, Gi, K, M, G
-	suffixes := []struct {
-		suffix string
-		factor float64
-	}{
-		{"Ki", 1.0 / 1024.0}, // KiB → MiB: divide by 1024
-		{"Mi", 1.0},
-		{"Gi", 1024.0},
-		{"K", 1.0 / 1000.0}, // KB → MiB (approx)
-		{"M", 1.0},           // MB ≈ MiB (close enough for cost)
-		{"G", 1000.0},        // GB → MiB
-	}
-
-	for _, sf := range suffixes {
-		if strings.HasSuffix(s, sf.suffix) {
-			numStr := strings.TrimSuffix(s, sf.suffix)
-			val, err := strconv.ParseFloat(numStr, 64)
-			if err != nil {
-				return 0, fmt.Errorf("invalid memory quantity %q: %w", s, err)
-			}
-			return int64(val * sf.factor), nil
-		}
-	}
-
-	// Plain bytes
-	val, err := strconv.ParseFloat(s, 64)
+	q, err := resource.ParseQuantity(s)
 	if err != nil {
-		return 0, fmt.Errorf("invalid memory quantity %q: %w", s, err)
+		return 0, fmt.Errorf("invalid quantity %q: %w", s, err)
 	}
-	return int64(val / (1024 * 1024)), nil
+	if isCPU {
+		return q.MilliValue(), nil
+	}
+	return q.Value() / (1024 * 1024), nil
 }
 
 // extractReplicasFromResource reads the replica/parallelism count from a workload object.
 func extractReplicasFromResource(obj *unstructured.Unstructured) int {
-	kind := obj.GetKind()
-	switch kind {
+	switch obj.GetKind() {
 	case "Job":
-		v, found, err := unstructured.NestedInt64(obj.Object, "spec", "parallelism")
-		if err == nil && found && v > 0 {
-			return int(v)
+		if v := nestedCount(obj.Object, "spec", "parallelism"); v > 0 {
+			return v
 		}
 		return 1
-	case "CronJob":
+	case "CronJob", "DaemonSet":
+		// A DaemonSet runs one pod per node; the node count is unknown.
 		return 1
 	default:
-		v, found, err := unstructured.NestedInt64(obj.Object, "spec", "replicas")
-		if err == nil && found && v > 0 {
-			return int(v)
+		if v := nestedCount(obj.Object, "spec", "replicas"); v > 0 {
+			return v
 		}
 		return 1
 	}
 }
 
+// nestedCount reads an integer field. Manifests decoded from YAML hold
+// numbers as float64, objects built in code as int64 or int.
+func nestedCount(obj map[string]interface{}, fields ...string) int {
+	v, found, err := unstructured.NestedFieldNoCopy(obj, fields...)
+	if err != nil || !found {
+		return 0
+	}
+	switch n := v.(type) {
+	case int64:
+		return int(n)
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case float64:
+		return int(n)
+	}
+	return 0
+}
+
 // extractContainersFromObj returns the containers slice for the workload kind.
 func extractContainersFromObj(obj *unstructured.Unstructured) ([]interface{}, bool) {
-	kind := obj.GetKind()
 	var path []string
-	switch kind {
+	switch obj.GetKind() {
 	case "CronJob":
 		path = []string{"spec", "jobTemplate", "spec", "template", "spec", "containers"}
 	default:
@@ -206,7 +204,7 @@ func estimateWorkloadCost(r *types.ProcessedResource, pricing providerPricing, u
 	est := WorkloadCostEstimate{
 		Name:      obj.GetName(),
 		Namespace: obj.GetNamespace(),
-		Kind:      obj.GetKind(),
+		Kind:      r.Original.GVK.Kind,
 		Replicas:  extractReplicasFromResource(obj),
 	}
 
@@ -216,69 +214,81 @@ func estimateWorkloadCost(r *types.ProcessedResource, pricing providerPricing, u
 		containers = []interface{}{map[string]interface{}{}}
 	}
 
-	var totalCPUMillis int64
-	var totalMemMiB int64
-
 	for _, cRaw := range containers {
 		c, ok := cRaw.(map[string]interface{})
 		if !ok {
 			continue
 		}
-
-		requests, _, _ := unstructured.NestedStringMap(c, "resources", "requests")
+		name, _ := c["name"].(string)
+		if name == "" {
+			name = "container"
+		}
+		requests := containerQuantities(c, "requests")
 		cpuStr := requests["cpu"]
 		memStr := requests["memory"]
 
-		// Check if there are any requests at all.
-		if cpuStr == "" && memStr == "" {
-			est.Warnings = append(est.Warnings, "container has no resource requests; using default values")
-		}
-
-		// Parse CPU.
 		cpuMillis := int64(defaultCPUMillicores)
-		if cpuStr != "" {
-			v, err := parseResourceQuantity(cpuStr, true)
-			if err != nil {
-				est.Warnings = append(est.Warnings, fmt.Sprintf("could not parse CPU request %q: %v; using default", cpuStr, err))
-			} else {
-				cpuMillis = v
-			}
+		if cpuStr == "" {
+			est.Warnings = append(est.Warnings, fmt.Sprintf("%s: no CPU request; assuming %dm", name, defaultCPUMillicores))
+		} else if v, err := parseResourceQuantity(cpuStr, true); err != nil {
+			est.Warnings = append(est.Warnings, fmt.Sprintf("%s: could not parse CPU request %q; assuming %dm", name, cpuStr, defaultCPUMillicores))
+		} else {
+			cpuMillis = v
 		}
 
-		// Parse memory.
 		memMiB := int64(defaultMemoryMiB)
-		if memStr != "" {
-			v, err := parseResourceQuantity(memStr, false)
-			if err != nil {
-				est.Warnings = append(est.Warnings, fmt.Sprintf("could not parse memory request %q: %v; using default", memStr, err))
-			} else {
-				memMiB = v
-			}
+		if memStr == "" {
+			est.Warnings = append(est.Warnings, fmt.Sprintf("%s: no memory request; assuming %dMi", name, defaultMemoryMiB))
+		} else if v, err := parseResourceQuantity(memStr, false); err != nil {
+			est.Warnings = append(est.Warnings, fmt.Sprintf("%s: could not parse memory request %q; assuming %dMi", name, memStr, defaultMemoryMiB))
+		} else {
+			memMiB = v
 		}
 
-		totalCPUMillis += cpuMillis
-		totalMemMiB += memMiB
+		est.CPUMillis += cpuMillis
+		est.MemoryMiB += memMiB
 	}
-
-	// Compute per-replica hourly costs
-	cpuCostPerReplicaHourly := float64(totalCPUMillis) * pricing.CPUPerMillicorePerHour
-	memCostPerReplicaHourly := float64(totalMemMiB) * pricing.MemPerMiBPerHour
 
 	multiplier := 1.0
 	if unit == CostUnitMonthly {
 		multiplier = hoursPerMonth
 	}
-
-	est.CPUCost = cpuCostPerReplicaHourly * float64(est.Replicas) * multiplier
-	est.MemoryCost = memCostPerReplicaHourly * float64(est.Replicas) * multiplier
+	est.CPUCost = float64(est.CPUMillis) * pricing.CPUPerMillicorePerHour * float64(est.Replicas) * multiplier
+	est.MemoryCost = float64(est.MemoryMiB) * pricing.MemPerMiBPerHour * float64(est.Replicas) * multiplier
 	est.TotalCost = est.CPUCost + est.MemoryCost
-
 	return est
+}
+
+// claimSizeGiB returns spec.resources.requests.storage of a PVC spec in GiB.
+func claimSizeGiB(spec map[string]interface{}) float64 {
+	storage, _, _ := unstructured.NestedString(spec, "resources", "requests", "storage")
+	if storage == "" {
+		return 0
+	}
+	q, err := resource.ParseQuantity(storage)
+	if err != nil {
+		return 0
+	}
+	return float64(q.Value()) / (1024 * 1024 * 1024)
+}
+
+// opsSortedResources returns the graph's resources ordered by key, so reports
+// are deterministic.
+func opsSortedResources(graph *types.ResourceGraph) []*types.ProcessedResource {
+	out := make([]*types.ProcessedResource, 0, len(graph.Resources))
+	for _, r := range graph.Resources {
+		if r != nil && r.Original != nil && r.Original.Object != nil {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Original.ResourceKey().String() < out[j].Original.ResourceKey().String()
+	})
+	return out
 }
 
 // GenerateCostEstimate computes cost estimates for all workloads in the resource graph.
 func GenerateCostEstimate(graph *types.ResourceGraph, opts CostEstimateOptions) *CostEstimateReport {
-	// Apply default region if empty.
 	region := opts.Region
 	if region == "" {
 		if def, ok := defaultProviderRegions[opts.Provider]; ok {
@@ -287,121 +297,135 @@ func GenerateCostEstimate(graph *types.ResourceGraph, opts CostEstimateOptions) 
 			region = "us-east-1"
 		}
 	}
-
-	// Resolve pricing.
 	pricing, ok := cloudPrices[opts.Provider]
 	if !ok {
 		pricing = cloudPrices[CloudProviderAWS]
+	}
+	unit := opts.Unit
+	if unit == "" {
+		unit = CostUnitMonthly
 	}
 
 	report := &CostEstimateReport{
 		Provider:  opts.Provider,
 		Region:    region,
-		Unit:      opts.Unit,
+		Unit:      unit,
 		Workloads: []WorkloadCostEstimate{},
 	}
-
 	if graph == nil {
 		return report
 	}
 
-	// Process workloads.
-	for _, r := range graph.Resources {
-		kind := r.Original.GVK.Kind
-		if !isWorkloadKind(kind) {
-			continue
+	storageCost := func(sizeGiB float64) float64 {
+		cost := sizeGiB * pricing.StoragePerGiBPerMonth
+		if unit == CostUnitHourly {
+			cost /= hoursPerMonth
 		}
-		est := estimateWorkloadCost(r, pricing, opts.Unit)
-		report.Workloads = append(report.Workloads, est)
-		report.GrandTotal += est.TotalCost
+		return cost
 	}
 
-	// Process storage if requested.
-	if opts.IncludeStorage {
-		for _, r := range graph.Resources {
-			if r.Original.GVK.Kind != "PersistentVolumeClaim" {
+	for _, r := range opsSortedResources(graph) {
+		kind := r.Original.GVK.Kind
+		obj := r.Original.Object
+		switch {
+		case isWorkloadKind(kind):
+			est := estimateWorkloadCost(r, pricing, unit)
+			report.Workloads = append(report.Workloads, est)
+			report.GrandTotal += est.TotalCost
+			if opts.IncludeStorage && kind == "StatefulSet" {
+				for _, vct := range volumeClaimTemplates(r) {
+					spec, _ := vct["spec"].(map[string]interface{})
+					size := claimSizeGiB(spec) * float64(est.Replicas)
+					if size <= 0 {
+						continue
+					}
+					name, _, _ := unstructured.NestedString(vct, "metadata", "name")
+					s := StorageCostEstimate{
+						Name:      name,
+						Namespace: obj.GetNamespace(),
+						Owner:     "StatefulSet/" + obj.GetName(),
+						SizeGiB:   size,
+						Cost:      storageCost(size),
+					}
+					report.Storage = append(report.Storage, s)
+					report.TotalStorageCost += s.Cost
+					report.GrandTotal += s.Cost
+				}
+			}
+		case opts.IncludeStorage && kind == "PersistentVolumeClaim":
+			spec, _ := obj.Object["spec"].(map[string]interface{})
+			size := claimSizeGiB(spec)
+			if size <= 0 {
 				continue
 			}
-			obj := r.Original.Object
-			// Try annotation first.
-			annotations := obj.GetAnnotations()
-			storageGiStr := annotations["dhg.deckhouse.io/storage-gi"]
-			var storageGi float64
-			if storageGiStr != "" {
-				v, err := strconv.ParseFloat(storageGiStr, 64)
-				if err == nil {
-					storageGi = v
-				}
+			s := StorageCostEstimate{
+				Name:      obj.GetName(),
+				Namespace: obj.GetNamespace(),
+				SizeGiB:   size,
+				Cost:      storageCost(size),
 			}
-			// Fallback to spec.resources.requests.storage.
-			if storageGi == 0 {
-				storageSt, _, _ := unstructured.NestedString(obj.Object, "spec", "resources", "requests", "storage")
-				if storageSt != "" {
-					mib, err := parseResourceQuantity(storageSt, false)
-					if err == nil {
-						storageGi = float64(mib) / 1024.0
-					}
-				}
-			}
-			if storageGi > 0 {
-				cost := storageGi * pricing.StoragePerGiBPerMonth
-				if opts.Unit == CostUnitHourly {
-					cost = cost / hoursPerMonth
-				}
-				report.TotalStorageCost += cost
-				report.GrandTotal += cost
-			}
+			report.Storage = append(report.Storage, s)
+			report.TotalStorageCost += s.Cost
+			report.GrandTotal += s.Cost
 		}
 	}
-
 	return report
 }
 
-// InjectCostNotes injects a cost estimate section into the chart's NOTES.txt.
-// Returns a copy of the chart with updated Notes and a boolean indicating whether
-// injection occurred (false if notes were already present).
-func InjectCostNotes(chart *types.GeneratedChart, report *CostEstimateReport) (*types.GeneratedChart, bool) {
-	if chart == nil {
-		return nil, false
+// Markdown renders the cost estimate as a Markdown section.
+func (r *CostEstimateReport) Markdown() string {
+	var b strings.Builder
+	b.WriteString("## Estimated cost\n\n")
+	if r == nil || (len(r.Workloads) == 0 && len(r.Storage) == 0) {
+		b.WriteString("No workloads or volumes.\n")
+		return b.String()
 	}
-	if report == nil {
-		result := copyChartTemplates(chart)
-		return result, false
+	per := "month"
+	if r.Unit == CostUnitHourly {
+		per = "hour"
 	}
+	fmt.Fprintf(&b, "On-demand list prices of %s (%s), USD per %s, based on resource **requests**. "+
+		"Containers without requests are counted with %dm CPU / %dMi memory. "+
+		"DaemonSets are counted as one pod; multiply by your node count.\n\n",
+		strings.ToUpper(string(r.Provider)), r.Region, per, defaultCPUMillicores, defaultMemoryMiB)
 
-	const marker = "Cost Estimate"
-	if strings.Contains(chart.Notes, marker) {
-		result := copyChartTemplates(chart)
-		return result, false
-	}
-
-	result := copyChartTemplates(chart)
-
-	var sb strings.Builder
-	if result.Notes != "" {
-		sb.WriteString(result.Notes)
-		if !strings.HasSuffix(result.Notes, "\n") {
-			sb.WriteString("\n")
+	if len(r.Workloads) > 0 {
+		b.WriteString("| Workload | Replicas | CPU / replica | Memory / replica | CPU cost | Memory cost | Total |\n")
+		b.WriteString("|---|---:|---:|---:|---:|---:|---:|\n")
+		for _, w := range r.Workloads {
+			fmt.Fprintf(&b, "| %s/%s | %d | %dm | %dMi | $%.2f | $%.2f | $%.2f |\n",
+				w.Kind, w.Name, w.Replicas, w.CPUMillis, w.MemoryMiB, w.CPUCost, w.MemoryCost, w.TotalCost)
 		}
-		sb.WriteString("\n")
+		b.WriteString("\n")
 	}
+	if len(r.Storage) > 0 {
+		b.WriteString("| Volume | Size | Cost |\n")
+		b.WriteString("|---|---:|---:|\n")
+		for _, s := range r.Storage {
+			name := "PersistentVolumeClaim/" + s.Name
+			if s.Owner != "" {
+				name = s.Owner + " volumeClaimTemplate " + s.Name
+			}
+			fmt.Fprintf(&b, "| %s | %.1f GiB | $%.2f |\n", name, s.SizeGiB, s.Cost)
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "**Total: $%.2f per %s**", r.GrandTotal, per)
+	if r.TotalStorageCost > 0 {
+		fmt.Fprintf(&b, " (storage $%.2f)", r.TotalStorageCost)
+	}
+	b.WriteString("\n")
 
-	sb.WriteString("## Cost Estimate\n")
-	sb.WriteString(fmt.Sprintf("Provider: %s | Region: %s | Unit: %s\n\n", report.Provider, report.Region, report.Unit))
-
-	for _, w := range report.Workloads {
-		sb.WriteString(fmt.Sprintf("- %s/%s (%s, %d replica(s)): CPU=$%.4f, Mem=$%.4f, Total=$%.4f\n",
-			w.Namespace, w.Name, w.Kind, w.Replicas, w.CPUCost, w.MemoryCost, w.TotalCost))
-		for _, warn := range w.Warnings {
-			sb.WriteString(fmt.Sprintf("  WARNING: %s\n", warn))
+	var warnings []string
+	for _, w := range r.Workloads {
+		for _, msg := range w.Warnings {
+			warnings = append(warnings, fmt.Sprintf("- %s/%s: %s", w.Kind, w.Name, msg))
 		}
 	}
-
-	if report.TotalStorageCost > 0 {
-		sb.WriteString(fmt.Sprintf("\nStorage: $%.4f\n", report.TotalStorageCost))
+	if len(warnings) > 0 {
+		b.WriteString("\nAssumptions:\n\n")
+		b.WriteString(strings.Join(warnings, "\n"))
+		b.WriteString("\n")
 	}
-	sb.WriteString(fmt.Sprintf("\nGrand Total: $%.4f\n", report.GrandTotal))
-
-	result.Notes = sb.String()
-	return result, true
+	return b.String()
 }

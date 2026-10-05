@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
@@ -11,11 +13,19 @@ import (
 type PVIssue string
 
 const (
-	PVIssueRWXMisuse              PVIssue = "rwx-misuse"
-	PVIssueMissingStorageClass    PVIssue = "missing-storage-class"
-	PVIssueNoVolumeSnapshot       PVIssue = "no-volume-snapshot"
-	PVIssueOrphanedPVC            PVIssue = "orphaned-pvc"
-	PVIssueRetainPolicyOnEphemeral PVIssue = "retain-policy-on-ephemeral"
+	// PVIssueRWOMultiPod: a ReadWriteOnce claim is mounted by several pods
+	// (replicas > 1, a DaemonSet, a parallel Job, or several workloads). Pods
+	// scheduled on another node hang in ContainerCreating (Multi-Attach error).
+	PVIssueRWOMultiPod PVIssue = "rwo-multi-pod"
+	// PVIssueRWORollingUpdate: a Deployment mounts a ReadWriteOnce claim with
+	// the RollingUpdate strategy; the new pod can land on another node and
+	// wait forever for the volume held by the old one. Use strategy Recreate.
+	PVIssueRWORollingUpdate PVIssue = "rwo-rolling-update"
+	// PVIssueMissingStorageClass: no storageClassName, so the cluster default
+	// StorageClass is used (or the claim stays Pending if there is none).
+	PVIssueMissingStorageClass PVIssue = "missing-storage-class"
+	// PVIssueOrphanedPVC: the claim is not mounted by any workload of the input.
+	PVIssueOrphanedPVC PVIssue = "orphaned-pvc"
 )
 
 // PVIssueSeverity classifies the severity of a PV finding.
@@ -29,15 +39,16 @@ const (
 
 // issueSeverity returns the default severity for a given PVIssue type.
 var issueSeverity = map[PVIssue]PVIssueSeverity{
-	PVIssueRWXMisuse:               PVIssueSeverityCritical,
-	PVIssueMissingStorageClass:     PVIssueSeverityWarning,
-	PVIssueNoVolumeSnapshot:        PVIssueSeverityWarning,
-	PVIssueOrphanedPVC:             PVIssueSeverityWarning,
-	PVIssueRetainPolicyOnEphemeral: PVIssueSeverityWarning,
+	PVIssueRWOMultiPod:         PVIssueSeverityCritical,
+	PVIssueRWORollingUpdate:    PVIssueSeverityWarning,
+	PVIssueOrphanedPVC:         PVIssueSeverityWarning,
+	PVIssueMissingStorageClass: PVIssueSeverityInfo,
 }
 
 // PVCFinding represents a single PVC best-practice finding.
 type PVCFinding struct {
+	// PVCName is the claim name; for a StatefulSet volumeClaimTemplate it is
+	// "<statefulset>/<template>".
 	PVCName   string
 	Namespace string
 	Issue     PVIssue
@@ -47,359 +58,187 @@ type PVCFinding struct {
 
 // PVAnalysisReport holds all PVC findings.
 type PVAnalysisReport struct {
-	Findings            []PVCFinding
-	TotalFindings       int
-	FindingsByIssue     map[PVIssue]int
-	FindingsBySeverity  map[PVIssueSeverity]int
+	// Analyzed is the number of claims and volumeClaimTemplates inspected.
+	Analyzed           int
+	Findings           []PVCFinding
+	TotalFindings      int
+	FindingsByIssue    map[PVIssue]int
+	FindingsBySeverity map[PVIssueSeverity]int
 }
 
 // PVAnalysisOptions configures which checks are enabled.
 type PVAnalysisOptions struct {
-	CheckRWXMisuse           bool
+	// CheckAccessModes reports ReadWriteOnce claims shared by several pods
+	// and Deployments that roll ReadWriteOnce claims.
+	CheckAccessModes         bool
 	CheckMissingStorageClass bool
-	CheckVolumeSnapshot      bool
 	CheckOrphanedPVC         bool
-	CheckRetainPolicy        bool
-	// SharedWorkloadKinds lists workload kinds for which RWX is considered acceptable.
-	SharedWorkloadKinds []string
 }
 
-// addFinding is a helper that adds a finding to the report.
-func (r *PVAnalysisReport) addFinding(f PVCFinding) {
+// DefaultPVAnalysisOptions enables every check.
+func DefaultPVAnalysisOptions() PVAnalysisOptions {
+	return PVAnalysisOptions{CheckAccessModes: true, CheckMissingStorageClass: true, CheckOrphanedPVC: true}
+}
+
+func (r *PVAnalysisReport) addFinding(name, namespace string, issue PVIssue, msg string) {
+	f := PVCFinding{PVCName: name, Namespace: namespace, Issue: issue, Severity: issueSeverity[issue], Message: msg}
 	r.Findings = append(r.Findings, f)
 	r.TotalFindings++
 	r.FindingsByIssue[f.Issue]++
 	r.FindingsBySeverity[f.Severity]++
 }
 
-// isSharedKind returns true if kind is in SharedWorkloadKinds.
-func isSharedKind(kind string, sharedKinds []string) bool {
-	for _, k := range sharedKinds {
-		if k == kind {
-			return true
-		}
-	}
-	return false
-}
-
-// pvcOwnerKinds inspects the relationship graph to find workload kinds that own a PVC.
-// Returns (ownerKinds []string, isOwned bool).
-func pvcOwnerKinds(graph *types.ResourceGraph, pvcKey types.ResourceKey) ([]string, bool) {
-	rels := graph.GetRelationshipsTo(pvcKey)
-	var kinds []string
-	for _, rel := range rels {
+// pvcOwners returns the workloads that mount the claim (via RelationPVC).
+// Owners that are not part of the graph are returned with only their key.
+func pvcOwners(graph *types.ResourceGraph, pvcKey types.ResourceKey) []types.ResourceKey {
+	var owners []types.ResourceKey
+	for _, rel := range graph.GetRelationshipsTo(pvcKey) {
 		if rel.Type == types.RelationPVC {
-			// Look up the From resource kind.
-			if r, ok := graph.GetResourceByKey(rel.From); ok {
-				kinds = append(kinds, r.Original.GVK.Kind)
-			} else {
-				// ResourceKey encodes kind in GVK.
-				kinds = append(kinds, rel.From.GVK.Kind)
-			}
+			owners = append(owners, rel.From)
 		}
 	}
-	return kinds, len(kinds) > 0
+	return owners
 }
 
-// hasBackupAnnotation checks whether the PVC carries any known backup annotation.
-func hasBackupAnnotation(annotations map[string]string) bool {
-	backupAnnotations := []string{
-		"backup.velero.io/backup-volumes",
-		"backup.velero.io/backup-volumes-excludes",
-		"velero.io/backup",
-		"snapshot.storage.kubernetes.io/volume-snapshot-class",
-		"dhg.deckhouse.io/backup",
-	}
-	for _, key := range backupAnnotations {
-		if _, ok := annotations[key]; ok {
-			return true
+// isReadWriteOnce reports whether a claim spec only allows single-node access.
+func isReadWriteOnce(spec map[string]interface{}) bool {
+	modes, _, _ := unstructured.NestedStringSlice(spec, "accessModes")
+	rwo := false
+	for _, m := range modes {
+		switch m {
+		case "ReadWriteMany", "ReadOnlyMany":
+			return false
+		case "ReadWriteOnce", "ReadWriteOncePod":
+			rwo = true
 		}
 	}
-	return false
+	return rwo
 }
 
-// AnalyzePVBestPractices examines all PVCs in the graph and returns a PVAnalysisReport.
+// multiPodReason describes why a workload runs more than one pod at once;
+// ok is false when it runs a single pod.
+func multiPodReason(r *types.ProcessedResource) (string, bool) {
+	obj := r.Original.Object
+	switch r.Original.GVK.Kind {
+	case "DaemonSet":
+		return "DaemonSet " + obj.GetName() + " (one pod per node)", true
+	case "Job", "CronJob", "Deployment", "StatefulSet":
+		if n := extractReplicasFromResource(obj); n > 1 {
+			return fmt.Sprintf("%s %s (%d pods)", r.Original.GVK.Kind, obj.GetName(), n), true
+		}
+	}
+	return "", false
+}
+
+// AnalyzePVBestPractices examines all PVCs and StatefulSet volumeClaimTemplates
+// in the graph and returns a PVAnalysisReport.
 func AnalyzePVBestPractices(graph *types.ResourceGraph, opts PVAnalysisOptions) *PVAnalysisReport {
 	report := &PVAnalysisReport{
 		Findings:           []PVCFinding{},
 		FindingsByIssue:    make(map[PVIssue]int),
 		FindingsBySeverity: make(map[PVIssueSeverity]int),
 	}
-
 	if graph == nil {
 		return report
 	}
 
-	// Build a map of StorageClass → reclaimPolicy from the graph.
-	scReclaimPolicy := make(map[string]string)
-	for _, r := range graph.Resources {
-		if r.Original.GVK.Kind == "StorageClass" {
-			obj := r.Original.Object
-			name := obj.GetName()
-			policy, _, _ := nestedString(obj.Object, "reclaimPolicy")
-			if policy != "" {
-				scReclaimPolicy[name] = policy
-			}
-		}
-	}
-
-	// Iterate PVCs.
-	for _, r := range graph.Resources {
-		if r.Original.GVK.Kind != "PersistentVolumeClaim" {
-			continue
-		}
-
+	for _, r := range opsSortedResources(graph) {
 		obj := r.Original.Object
-		pvcName := obj.GetName()
-		namespace := obj.GetNamespace()
-		annotations := obj.GetAnnotations()
-		pvcKey := r.Original.ResourceKey()
+		switch r.Original.GVK.Kind {
+		case "StatefulSet":
+			for _, vct := range volumeClaimTemplates(r) {
+				report.Analyzed++
+				name, _, _ := unstructured.NestedString(vct, "metadata", "name")
+				spec, _ := vct["spec"].(map[string]interface{})
+				if opts.CheckMissingStorageClass && storageClassMissing(spec) {
+					report.addFinding(obj.GetName()+"/"+name, obj.GetNamespace(), PVIssueMissingStorageClass,
+						fmt.Sprintf("volumeClaimTemplate %s of StatefulSet %s has no storageClassName; the cluster default StorageClass is used",
+							name, obj.GetName()))
+				}
+			}
 
-		// ── Check: missing storage class ──────────────────────────────────────
-		if opts.CheckMissingStorageClass {
+		case "PersistentVolumeClaim":
+			report.Analyzed++
+			name, ns := obj.GetName(), obj.GetNamespace()
 			spec, _ := obj.Object["spec"].(map[string]interface{})
-			if spec != nil {
-				scVal, scPresent := spec["storageClassName"]
-				if !scPresent {
-					// Key absent entirely.
-					report.addFinding(PVCFinding{
-						PVCName:   pvcName,
-						Namespace: namespace,
-						Issue:     PVIssueMissingStorageClass,
-						Severity:  issueSeverity[PVIssueMissingStorageClass],
-						Message:   fmt.Sprintf("PVC %s/%s has no storageClassName field", namespace, pvcName),
-					})
-				} else if scStr, ok := scVal.(string); ok && scStr == "" {
-					// Key present but empty.
-					report.addFinding(PVCFinding{
-						PVCName:   pvcName,
-						Namespace: namespace,
-						Issue:     PVIssueMissingStorageClass,
-						Severity:  issueSeverity[PVIssueMissingStorageClass],
-						Message:   fmt.Sprintf("PVC %s/%s has empty storageClassName", namespace, pvcName),
-					})
-				}
-			}
-		}
-
-		// ── Determine owner workloads ──────────────────────────────────────────
-		ownerKinds, isOwned := pvcOwnerKinds(graph, pvcKey)
-
-		// ── Check: orphaned PVC ───────────────────────────────────────────────
-		if opts.CheckOrphanedPVC && !isOwned {
-			report.addFinding(PVCFinding{
-				PVCName:   pvcName,
-				Namespace: namespace,
-				Issue:     PVIssueOrphanedPVC,
-				Severity:  issueSeverity[PVIssueOrphanedPVC],
-				Message:   fmt.Sprintf("PVC %s/%s is not mounted by any workload", namespace, pvcName),
-			})
-		}
-
-		// ── Check: RWX misuse ─────────────────────────────────────────────────
-		if opts.CheckRWXMisuse && isOwned {
-			// Get access modes.
-			accessModes, _, _ := nestedStringSlice(obj.Object, "spec", "accessModes")
-			isRWX := false
-			for _, mode := range accessModes {
-				if mode == "ReadWriteMany" {
-					isRWX = true
-					break
-				}
+			if opts.CheckMissingStorageClass && storageClassMissing(spec) {
+				report.addFinding(name, ns, PVIssueMissingStorageClass,
+					fmt.Sprintf("PVC %s has no storageClassName; the cluster default StorageClass is used", name))
 			}
 
-			if isRWX {
-				// RWX is a misuse unless ALL owners are in SharedWorkloadKinds.
-				for _, kind := range ownerKinds {
-					if !isSharedKind(kind, opts.SharedWorkloadKinds) {
-						report.addFinding(PVCFinding{
-							PVCName:   pvcName,
-							Namespace: namespace,
-							Issue:     PVIssueRWXMisuse,
-							Severity:  issueSeverity[PVIssueRWXMisuse],
-							Message:   fmt.Sprintf("PVC %s/%s uses ReadWriteMany but is mounted by %s (not in SharedWorkloadKinds)", namespace, pvcName, kind),
-						})
-						break
+			owners := pvcOwners(graph, r.Original.ResourceKey())
+			if opts.CheckOrphanedPVC && len(owners) == 0 {
+				report.addFinding(name, ns, PVIssueOrphanedPVC,
+					fmt.Sprintf("PVC %s is not mounted by any workload", name))
+			}
+			if !opts.CheckAccessModes || !isReadWriteOnce(spec) {
+				continue
+			}
+
+			var multi []string
+			for _, key := range owners {
+				owner, ok := graph.GetResourceByKey(key)
+				if !ok {
+					continue
+				}
+				if reason, ok := multiPodReason(owner); ok {
+					multi = append(multi, reason)
+				}
+				if key.GVK.Kind == "Deployment" {
+					strategy, _, _ := unstructured.NestedString(owner.Original.Object.Object, "spec", "strategy", "type")
+					if strategy == "" || strategy == "RollingUpdate" {
+						report.addFinding(name, ns, PVIssueRWORollingUpdate,
+							fmt.Sprintf("Deployment %s mounts ReadWriteOnce PVC %s with the RollingUpdate strategy; "+
+								"the new pod can be scheduled on another node and wait for the volume. Use strategy Recreate",
+								key.Name, name))
 					}
 				}
 			}
-		}
-
-		// ── Check: no volume snapshot / backup ───────────────────────────────
-		if opts.CheckVolumeSnapshot && isOwned {
-			// Only flag for SharedWorkloadKinds (stateful workloads like StatefulSet).
-			hasSharedOwner := false
-			for _, kind := range ownerKinds {
-				if isSharedKind(kind, opts.SharedWorkloadKinds) {
-					hasSharedOwner = true
-					break
-				}
+			if len(owners) > 1 {
+				multi = append(multi, fmt.Sprintf("%d workloads", len(owners)))
 			}
-			if hasSharedOwner && !hasBackupAnnotation(annotations) {
-				report.addFinding(PVCFinding{
-					PVCName:   pvcName,
-					Namespace: namespace,
-					Issue:     PVIssueNoVolumeSnapshot,
-					Severity:  issueSeverity[PVIssueNoVolumeSnapshot],
-					Message:   fmt.Sprintf("PVC %s/%s on stateful workload has no backup/snapshot annotation", namespace, pvcName),
-				})
-			}
-		}
-
-		// ── Check: retain policy on ephemeral PVC ────────────────────────────
-		if opts.CheckRetainPolicy {
-			isEphemeral := annotations["dhg.deckhouse.io/ephemeral"] == "true"
-			if isEphemeral {
-				scName, _, _ := nestedString(obj.Object, "spec", "storageClassName")
-				if scName != "" {
-					policy, hasSC := scReclaimPolicy[scName]
-					if hasSC && strings.EqualFold(policy, "Retain") {
-						report.addFinding(PVCFinding{
-							PVCName:   pvcName,
-							Namespace: namespace,
-							Issue:     PVIssueRetainPolicyOnEphemeral,
-							Severity:  issueSeverity[PVIssueRetainPolicyOnEphemeral],
-							Message:   fmt.Sprintf("PVC %s/%s is ephemeral but StorageClass %q has Retain reclaim policy", namespace, pvcName, scName),
-						})
-					}
-				}
+			if len(multi) > 0 {
+				report.addFinding(name, ns, PVIssueRWOMultiPod,
+					fmt.Sprintf("ReadWriteOnce PVC %s is mounted by %s; pods on other nodes cannot attach it. "+
+						"Use ReadWriteMany storage or a StatefulSet volumeClaimTemplate", name, strings.Join(multi, ", ")))
 			}
 		}
 	}
-
 	return report
 }
 
-// nestedString extracts a string from an unstructured map by field path.
-func nestedString(obj map[string]interface{}, fields ...string) (string, bool, error) {
-	cur := obj
-	for i, f := range fields {
-		v, ok := cur[f]
-		if !ok {
-			return "", false, nil
-		}
-		if i == len(fields)-1 {
-			s, ok := v.(string)
-			return s, ok, nil
-		}
-		next, ok := v.(map[string]interface{})
-		if !ok {
-			return "", false, nil
-		}
-		cur = next
+// storageClassMissing reports whether a claim spec has no (or an empty)
+// storageClassName.
+func storageClassMissing(spec map[string]interface{}) bool {
+	sc, ok := spec["storageClassName"]
+	if !ok || sc == nil {
+		return true
 	}
-	return "", false, nil
+	s, isString := sc.(string)
+	return isString && s == ""
 }
 
-// nestedStringSlice extracts a []string from an unstructured field path.
-func nestedStringSlice(obj map[string]interface{}, fields ...string) ([]string, bool, error) {
-	cur := obj
-	for i, f := range fields {
-		v, ok := cur[f]
-		if !ok {
-			return nil, false, nil
-		}
-		if i == len(fields)-1 {
-			switch sl := v.(type) {
-			case []string:
-				return sl, true, nil
-			case []interface{}:
-				result := make([]string, 0, len(sl))
-				for _, item := range sl {
-					if s, ok := item.(string); ok {
-						result = append(result, s)
-					}
-				}
-				return result, true, nil
-			}
-			return nil, false, nil
-		}
-		next, ok := v.(map[string]interface{})
-		if !ok {
-			return nil, false, nil
-		}
-		cur = next
+// Markdown renders the persistent volume findings as a Markdown section,
+// most severe first.
+func (r *PVAnalysisReport) Markdown() string {
+	var b strings.Builder
+	b.WriteString("## Persistent volumes\n\n")
+	if r == nil || r.Analyzed == 0 {
+		b.WriteString("No PersistentVolumeClaims or volumeClaimTemplates.\n")
+		return b.String()
 	}
-	return nil, false, nil
-}
-
-// GeneratePVNotes returns a human-readable PV analysis report string.
-// Critical findings are listed before Warning findings.
-func GeneratePVNotes(report *PVAnalysisReport) string {
-	if report == nil || len(report.Findings) == 0 {
-		return ""
+	if len(r.Findings) == 0 {
+		fmt.Fprintf(&b, "No findings for %d claim(s).\n", r.Analyzed)
+		return b.String()
 	}
-
-	var sb strings.Builder
-	sb.WriteString("## PV Analysis\n\n")
-	sb.WriteString(fmt.Sprintf("Total findings: %d\n\n", report.TotalFindings))
-
-	// Separate by severity — CRITICAL first, then WARNING, then INFO.
-	sections := []struct {
-		label    string
-		severity PVIssueSeverity
-	}{
-		{"CRITICAL", PVIssueSeverityCritical},
-		{"WARNING", PVIssueSeverityWarning},
-		{"INFO", PVIssueSeverityInfo},
-	}
-
-	for _, sec := range sections {
-		var sectionFindings []PVCFinding
-		for _, f := range report.Findings {
-			if f.Severity == sec.severity {
-				sectionFindings = append(sectionFindings, f)
+	b.WriteString("| Severity | Claim | Finding |\n")
+	b.WriteString("|---|---|---|\n")
+	for _, sev := range []PVIssueSeverity{PVIssueSeverityCritical, PVIssueSeverityWarning, PVIssueSeverityInfo} {
+		for _, f := range r.Findings {
+			if f.Severity == sev {
+				fmt.Fprintf(&b, "| %s | %s | %s: %s |\n", strings.ToUpper(string(sev)), f.PVCName, f.Issue, f.Message)
 			}
 		}
-		if len(sectionFindings) == 0 {
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("### %s\n", sec.label))
-		for _, f := range sectionFindings {
-			sb.WriteString(fmt.Sprintf("- [%s] %s/%s: %s\n", f.Issue, f.Namespace, f.PVCName, f.Message))
-		}
-		sb.WriteString("\n")
 	}
-
-	return sb.String()
-}
-
-// InjectPVNotes injects a PV analysis section into the chart's NOTES.txt.
-// Idempotent: if the section already exists the chart is returned unchanged.
-// Returns a copy of the chart and a boolean indicating whether injection occurred.
-func InjectPVNotes(chart *types.GeneratedChart, report *PVAnalysisReport) (*types.GeneratedChart, bool) {
-	if chart == nil {
-		return nil, false
-	}
-	if report == nil {
-		result := copyChartTemplates(chart)
-		return result, false
-	}
-
-	const marker = "PV Analysis"
-	if strings.Contains(chart.Notes, marker) {
-		result := copyChartTemplates(chart)
-		return result, false
-	}
-
-	notes := GeneratePVNotes(report)
-	if notes == "" {
-		result := copyChartTemplates(chart)
-		return result, false
-	}
-
-	result := copyChartTemplates(chart)
-
-	var sb strings.Builder
-	if result.Notes != "" {
-		sb.WriteString(result.Notes)
-		if !strings.HasSuffix(result.Notes, "\n") {
-			sb.WriteString("\n")
-		}
-		sb.WriteString("\n")
-	}
-	sb.WriteString(notes)
-
-	result.Notes = sb.String()
-	return result, true
+	return b.String()
 }

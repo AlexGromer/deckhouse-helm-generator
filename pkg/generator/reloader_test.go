@@ -8,39 +8,6 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-func TestConfigReferences(t *testing.T) {
-	obj := map[string]interface{}{"spec": map[string]interface{}{"template": map[string]interface{}{"spec": map[string]interface{}{
-		"volumes": []interface{}{
-			map[string]interface{}{"name": "a", "configMap": map[string]interface{}{"name": "cm-volume"}},
-			map[string]interface{}{"name": "b", "secret": map[string]interface{}{"secretName": "secret-volume"}},
-			map[string]interface{}{"name": "c", "projected": map[string]interface{}{"sources": []interface{}{
-				map[string]interface{}{"configMap": map[string]interface{}{"name": "cm-projected"}},
-				map[string]interface{}{"secret": map[string]interface{}{"name": "secret-projected"}},
-			}}},
-			map[string]interface{}{"name": "d", "emptyDir": map[string]interface{}{}},
-		},
-		"initContainers": []interface{}{map[string]interface{}{
-			"envFrom": []interface{}{map[string]interface{}{"secretRef": map[string]interface{}{"name": "secret-envfrom"}}},
-		}},
-		"containers": []interface{}{map[string]interface{}{
-			"env": []interface{}{
-				map[string]interface{}{"name": "A", "valueFrom": map[string]interface{}{"configMapKeyRef": map[string]interface{}{"name": "cm-env", "key": "a"}}},
-				map[string]interface{}{"name": "B", "valueFrom": map[string]interface{}{"secretKeyRef": map[string]interface{}{"name": "secret-env", "key": "b"}}},
-				map[string]interface{}{"name": "C", "value": "plain"},
-			},
-			"envFrom": []interface{}{map[string]interface{}{"configMapRef": map[string]interface{}{"name": "cm-volume"}}},
-		}},
-	}}}}
-
-	cms, secrets := configReferences(obj)
-	if want := []string{"cm-env", "cm-projected", "cm-volume"}; !reflect.DeepEqual(cms, want) {
-		t.Errorf("configMaps = %v, want %v", cms, want)
-	}
-	if want := []string{"secret-env", "secret-envfrom", "secret-projected", "secret-volume"}; !reflect.DeepEqual(secrets, want) {
-		t.Errorf("secrets = %v, want %v", secrets, want)
-	}
-}
-
 func TestDetectReloaderCandidates(t *testing.T) {
 	candidates := DetectReloaderCandidates(obsTestGraph())
 	if len(candidates) != 1 || candidates[0].Key.Name != "web" || !reflect.DeepEqual(candidates[0].ConfigMaps, []string{"web-config"}) {
