@@ -2,173 +2,164 @@ package generator
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// CanaryStep describes a single canary rollout step.
+// Argo Rollouts progressive delivery (`dhg generate --with argo-rollouts`).
+//
+// For every generated Deployment the feature adds an Argo Rollout that
+// references it through `spec.workloadRef` (the Rollout reuses the
+// Deployment's pod template, so the chart keeps a single source of truth)
+// with a canary strategy whose steps come from `.Values.argoRollouts.steps`.
+// `.Values.argoRollouts.scaleDown` controls how Argo scales the referenced
+// Deployment down (never, onsuccess, progressively).
+//
+// If an HPA targets the Deployment, point it at the Rollout instead
+// (scaleTargetRef apiVersion argoproj.io/v1alpha1, kind Rollout).
+
+// CanaryStep is one canary step: shift Weight percent of the pods to the new
+// version, then pause. Pause is a duration ("1m"), "manual" for an indefinite
+// pause awaiting promotion, or "" for no pause.
 type CanaryStep struct {
 	Weight int
 	Pause  string
 }
 
-// ProgressiveDeliveryOptions configures progressive delivery (Argo Rollouts) generation.
-type ProgressiveDeliveryOptions struct {
-	MinReplicas             int
-	CanarySteps             []CanaryStep
-	IncludeAnalysisTemplate bool
-}
+var rolloutScaleDownModes = map[string]bool{"never": true, "onsuccess": true, "progressively": true}
 
-// ProgressiveDeliveryResult holds generated Argo Rollouts manifests.
-type ProgressiveDeliveryResult struct {
-	// Candidates is the list of eligible workload names.
-	Candidates []string
-	// Rollouts maps workload name → Rollout YAML.
-	Rollouts map[string]string
-	// AnalysisTemplates maps workload name → AnalysisTemplate YAML.
-	AnalysisTemplates map[string]string
-	NOTESTxt          string
-}
-
-var defaultCanarySteps = []CanaryStep{
-	{Weight: 20, Pause: "1m"},
-	{Weight: 50, Pause: "2m"},
-	{Weight: 100, Pause: ""},
-}
-
-// SuggestProgressiveDelivery scans the graph and generates Argo Rollouts YAML
-// for eligible Deployments (replicas >= MinReplicas).
-func SuggestProgressiveDelivery(graph *types.ResourceGraph, opts ProgressiveDeliveryOptions) *ProgressiveDeliveryResult {
-	result := &ProgressiveDeliveryResult{
-		Rollouts:          make(map[string]string),
-		AnalysisTemplates: make(map[string]string),
+// ParseCanarySteps parses steps written as "weight[:pause],..." such as
+// "20:1m,50:manual,80".
+func ParseCanarySteps(spec string) ([]CanaryStep, error) {
+	var steps []CanaryStep
+	for _, item := range strings.Split(spec, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		weightStr, pause, _ := strings.Cut(item, ":")
+		weight, err := strconv.Atoi(weightStr)
+		if err != nil || weight < 1 || weight > 100 {
+			return nil, fmt.Errorf("invalid canary step %q: weight must be an integer between 1 and 100", item)
+		}
+		if pause != "" && pause != "manual" && !reDuration.MatchString(pause) {
+			return nil, fmt.Errorf("invalid canary step %q: pause must be a duration such as 1m, or manual", item)
+		}
+		steps = append(steps, CanaryStep{Weight: weight, Pause: pause})
 	}
-
-	if graph == nil {
-		result.NOTESTxt = buildProgressiveDeliveryNOTESTxt(result)
-		return result
-	}
-
-	minReplicas := opts.MinReplicas
-	if minReplicas == 0 {
-		minReplicas = 2
-	}
-
-	steps := opts.CanarySteps
 	if len(steps) == 0 {
-		steps = defaultCanarySteps
+		return nil, fmt.Errorf("at least one canary step is required")
 	}
-
-	for _, r := range graph.Resources {
-		if r.Original.GVK.Kind != "Deployment" {
-			continue
-		}
-		name := r.Original.Object.GetName()
-		ns := r.Original.Object.GetNamespace()
-
-		// Check replicas.
-		replicas := int64(0)
-		spec, ok := r.Original.Object.Object["spec"].(map[string]interface{})
-		if ok {
-			if rep, ok := spec["replicas"].(int64); ok {
-				replicas = rep
-			}
-		}
-		if replicas < int64(minReplicas) {
-			continue
-		}
-
-		result.Candidates = append(result.Candidates, name)
-		result.Rollouts[name] = generateRolloutYAML(name, ns, steps)
-
-		if opts.IncludeAnalysisTemplate {
-			result.AnalysisTemplates[name] = generateAnalysisTemplateYAML(name, ns)
-		}
-	}
-
-	result.NOTESTxt = buildProgressiveDeliveryNOTESTxt(result)
-	return result
+	return steps, nil
 }
 
-func generateRolloutYAML(name, namespace string, steps []CanaryStep) string {
-	var sb strings.Builder
-	sb.WriteString("apiVersion: argoproj.io/v1alpha1\n")
-	sb.WriteString("kind: Rollout\n")
-	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: %s\n", name))
-	sb.WriteString(fmt.Sprintf("  namespace: %s\n", namespace))
-	sb.WriteString("spec:\n")
-	sb.WriteString("  strategy:\n")
-	sb.WriteString("    canary:\n")
-	sb.WriteString("      steps:\n")
-	for _, step := range steps {
-		sb.WriteString(fmt.Sprintf("        - setWeight: %d\n", step.Weight))
-		if step.Pause != "" {
-			sb.WriteString(fmt.Sprintf("        - pause: {duration: %s}\n", step.Pause))
+// canaryStepsValues converts steps into Rollout `steps` entries.
+func canaryStepsValues(steps []CanaryStep) []interface{} {
+	var out []interface{}
+	for _, s := range steps {
+		out = append(out, map[string]interface{}{"setWeight": s.Weight})
+		switch s.Pause {
+		case "":
+		case "manual":
+			out = append(out, map[string]interface{}{"pause": map[string]interface{}{}})
+		default:
+			out = append(out, map[string]interface{}{"pause": map[string]interface{}{"duration": s.Pause}})
 		}
 	}
-	return sb.String()
+	return out
 }
 
-func generateAnalysisTemplateYAML(name, namespace string) string {
-	var sb strings.Builder
-	sb.WriteString("apiVersion: argoproj.io/v1alpha1\n")
-	sb.WriteString("kind: AnalysisTemplate\n")
-	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: %s-analysis\n", name))
-	sb.WriteString(fmt.Sprintf("  namespace: %s\n", namespace))
-	sb.WriteString("spec:\n")
-	sb.WriteString("  metrics:\n")
-	sb.WriteString("    - name: success-rate\n")
-	sb.WriteString("      interval: 5m\n")
-	sb.WriteString("      successCondition: result[0] >= 0.95\n")
-	return sb.String()
-}
-
-func buildProgressiveDeliveryNOTESTxt(result *ProgressiveDeliveryResult) string {
-	candidateStr := strings.Join(result.Candidates, ", ")
-	if candidateStr == "" {
-		candidateStr = "none"
+// rolloutReplicas returns the replicas lines of a Deployment body (with their
+// guard, e.g. `if not .autoscaling`), or nil when they are not recognised.
+func rolloutReplicas(dep *resourceTemplate) []string {
+	spec := dep.topLevel("spec:")
+	sel := dep.child(spec, "  selector:")
+	if spec < 0 || sel < 0 {
+		return nil
 	}
-	return fmt.Sprintf(
-		"Progressive delivery candidates: %s. %d Rollout(s) generated. "+
-			"Requires Argo Rollouts installed in cluster.",
-		candidateStr, len(result.Rollouts),
+	region := dep.body[spec+1 : sel]
+	found := false
+	for _, l := range region {
+		switch {
+		case strings.HasPrefix(l, "  replicas: "):
+			found = true
+		case reOpener.MatchString(l) || reEnd.MatchString(l):
+		default:
+			return nil
+		}
+	}
+	if !found || !balancedControl(region) {
+		return nil
+	}
+	return append([]string(nil), region...)
+}
+
+// rolloutBody builds the Rollout document for one Deployment template.
+func rolloutBody(dep *resourceTemplate) []string {
+	b := []string{
+		"apiVersion: argoproj.io/v1alpha1",
+		"kind: Rollout",
+		"metadata:",
+		"  name: " + dep.name,
+		"  namespace: {{ $.Release.Namespace }}",
+	}
+	b = append(b, dep.labels()...)
+	b = append(b, "spec:")
+	b = append(b, rolloutReplicas(dep)...)
+	b = append(b, dep.selector()...)
+	b = append(b,
+		"  workloadRef:",
+		"    apiVersion: apps/v1",
+		// Quoted so that tools grepping for "kind: Deployment" do not take
+		// this Rollout for a Deployment template.
+		`    kind: "Deployment"`,
+		"    name: "+dep.name,
+		`    scaleDown: {{ $.Values.argoRollouts.scaleDown | default "progressively" }}`,
+		"  strategy:",
+		"    canary:",
+		"      {{- with $.Values.argoRollouts.steps }}",
+		"      steps:",
+		"        {{- toYaml . | nindent 8 }}",
+		"      {{- end }}",
 	)
+	return b
 }
 
-// InjectProgressiveDelivery injects Rollout and AnalysisTemplate YAMLs into a chart.
-// Returns (copy, 0) if chart is nil.
-func InjectProgressiveDelivery(chart *types.GeneratedChart, result *ProgressiveDeliveryResult) (*types.GeneratedChart, int) {
-	if chart == nil {
-		return nil, 0
+func applyArgoRolloutsFeature(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {
+	steps, err := ParseCanarySteps(fc.Param("steps"))
+	if err != nil {
+		return nil, err
+	}
+	scaleDown := fc.Param("scale-down")
+	if !rolloutScaleDownModes[scaleDown] {
+		return nil, fmt.Errorf("scale-down must be one of never, onsuccess, progressively; got %q", scaleDown)
 	}
 
-	newChart := copyChartTemplates(chart)
-	count := 0
-
-	if result == nil {
-		return newChart, 0
-	}
-
-	for name, yaml := range result.Rollouts {
-		path := fmt.Sprintf("templates/rollout-%s.yaml", strings.ToLower(name))
-		if _, exists := newChart.Templates[path]; exists {
+	out := cloneChart(chart)
+	changed := false
+	for _, dep := range resourceTemplates(chart, isKind("Deployment")) {
+		selector, labels := dep.selector(), dep.labels()
+		if selector == nil || !balancedControl(selector[1:]) || (labels != nil && !balancedControl(labels[1:])) {
 			continue
 		}
-		newChart.Templates[path] = yaml
-		count++
-	}
-
-	for name, yaml := range result.AnalysisTemplates {
-		path := fmt.Sprintf("templates/analysis-%s.yaml", strings.ToLower(name))
-		if _, exists := newChart.Templates[path]; exists {
-			continue
+		path := featureTemplatePath("argo-rollout", dep.path)
+		if err := addTemplate(out, path, dep.wrap("$.Values.argoRollouts.enabled", rolloutBody(dep))); err != nil {
+			return nil, err
 		}
-		newChart.Templates[path] = yaml
-		count++
+		changed = true
 	}
-
-	return newChart, count
+	if !changed {
+		return chart, nil
+	}
+	err = addFeatureValues(out, "argoRollouts", map[string]interface{}{
+		"enabled":   true,
+		"scaleDown": scaleDown,
+		"steps":     canaryStepsValues(steps),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
