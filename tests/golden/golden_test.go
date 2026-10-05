@@ -9,6 +9,7 @@ package golden
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
 
 var dhgBin string
@@ -121,6 +124,7 @@ var scenarios = []scenario{
 	{"auto-deps", []string{"--auto-deps"}},
 	{"kustomize", []string{"--kustomize"}},
 	{"monorepo", []string{"--monorepo"}},
+	{"post-renderer", []string{"--post-renderer"}},
 	{"separate-post", []string{"--mode", "separate", "--env-values", "--namespace-resources", "--feature-flags", "--spot"}},
 }
 
@@ -195,6 +199,22 @@ func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 			t.Errorf("helm template %s rendered no objects", rel)
 		}
 		rendered += n
+		for _, problem := range checkRendered(out) {
+			t.Errorf("helm template %s: %s", rel, problem)
+		}
+
+		// A generated post-renderer must run end to end when a kustomize
+		// implementation is available.
+		if script := filepath.Join(chart, "post-renderer", "kustomize.sh"); fileExists(script) && hasKustomize() {
+			for _, env := range []string{"dev", "staging", "prod"} {
+				out, err := run(helm, "template", "golden", chart, "--post-renderer", script, "--post-renderer-args", env)
+				if err != nil {
+					t.Errorf("helm template %s with post-renderer %s failed:\n%s", rel, env, out)
+				} else if countObjects(out) != n {
+					t.Errorf("post-renderer %s changed the object count: %d, want %d", env, countObjects(out), n)
+				}
+			}
+		}
 
 		// Every values overlay shipped with the chart must render too.
 		overlays, _ := filepath.Glob(filepath.Join(chart, "values-*.yaml"))
@@ -205,6 +225,76 @@ func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 		}
 	}
 	return rendered, complete
+}
+
+// checkRendered applies checks the Kubernetes API server would enforce but
+// `helm template` does not: every document is strict YAML (no duplicate keys,
+// which parsers resolve differently), and workload selectors match their pod
+// template labels.
+func checkRendered(stream string) []string {
+	var problems []string
+	for _, doc := range strings.Split(stream, "\n---") {
+		source := ""
+		if i := strings.Index(doc, "# Source: "); i >= 0 {
+			source = strings.SplitN(doc[i+len("# Source: "):], "\n", 2)[0]
+		}
+		var obj map[string]interface{}
+		if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: invalid YAML: %v", source, err))
+			continue
+		}
+		if obj == nil {
+			continue
+		}
+		if msg := selectorMismatch(obj); msg != "" {
+			problems = append(problems, fmt.Sprintf("%s: %s", source, msg))
+		}
+	}
+	return problems
+}
+
+// selectorMismatch reports a workload whose spec.selector.matchLabels are not
+// all present in its pod template labels (rejected by the API server).
+func selectorMismatch(obj map[string]interface{}) string {
+	switch obj["kind"] {
+	case "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet":
+	default:
+		return ""
+	}
+	selector := nested(obj, "spec", "selector", "matchLabels")
+	labels := nested(obj, "spec", "template", "metadata", "labels")
+	for k, v := range selector {
+		if fmt.Sprint(labels[k]) != fmt.Sprint(v) {
+			return fmt.Sprintf("selector %s=%v does not match pod template label %s=%v", k, v, k, labels[k])
+		}
+	}
+	return ""
+}
+
+func nested(obj map[string]interface{}, path ...string) map[string]interface{} {
+	cur := obj
+	for _, p := range path {
+		next, ok := cur[p].(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		cur = next
+	}
+	return cur
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func hasKustomize() bool {
+	for _, bin := range []string{"kustomize", "kubectl"} {
+		if _, err := exec.LookPath(bin); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // countObjects counts top-level Kubernetes objects in a YAML stream.

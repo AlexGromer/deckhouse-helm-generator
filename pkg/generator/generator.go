@@ -184,7 +184,12 @@ func WriteChart(chart *types.GeneratedChart, outputDir string) error {
 			if err := os.MkdirAll(filepath.Dir(absFilePath), 0755); err != nil {
 				return fmt.Errorf("failed to create directory for external file %s: %w", file.Path, err)
 			}
-			if err := os.WriteFile(absFilePath, []byte(file.Content), 0644); err != nil {
+			// Shell scripts (post-renderer, image mirroring) must be executable.
+			mode := os.FileMode(0644)
+			if strings.HasSuffix(file.Path, ".sh") {
+				mode = 0755
+			}
+			if err := os.WriteFile(absFilePath, []byte(file.Content), mode); err != nil {
 				return fmt.Errorf("failed to write external file %s: %w", file.Path, err)
 			}
 		}

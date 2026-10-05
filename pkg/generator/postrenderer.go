@@ -2,190 +2,81 @@ package generator
 
 import (
 	"fmt"
-	"strings"
+	"path"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// PostRendererEnv represents a deployment environment.
-type PostRendererEnv string
+// postRendererScript is a Helm post-renderer: Helm pipes the rendered
+// manifests to its stdin and installs what it prints. It applies the Kustomize
+// overlay of one environment on top of the rendered release.
+const postRendererScript = `#!/bin/sh
+# Helm post-renderer: applies a Kustomize overlay to the manifests Helm rendered.
+#
+#   helm install REL CHART --post-renderer ./post-renderer/kustomize.sh --post-renderer-args prod
+#
+# Without --post-renderer-args, DHG_OVERLAY (default: dev) selects the overlay.
+# Requires kustomize or kubectl in PATH.
+set -eu
+overlay="${1:-${DHG_OVERLAY:-dev}}"
+here="$(cd "$(dirname "$0")" && pwd)"
+if [ ! -d "$here/overlays/$overlay" ]; then
+  echo "post-renderer: unknown overlay '$overlay' (see $here/overlays)" >&2
+  exit 1
+fi
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+cp -R "$here/base" "$here/overlays" "$work/"
+cat > "$work/base/rendered.yaml"
+if command -v kustomize >/dev/null 2>&1; then
+  kustomize build "$work/overlays/$overlay"
+else
+  kubectl kustomize "$work/overlays/$overlay"
+fi
+`
 
-const (
-	PostRendererEnvDev     PostRendererEnv = "dev"
-	PostRendererEnvStaging PostRendererEnv = "staging"
-	PostRendererEnvProd    PostRendererEnv = "prod"
-)
+const postRendererBase = `# Helm's rendered manifests are written to rendered.yaml by kustomize.sh.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - rendered.yaml
+`
 
-// PostRendererOptions configures a post-renderer layout generation.
-type PostRendererOptions struct {
-	ChartName string
-	Namespace string
-	Envs      []PostRendererEnv
-}
+const postRendererOverlay = `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+# Environment-specific changes Helm values cannot express, e.g.:
+# patches:
+#   - target:
+#       kind: Deployment
+#     patch: |-
+#       - op: add
+#         path: /metadata/annotations/environment
+#         value: %s
+`
 
-// StrategicMergePatch represents a strategic merge patch definition.
-type StrategicMergePatch struct {
-	FileName string
-	Content  string
-}
-
-// JSON6902Target identifies the target resource for a JSON6902 patch.
-type JSON6902Target struct {
-	Group     string
-	Version   string
-	Kind      string
-	Name      string
-	Namespace string
-}
-
-// JSON6902Op represents a single JSON Patch operation.
-type JSON6902Op struct {
-	Op    string
-	Path  string
-	Value interface{}
-}
-
-// JSON6902Patch represents a JSON6902 patch definition.
-type JSON6902Patch struct {
-	FileName string
-	Target   JSON6902Target
-	Ops      []JSON6902Op
-}
-
-// PostRendererOverlay holds a per-environment Kustomize overlay.
-type PostRendererOverlay struct {
-	Env                   PostRendererEnv
-	ChartName             string
-	Namespace             string
-	StrategicMergePatches []StrategicMergePatch
-	JSON6902Patches       []JSON6902Patch
-}
-
-// PostRendererOutput holds the result of a post-renderer layout generation.
-type PostRendererOutput struct {
-	BaseDir  string
-	Overlays []*PostRendererOverlay
-}
-
-// ValidatePostRendererOptions validates options and returns a list of errors.
-func ValidatePostRendererOptions(opts PostRendererOptions) []error {
-	var errs []error
-	if opts.ChartName == "" {
-		errs = append(errs, fmt.Errorf("ChartName is required"))
+// GeneratePostRenderer returns the files of a Helm post-renderer layout
+// (post-renderer/kustomize.sh, base/ and one overlay per environment), to be
+// written next to the chart.
+func GeneratePostRenderer(envs []string) []types.ExternalFileInfo {
+	files := []types.ExternalFileInfo{
+		{Path: "post-renderer/kustomize.sh", Content: postRendererScript},
+		{Path: "post-renderer/base/kustomization.yaml", Content: postRendererBase},
 	}
-	return errs
-}
-
-// BuildDefaultPostRendererOptions returns default PostRendererOptions for a chart and namespace.
-func BuildDefaultPostRendererOptions(chart *types.GeneratedChart, namespace string) PostRendererOptions {
-	name := ""
-	if chart != nil {
-		name = chart.Name
-	}
-	return PostRendererOptions{
-		ChartName: name,
-		Namespace: namespace,
-		Envs:      []PostRendererEnv{PostRendererEnvDev, PostRendererEnvStaging, PostRendererEnvProd},
-	}
-}
-
-// GeneratePostRendererLayout generates a Kustomize overlay layout for multi-environment deployments.
-func GeneratePostRendererLayout(chart *types.GeneratedChart, opts PostRendererOptions) (*PostRendererOutput, error) {
-	if chart == nil {
-		return nil, fmt.Errorf("chart is nil")
-	}
-
-	baseDir := opts.ChartName + "-overlays"
-	if baseDir == "" {
-		baseDir = "chart-overlays"
-	}
-
-	overlays := make([]*PostRendererOverlay, 0, len(opts.Envs))
-	for _, env := range opts.Envs {
-		ns := opts.Namespace
-		if ns == "" {
-			ns = string(env)
-		}
-		overlays = append(overlays, &PostRendererOverlay{
-			Env:       env,
-			ChartName: opts.ChartName,
-			Namespace: ns,
+	for _, env := range envs {
+		files = append(files, types.ExternalFileInfo{
+			Path:    path.Join("post-renderer/overlays", env, "kustomization.yaml"),
+			Content: fmt.Sprintf(postRendererOverlay, env),
 		})
 	}
-
-	return &PostRendererOutput{
-		BaseDir:  baseDir,
-		Overlays: overlays,
-	}, nil
+	return files
 }
 
-// RenderOverlayKustomization renders a Kustomize kustomization.yaml for a given overlay.
-func RenderOverlayKustomization(overlay *PostRendererOverlay) (string, error) {
-	if overlay == nil {
-		return "", fmt.Errorf("overlay is nil")
-	}
-
-	var sb strings.Builder
-	sb.WriteString("apiVersion: kustomize.config.k8s.io/v1beta1\n")
-	sb.WriteString("kind: Kustomization\n")
-
-	if overlay.Namespace != "" {
-		sb.WriteString(fmt.Sprintf("namespace: %s\n", overlay.Namespace))
-	}
-
-	hasPatches := len(overlay.StrategicMergePatches) > 0 || len(overlay.JSON6902Patches) > 0
-	if hasPatches {
-		sb.WriteString("patches:\n")
-		for _, p := range overlay.StrategicMergePatches {
-			sb.WriteString(fmt.Sprintf("- path: %s\n", p.FileName))
-		}
-		for _, p := range overlay.JSON6902Patches {
-			sb.WriteString(fmt.Sprintf("- path: %s\n", p.FileName))
-			sb.WriteString("  target:\n")
-			if p.Target.Group != "" {
-				sb.WriteString(fmt.Sprintf("    group: %s\n", p.Target.Group))
-			}
-			if p.Target.Version != "" {
-				sb.WriteString(fmt.Sprintf("    version: %s\n", p.Target.Version))
-			}
-			if p.Target.Kind != "" {
-				sb.WriteString(fmt.Sprintf("    kind: %s\n", p.Target.Kind))
-			}
-			if p.Target.Name != "" {
-				sb.WriteString(fmt.Sprintf("    name: %s\n", p.Target.Name))
-			}
-		}
-	}
-
-	return sb.String(), nil
-}
-
-// InjectPostRenderer injects post-renderer overlay files into a chart's ExternalFiles.
-func InjectPostRenderer(chart *types.GeneratedChart, opts PostRendererOptions) (*types.GeneratedChart, int, error) {
-	if chart == nil {
-		return nil, 0, fmt.Errorf("chart is nil")
-	}
-
-	output, err := GeneratePostRendererLayout(chart, opts)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	result := copyChartTemplates(chart)
-	count := 0
-
-	for _, overlay := range output.Overlays {
-		kustomization, err := RenderOverlayKustomization(overlay)
-		if err != nil {
-			return nil, 0, fmt.Errorf("render overlay %q: %w", overlay.Env, err)
-		}
-		path := fmt.Sprintf("overlays/%s/kustomization.yaml", overlay.Env)
-		result.ExternalFiles = append(result.ExternalFiles, types.ExternalFileInfo{
-			Path:    path,
-			Content: kustomization,
-		})
-		count++
-	}
-
-	return result, count, nil
+// InjectPostRenderer adds the post-renderer layout to the chart's external
+// files. The input chart is not mutated.
+func InjectPostRenderer(chart *types.GeneratedChart, envs []string) *types.GeneratedChart {
+	out := cloneChart(chart)
+	out.ExternalFiles = append(out.ExternalFiles, GeneratePostRenderer(envs)...)
+	return out
 }

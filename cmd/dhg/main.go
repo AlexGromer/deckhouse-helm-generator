@@ -227,7 +227,7 @@ Examples:
 	cmd.Flags().BoolVar(&spot, "spot", false, "Inject spot/preemptible instance tolerations and PDB")
 	cmd.Flags().IntVar(&spotGracePeriod, "spot-grace-period", 15, "Grace period in seconds for spot instance preStop hook")
 	cmd.Flags().BoolVar(&kustomize, "kustomize", false, "Generate Kustomize layout with base and dev/staging/prod overlays")
-	cmd.Flags().BoolVar(&postRenderer, "post-renderer", false, "Generate Kustomize overlays compatible with Helm post-rendering (Flux CD postBuild)")
+	cmd.Flags().BoolVar(&postRenderer, "post-renderer", false, "Generate a Helm post-renderer (post-renderer/kustomize.sh) applying per-environment Kustomize overlays")
 	cmd.Flags().BoolVar(&autoDeps, "auto-deps", false, "Auto-detect infrastructure dependencies (PostgreSQL, Redis, etc.)")
 	cmd.Flags().IntVar(&tenantCount, "tenant-count", 2, "Number of tenant examples to scaffold (default: 2)")
 	cmd.Flags().StringVar(&templateStyle, "template-style", "standard", "Template output style: standard, helm")
@@ -714,6 +714,16 @@ drain:
 		}
 	}
 
+	// Helm post-renderer layout (post-renderer/kustomize.sh + overlays).
+	if opts.postRenderer {
+		if opts.verbose {
+			fmt.Println("\nGenerating Helm post-renderer layout (post-renderer/)...")
+		}
+		for i, chart := range charts {
+			charts[i] = generator.InjectPostRenderer(chart, []string{"dev", "staging", "prod"})
+		}
+	}
+
 	// Apply optional features (--with)
 	if len(opts.withFeatures) > 0 {
 		if opts.verbose {
@@ -895,16 +905,6 @@ drain:
 				fmt.Printf("  Written: kustomize layout for %s\n", chart.Name)
 			}
 		}
-	}
-
-	// Post-renderer mode: when enabled, Kustomize overlays are generated with
-	// Flux CD postBuild-compatible structure. Currently infrastructure-only.
-	if opts.postRenderer {
-		if opts.verbose {
-			fmt.Println("\nPost-renderer mode enabled: Kustomize overlays will be compatible with Helm post-rendering.")
-		}
-		// TODO: Integrate actual post-renderer pipeline (Flux CD postBuild, kustomize --enable-helm).
-		// For now, --post-renderer implies --kustomize behavior with Flux-compatible annotations.
 	}
 
 	fmt.Printf("\n✓ Successfully generated %d chart(s) in %s\n", len(charts), opts.outputDir)

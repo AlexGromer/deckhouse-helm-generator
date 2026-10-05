@@ -278,11 +278,10 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "%s.labels" $ | nindent 8 }}
-        app.kubernetes.io/component: %s
-        {{- with .podLabels }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
+        {{- /* Chart labels win over pod labels from values: the selector must match. */}}
+        {{- $podLabels := include "%s.labels" $ | fromYaml }}
+        {{- $_ := set $podLabels "app.kubernetes.io/component" "%s" }}
+        {{- toYaml (merge $podLabels (.podLabels | default dict)) | nindent 8 }}
     spec:
       {{- with $.Values.global.imagePullSecrets }}
       imagePullSecrets:
