@@ -526,3 +526,38 @@ func TestAutoNP_GroupNameSpecialChars(t *testing.T) {
 		}
 	}
 }
+
+func TestAutoNP_SelectsPodsByWorkloadSelector(t *testing.T) {
+	web := makeDeploymentWithEnv("web", "default", nil)
+	web.Original.Object.Object["spec"].(map[string]interface{})["selector"] = map[string]interface{}{
+		"matchLabels": map[string]interface{}{"app.kubernetes.io/name": "web"},
+	}
+	cron := makeProcessedResource("CronJob", "report", "default", nil)
+	cron.Original.Object.Object["spec"] = map[string]interface{}{
+		"jobTemplate": map[string]interface{}{"spec": map[string]interface{}{"template": map[string]interface{}{
+			"metadata": map[string]interface{}{"labels": map[string]interface{}{"job": "report"}},
+		}}},
+	}
+	unlabeledJob := makeProcessedResource("Job", "once", "default", nil)
+	group := makeGroup("web", "default", []*types.ProcessedResource{web, cron, unlabeledJob})
+	graph := buildGraph(group.Resources, nil)
+
+	np := GenerateAutoNetworkPolicies("app", graph, []*ServiceGroup{group})["templates/web-networkpolicy.yaml"]
+	docs := strings.Split(np, "---\n")
+	if len(docs) != 2 {
+		t.Fatalf("expected one policy per selectable workload, got %d:\n%s", len(docs), np)
+	}
+	for _, want := range []string{
+		"  name: {{ include \"app.fullname\" . }}-web-report-netpol\n",
+		"  podSelector:\n    matchLabels:\n      job: report\n",
+		"  name: {{ include \"app.fullname\" . }}-web-web-netpol\n",
+		"  podSelector:\n    matchLabels:\n      app.kubernetes.io/name: web\n",
+	} {
+		if !strings.Contains(np, want) {
+			t.Errorf("missing %q in:\n%s", want, np)
+		}
+	}
+	if strings.Contains(np, "app.kubernetes.io/component") || strings.Contains(np, "app.kubernetes.io/instance") {
+		t.Errorf("pods must be selected by their labels from the input:\n%s", np)
+	}
+}

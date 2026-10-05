@@ -88,7 +88,7 @@ func injectIngressTLSBlocks(content string) (string, bool) {
 	if nameMatch == nil || loc == nil {
 		return content, false
 	}
-	secretName := strings.TrimSpace(nameMatch[1]) + "-tls"
+	secretName := suffixedName(strings.TrimSpace(nameMatch[1]), "-tls")
 
 	annotations := strings.Join([]string{
 		`  {{- $dhgIngressTLS := $.Values.ingressTLS | default dict }}`,

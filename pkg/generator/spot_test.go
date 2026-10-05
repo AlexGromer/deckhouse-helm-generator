@@ -108,12 +108,14 @@ const spotDeploymentTemplate = `{{- $svc := .Values.services.web -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "app.fullname" $ }}-web
+  name: web
 spec:
+  selector:
+    {{- toYaml .selector | nindent 4 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/component: web
+        {{- toYaml (merge (dict) (.podLabels | default dict) (include "app.labels" $ | fromYaml)) | nindent 8 }}
     spec:
       containers:
         - name: web
@@ -126,10 +128,20 @@ spec:
 
 func spotTestChart(templates map[string]string) *types.GeneratedChart {
 	return &types.GeneratedChart{
-		Name:       "app",
-		ChartYAML:  "apiVersion: v2\nname: app\nversion: 0.1.0\n",
-		ValuesYAML: "services:\n  web:\n    enabled: true\n",
-		Templates:  templates,
+		Name:      "app",
+		ChartYAML: "apiVersion: v2\nname: app\nversion: 0.1.0\n",
+		ValuesYAML: `services:
+  web:
+    enabled: true
+    deployment:
+      podLabels:
+        app: web
+        tier: frontend
+      selector:
+        matchLabels:
+          app: web
+`,
+		Templates: templates,
 	}
 }
 
@@ -173,20 +185,73 @@ func TestInjectSpotConfig_PDBPerComponent(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a spot PDB for the Deployment")
 	}
-	for _, want := range []string{"kind: PodDisruptionBudget", "maxUnavailable: 1", "app.kubernetes.io/component: web", `include "app.selectorLabels"`, "if and .Values.spot .Values.spot.enabled"} {
+	for _, want := range []string{
+		"kind: PodDisruptionBudget", "maxUnavailable: 1", "  name: web-spot\n",
+		// The workload's own selector, in the workload's values scope.
+		"{{- $svc := .Values.services.web -}}\n{{- with $svc.deployment }}\n",
+		"  selector:\n    {{- toYaml .selector | nindent 4 }}\n",
+		"{{- if and $.Values.spot $.Values.spot.enabled }}",
+	} {
 		if !strings.Contains(pdb, want) {
 			t.Errorf("PDB missing %q:\n%s", want, pdb)
 		}
 	}
+	if strings.Contains(pdb, "selectorLabels") || strings.Contains(pdb, "app.kubernetes.io/component") {
+		t.Errorf("PDB must select the pods by the workload's selector:\n%s", pdb)
+	}
 
-	// A workload that already has a PDB does not get a second one.
-	chart.Templates["templates/web-pdb.yaml"] = "kind: PodDisruptionBudget\n    app.kubernetes.io/component: web\n"
+	// Applying spot again finds the spot PDB and adds no second one.
+	again, err := InjectSpotConfig(out, SpotConfig{Provider: SpotAWS, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Templates["templates/web-deployment-spot-pdb.yaml"] != pdb || len(again.Templates) != len(out.Templates) {
+		t.Error("a second application must not add PDBs")
+	}
+
+	// A workload that already has a PDB (from the input, rendered from its
+	// values) does not get a second one.
+	for name, sel := range map[string]string{
+		"matchLabels":      "        matchLabels:\n          tier: frontend\n",
+		"matchExpressions": "        matchExpressions:\n          - key: app\n            operator: In\n            values: [web, api]\n",
+	} {
+		chart := spotTestChart(map[string]string{
+			"templates/web-deployment.yaml": spotDeploymentTemplate,
+			"templates/web-pdb.yaml": `{{- $svc := .Values.services.web -}}
+{{- with $svc.pdb }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web-pdb
+spec:
+  {{- with .selector }}
+  selector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+`,
+		})
+		chart.ValuesYAML += "    pdb:\n      selector:\n" + sel
+		out, err = InjectSpotConfig(chart, SpotConfig{Provider: SpotAWS, Enabled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := out.Templates["templates/web-deployment-spot-pdb.yaml"]; ok {
+			t.Errorf("%s: spot PDB must not duplicate an existing PDB", name)
+		}
+	}
+
+	// A PDB selecting other pods does not count.
+	chart = spotTestChart(map[string]string{
+		"templates/web-deployment.yaml": spotDeploymentTemplate,
+		"templates/other-pdb.yaml":      "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata:\n  name: other\nspec:\n  selector:\n    matchLabels:\n      app: other\n",
+	})
 	out, err = InjectSpotConfig(chart, SpotConfig{Provider: SpotAWS, Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := out.Templates["templates/web-deployment-spot-pdb.yaml"]; ok {
-		t.Error("spot PDB must not duplicate an existing PDB")
+	if _, ok := out.Templates["templates/web-deployment-spot-pdb.yaml"]; !ok {
+		t.Error("a PDB of other pods must not prevent the spot PDB")
 	}
 }
 

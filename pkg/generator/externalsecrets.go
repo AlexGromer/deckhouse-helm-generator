@@ -25,6 +25,9 @@ type esoSecret struct {
 	Keys []string
 	// Type is the Secret type when it is not Opaque.
 	Type string
+	// Template is the chart template rendering the Secret manifest from the
+	// input, if the chart ships one.
+	Template string
 }
 
 // esoOwnedSecrets returns the Secrets the chart must provide via ESO.
@@ -119,6 +122,9 @@ func esoOwnedSecrets(chart *types.GeneratedChart, graph *types.ResourceGraph) []
 			continue
 		}
 		e := esoSecret{Name: name, Type: s.typ}
+		if s.manifest {
+			e.Template = s.owner
+		}
 		if !s.whole || s.known {
 			for key := range s.keys {
 				e.Keys = append(e.Keys, key)
@@ -191,7 +197,22 @@ func applyExternalSecretsFeature(chart *types.GeneratedChart, fc FeatureContext)
 	if err := secAddTemplate(out, "templates/external-secrets.yaml", externalSecretsTemplate(newSecChartHelpers(chart), apiVersion)); err != nil {
 		return nil, err
 	}
+	// The chart renders input Secrets under their own names, the names the
+	// ExternalSecrets target: such a Secret is left to the ExternalSecret
+	// while it is listed in externalSecrets.secrets.
+	for _, s := range secrets {
+		if content, ok := out.Templates[s.Template]; ok && s.Template != "" {
+			out.Templates[s.Template] = esoGuardSecretTemplate(content, s.Name)
+		}
+	}
 	return out, nil
+}
+
+// esoGuardSecretTemplate wraps a Secret template so that it renders only
+// while no ExternalSecret manages the Secret of that name.
+func esoGuardSecretTemplate(content, name string) string {
+	guard := fmt.Sprintf(`{{- if not (and .Values.externalSecrets .Values.externalSecrets.enabled (hasKey (.Values.externalSecrets.secrets | default dict) %q)) }}`, name)
+	return guard + "\n" + strings.TrimRight(content, "\n") + "\n{{- end }}\n"
 }
 
 func externalSecretsTemplate(h secChartHelpers, apiVersion string) string {

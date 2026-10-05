@@ -33,9 +33,10 @@ var envPortMapping = map[string]int{
 
 // GenerateAutoNetworkPolicies creates fine-grained NetworkPolicies from service relationship analysis.
 // Returns map of template path → template content.
-// Policies select the group's pods by the labels dhg's workload templates
-// set: app.kubernetes.io/instance and app.kubernetes.io/component. Groups
-// without workloads get no policy. chartName is the helper prefix.
+// Each workload of a group gets a policy selecting its pods by the
+// workload's selector from the input (generated charts keep the input's pod
+// labels and selectors). Groups without selectable workloads get no policy.
+// chartName is the helper prefix.
 func GenerateAutoNetworkPolicies(chartName string, graph *types.ResourceGraph, groups []*ServiceGroup) map[string]string {
 	if len(groups) == 0 {
 		return make(map[string]string)
@@ -56,13 +57,21 @@ func GenerateAutoNetworkPolicies(chartName string, graph *types.ResourceGraph, g
 		// Check if this group has cross-namespace relationships
 		crossNamespaces := crossNS[group.Name]
 
-		components := workloadComponents(group)
-		if len(components) == 0 {
+		var docs []string
+		workloads := selectableWorkloads(group)
+		for _, w := range workloads {
+			name := processor.ResourceNameSuffix(group.Name)
+			if len(workloads) > 1 {
+				name += "-" + w.name
+			}
+			docs = append(docs, generateNetworkPolicy(chartName, name, w.selector, ingressPorts, egressPorts, crossNamespaces))
+		}
+		if len(docs) == 0 {
 			continue
 		}
 
 		path := fmt.Sprintf("templates/%s-networkpolicy.yaml", group.Name)
-		result[path] = generateNetworkPolicy(chartName, group, components, ingressPorts, egressPorts, crossNamespaces)
+		result[path] = strings.Join(docs, "---\n")
 	}
 
 	return result
@@ -262,28 +271,23 @@ func buildCrossNamespaceIndex(graph *types.ResourceGraph, groups []*ServiceGroup
 	return result
 }
 
-// generateNetworkPolicy builds a NetworkPolicy YAML template.
-func generateNetworkPolicy(chartName string, group *ServiceGroup, components []string, ingressPorts, egressPorts []portInfo, crossNamespaces []string) string {
+// generateNetworkPolicy builds a NetworkPolicy YAML template for the pods
+// selected by podSelector. name is appended to the release name.
+func generateNetworkPolicy(chartName, name string, podSelector map[string]interface{}, ingressPorts, egressPorts []portInfo, crossNamespaces []string) string {
 	var sb strings.Builder
 
 	sb.WriteString("{{- if .Values.namespace.networkPolicy.enabled }}\n")
 	sb.WriteString("apiVersion: networking.k8s.io/v1\n")
 	sb.WriteString("kind: NetworkPolicy\n")
 	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-%s-netpol\n", chartName, processor.ResourceNameSuffix(group.Name)))
+	sb.WriteString(fmt.Sprintf("  name: {{ include \"%s.fullname\" . }}-%s-netpol\n", chartName, name))
 	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
 	sb.WriteString("  labels:\n")
 	sb.WriteString(fmt.Sprintf("    {{- include \"%s.labels\" . | nindent 4 }}\n", chartName))
 	sb.WriteString("spec:\n")
 	sb.WriteString("  podSelector:\n")
-	sb.WriteString("    matchLabels:\n")
-	sb.WriteString("      app.kubernetes.io/instance: {{ .Release.Name }}\n")
-	sb.WriteString("    matchExpressions:\n")
-	sb.WriteString("      - key: app.kubernetes.io/component\n")
-	sb.WriteString("        operator: In\n")
-	sb.WriteString("        values:\n")
-	for _, c := range components {
-		sb.WriteString(fmt.Sprintf("          - %s\n", c))
+	for _, l := range selectorYAML(podSelector, 4) {
+		sb.WriteString(l + "\n")
 	}
 	sb.WriteString("  policyTypes:\n")
 	sb.WriteString("    - Ingress\n")
@@ -346,28 +350,20 @@ func generateNetworkPolicy(chartName string, group *ServiceGroup, components []s
 	return sb.String()
 }
 
-// workloadComponents returns the sorted, distinct service names of the
-// group's pod-creating resources; dhg templates label pods with them as
-// app.kubernetes.io/component.
-func workloadComponents(group *ServiceGroup) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, r := range group.Resources {
-		switch r.Original.GVK.Kind {
-		case "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Rollout":
-		default:
-			continue
-		}
-		name := r.ServiceName
-		if name == "" && r.Original != nil && r.Original.Object != nil {
-			// Same fallback the processors use.
-			name = processor.SanitizeServiceName(r.Original.Object.GetName())
-		}
-		if name != "" && !seen[name] {
-			seen[name] = true
-			out = append(out, name)
+// policyWorkload is a workload of a group whose pods a policy can select.
+type policyWorkload struct {
+	name     string
+	selector map[string]interface{}
+}
+
+// selectableWorkloads returns the group's pod-creating resources with the
+// label selector of their pods, in a stable order.
+func selectableWorkloads(group *ServiceGroup) []policyWorkload {
+	var out []policyWorkload
+	for _, r := range sortedWorkloads(group) {
+		if sel := workloadPodSelector(r); len(sel) > 0 {
+			out = append(out, policyWorkload{name: r.Original.Object.GetName(), selector: sel})
 		}
 	}
-	sort.Strings(out)
 	return out
 }
