@@ -42,7 +42,7 @@ func (p *PDBProcessor) Process(ctx processor.Context, obj *unstructured.Unstruct
 
 	values := p.extractValues(obj)
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -84,8 +84,7 @@ func (p *PDBProcessor) extractValues(obj *unstructured.Unstructured) map[string]
 	return values
 }
 
-func (p *PDBProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
+func (p *PDBProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -93,17 +92,17 @@ func (p *PDBProcessor) generateTemplate(ctx processor.Context, serviceName strin
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
     app.kubernetes.io/component: %s
 spec:
-  {{- with .minAvailable }}
-  minAvailable: {{ . }}
+  {{- if hasKey . "minAvailable" }}
+  minAvailable: {{ .minAvailable }}
   {{- end }}
-  {{- with .maxUnavailable }}
-  maxUnavailable: {{ . }}
+  {{- if hasKey . "maxUnavailable" }}
+  maxUnavailable: {{ .maxUnavailable }}
   {{- end }}
   {{- with .unhealthyPodEvictionPolicy }}
   unhealthyPodEvictionPolicy: {{ . }}
@@ -114,5 +113,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
 }

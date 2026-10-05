@@ -535,4 +535,3 @@ func TestInjectIngressAnnotations_NoIngressTemplate_PreservesChart(t *testing.T)
 		t.Error("original Deployment template content was corrupted")
 	}
 }
-

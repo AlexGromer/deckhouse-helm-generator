@@ -56,14 +56,14 @@ func (f *Formatter) FormatMarkdown(report *Report) string {
 
 	// Each section
 	for _, section := range report.Sections {
-		sb.WriteString(fmt.Sprintf("## %s\n\n", section.Title))
+		fmt.Fprintf(&sb, "## %s\n\n", section.Title)
 		if section.Description != "" {
-			sb.WriteString(fmt.Sprintf("*%s*\n\n", section.Description))
+			fmt.Fprintf(&sb, "*%s*\n\n", section.Description)
 		}
 
 		for _, item := range section.Items {
-			sb.WriteString(fmt.Sprintf("### %s\n\n", item.Title))
-			sb.WriteString(fmt.Sprintf("```\n%s\n```\n\n", item.Content))
+			fmt.Fprintf(&sb, "### %s\n\n", item.Title)
+			fmt.Fprintf(&sb, "```\n%s\n```\n\n", item.Content)
 		}
 	}
 
@@ -117,7 +117,7 @@ func (f *Formatter) formatItem(item ReportItem) string {
 	lines := strings.Split(item.Content, "\n")
 	for _, line := range lines {
 		if line != "" {
-			sb.WriteString(fmt.Sprintf("  %s\n", line))
+			fmt.Fprintf(&sb, "  %s\n", line)
 		}
 	}
 
@@ -188,20 +188,20 @@ func (f *Formatter) FormatSummary(result *AnalysisResult) string {
 	sb.WriteString("\n\n")
 
 	// Key metrics
-	sb.WriteString(fmt.Sprintf("Services: %d | Resources: %d | Complexity: %d/100 | Coupling: %d/100\n",
+	fmt.Fprintf(&sb, "Services: %d | Resources: %d | Complexity: %d/100 | Coupling: %d/100\n",
 		result.Metrics.TotalServices,
 		result.Metrics.TotalResources,
 		result.Metrics.ComplexityScore,
-		result.Metrics.CouplingScore))
+		result.Metrics.CouplingScore)
 
 	// Primary pattern
-	sb.WriteString(fmt.Sprintf("Primary Pattern: %s (confidence: %d%%)\n",
+	fmt.Fprintf(&sb, "Primary Pattern: %s (confidence: %d%%)\n",
 		result.PrimaryPattern,
-		result.Confidence))
+		result.Confidence)
 
 	// Recommended strategy
-	sb.WriteString(fmt.Sprintf("Recommended Strategy: %s\n",
-		result.RecommendedStrategy))
+	fmt.Fprintf(&sb, "Recommended Strategy: %s\n",
+		result.RecommendedStrategy)
 
 	// Best practices summary
 	violations := 0

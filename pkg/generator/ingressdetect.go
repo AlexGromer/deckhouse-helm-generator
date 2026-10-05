@@ -256,4 +256,3 @@ func InjectIngressAnnotations(chart *types.GeneratedChart, controller IngressCon
 		ExternalFiles: chart.ExternalFiles,
 	}
 }
-

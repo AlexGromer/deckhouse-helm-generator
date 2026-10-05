@@ -3,6 +3,7 @@ package generator
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 
@@ -56,7 +57,7 @@ func (g *UmbrellaGenerator) Generate(ctx context.Context, graph *types.ResourceG
 		// Generate subchart using SeparateGenerator logic.
 		subOpts := opts
 		subOpts.ChartName = group.Name
-		subchart, err := sep.generateChartForGroup(group, subOpts)
+		subchart, err := sep.generateChartForGroup(group, subOpts, opts.ChartName)
 		if err != nil {
 			return nil, fmt.Errorf("generating subchart for %s: %w", group.Name, err)
 		}
@@ -130,12 +131,38 @@ func (g *UmbrellaGenerator) generateParentChart(
 	}
 	valuesYAML := "# Umbrella chart — override subchart values per-service here\n" + string(valuesBytes)
 
+	var externalFiles []types.ExternalFileInfo
+	if opts.IncludeREADME {
+		externalFiles = append(externalFiles, types.ExternalFileInfo{
+			Path: "README.md", Content: helm.GenerateREADME(chartMeta, allValues),
+		})
+	}
+
 	return &types.GeneratedChart{
-		Name:       chartName,
-		Path:       opts.OutputDir,
-		ChartYAML:  helm.GenerateChartYAML(chartMeta),
-		ValuesYAML: valuesYAML,
-		Templates:  map[string]string{},
-		Helpers:    helm.GenerateHelpers(chartName),
+		ExternalFiles: externalFiles,
+		Name:          chartName,
+		Path:          opts.OutputDir,
+		ChartYAML:     helm.GenerateChartYAML(chartMeta),
+		ValuesYAML:    valuesYAML,
+		Templates:     map[string]string{},
+		Helpers:       helm.GenerateHelpers(chartName),
+		Notes:         umbrellaNotes(chartName, deps),
+		ValuesSchema: func() string {
+			if !opts.IncludeSchema {
+				return ""
+			}
+			return helm.InferValuesSchema(allValues)
+		}(),
 	}, nil
+}
+
+// umbrellaNotes lists the subcharts of the umbrella and whether each is enabled.
+func umbrellaNotes(chartName string, deps []helm.Dependency) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%s has been deployed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.\n\n", chartName)
+	sb.WriteString("Components:\n")
+	for _, d := range deps {
+		fmt.Fprintf(&sb, "  - %s: {{ if (index .Values %q).enabled }}enabled{{ else }}disabled{{ end }}\n", d.Name, d.Name)
+	}
+	return sb.String()
 }

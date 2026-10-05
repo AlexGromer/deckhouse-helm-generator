@@ -82,8 +82,8 @@ func (a *Analyzer) Analyze(graph *types.ResourceGraph) *AnalysisResult {
 // computeMetrics calculates various metrics from the graph.
 func (a *Analyzer) computeMetrics(graph *types.ResourceGraph) AnalysisMetrics {
 	metrics := AnalysisMetrics{
-		TotalServices:  len(graph.Groups),
-		TotalResources: len(graph.Resources),
+		TotalServices:   len(graph.Groups),
+		TotalResources:  len(graph.Resources),
 		ResourcesByKind: make(map[string]int),
 	}
 
@@ -338,11 +338,11 @@ func (a *Analyzer) generateRecommendations(result *AnalysisResult, graph *types.
 
 	// Recommendation 1: Chart strategy
 	recommendations = append(recommendations, Recommendation{
-		Priority: 1,
-		Title:    "Recommended Chart Strategy",
-		Description: getStrategyDescription(result.RecommendedStrategy),
-		Rationale: getStrategyRationale(result.RecommendedStrategy, result.PrimaryPattern, result.Metrics),
-		Impact:    "Optimal chart organization for maintainability and deployment flexibility",
+		Priority:            1,
+		Title:               "Recommended Chart Strategy",
+		Description:         getStrategyDescription(result.RecommendedStrategy),
+		Rationale:           getStrategyRationale(result.RecommendedStrategy, result.PrimaryPattern, result.Metrics),
+		Impact:              "Optimal chart organization for maintainability and deployment flexibility",
 		ImplementationSteps: getStrategySteps(result.RecommendedStrategy),
 	})
 
@@ -356,11 +356,11 @@ func (a *Analyzer) generateRecommendations(result *AnalysisResult, graph *types.
 
 	if nonCompliantCount > 0 {
 		recommendations = append(recommendations, Recommendation{
-			Priority: 2,
-			Title:    "Address Best Practice Violations",
+			Priority:    2,
+			Title:       "Address Best Practice Violations",
 			Description: formatString("Found %d best practice violations that should be addressed", nonCompliantCount),
-			Rationale: "Following Kubernetes and Helm best practices improves security, reliability, and maintainability",
-			Impact:    "Reduced operational issues and improved security posture",
+			Rationale:   "Following Kubernetes and Helm best practices improves security, reliability, and maintainability",
+			Impact:      "Reduced operational issues and improved security posture",
 			ImplementationSteps: []string{
 				"Review the best practices section for specific violations",
 				"Prioritize critical and error severity items",
@@ -372,11 +372,11 @@ func (a *Analyzer) generateRecommendations(result *AnalysisResult, graph *types.
 	// Recommendation 3: Complexity management
 	if result.Metrics.ComplexityScore > 60 {
 		recommendations = append(recommendations, Recommendation{
-			Priority: 3,
-			Title:    "Consider Complexity Reduction",
+			Priority:    3,
+			Title:       "Consider Complexity Reduction",
 			Description: formatString("Complexity score is %d/100, consider modularization", result.Metrics.ComplexityScore),
-			Rationale: "High complexity increases maintenance burden and deployment risk",
-			Impact:    "Easier troubleshooting, faster deployments, reduced cognitive load",
+			Rationale:   "High complexity increases maintenance burden and deployment risk",
+			Impact:      "Easier troubleshooting, faster deployments, reduced cognitive load",
 			ImplementationSteps: []string{
 				"Break down large services into smaller components",
 				"Use subcharts for independent modules",

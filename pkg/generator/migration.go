@@ -247,14 +247,14 @@ func GenerateMigrationPlan(drift DriftReport) string {
 
 	var b strings.Builder
 	b.WriteString("# Migration Plan\n\n")
-	b.WriteString(fmt.Sprintf("Total changes: %d\n\n", drift.TotalItems()))
+	fmt.Fprintf(&b, "Total changes: %d\n\n", drift.TotalItems())
 
 	// Phase 1: Additions (safe)
 	additions := collectByCategory(drift, DriftAdded)
 	if len(additions) > 0 {
 		b.WriteString("## Phase 1: Additions (low risk)\n\n")
 		for i, item := range additions {
-			b.WriteString(fmt.Sprintf("%d. Add `%s` — %s\n", i+1, item.Path, item.Detail))
+			fmt.Fprintf(&b, "%d. Add `%s` — %s\n", i+1, item.Path, item.Detail)
 		}
 		b.WriteString("\n")
 	}
@@ -264,7 +264,7 @@ func GenerateMigrationPlan(drift DriftReport) string {
 	if len(changes) > 0 {
 		b.WriteString("## Phase 2: Modifications (medium risk)\n\n")
 		for i, item := range changes {
-			b.WriteString(fmt.Sprintf("%d. Update `%s` — %s\n", i+1, item.Path, item.Detail))
+			fmt.Fprintf(&b, "%d. Update `%s` — %s\n", i+1, item.Path, item.Detail)
 		}
 		b.WriteString("\n")
 	}
@@ -274,7 +274,7 @@ func GenerateMigrationPlan(drift DriftReport) string {
 	if len(removals) > 0 {
 		b.WriteString("## Phase 3: Removals (high risk — verify before applying)\n\n")
 		for i, item := range removals {
-			b.WriteString(fmt.Sprintf("%d. Remove `%s` — %s\n", i+1, item.Path, item.Detail))
+			fmt.Fprintf(&b, "%d. Remove `%s` — %s\n", i+1, item.Path, item.Detail)
 		}
 		b.WriteString("\n")
 	}
@@ -389,8 +389,8 @@ func GenerateValuesMigration(oldValues, newValues string) string {
 	for _, m := range mappings {
 		newPath := toValuesPath(m.newKey)
 		oldPath := toValuesPath(m.oldKey)
-		b.WriteString(fmt.Sprintf("{{- $_%s := coalesce %s %s -}}\n",
-			sanitizeVarName(m.newKey), newPath, oldPath))
+		fmt.Fprintf(&b, "{{- $_%s := coalesce %s %s -}}\n",
+			sanitizeVarName(m.newKey), newPath, oldPath)
 	}
 
 	b.WriteString("{{- end -}}\n")

@@ -301,9 +301,9 @@ func makeTestChart(name, chartYAML, valuesYAML string, templates map[string]stri
 		templates = make(map[string]string)
 	}
 	return &types.GeneratedChart{
-		Name:      name,
-		ChartYAML: chartYAML,
+		Name:       name,
+		ChartYAML:  chartYAML,
 		ValuesYAML: valuesYAML,
-		Templates: templates,
+		Templates:  templates,
 	}
 }

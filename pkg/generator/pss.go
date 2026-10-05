@@ -1,33 +1,10 @@
 package generator
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
-
-// PSSLevel represents a Pod Security Standards level.
-type PSSLevel string
-
-const (
-	PSSRestricted PSSLevel = "restricted"
-	PSSBaseline   PSSLevel = "baseline"
-	PSSPrivileged PSSLevel = "privileged"
-)
-
-// PSSViolation describes a missing security field in a template.
-type PSSViolation struct {
-	Template string
-	Field    string
-	Message  string
-}
-
-// PSSReport is the result of a PSS compliance analysis.
-type PSSReport struct {
-	Level      PSSLevel
-	Violations []PSSViolation
-}
 
 // pssWorkloadKinds lists Kubernetes workload kinds that contain pod templates.
 var pssWorkloadKinds = []string{"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}
@@ -44,54 +21,6 @@ var restrictedFields = []string{
 // baselineFields are the security fields required for PSS baseline level.
 var baselineFields = []string{
 	"runAsNonRoot",
-}
-
-// AnalyzePSSCompliance scans chart templates and classifies the PSS level.
-func AnalyzePSSCompliance(chart *types.GeneratedChart) PSSReport {
-	var violations []PSSViolation
-	hasWorkload := false
-
-	for path, content := range chart.Templates {
-		if !isWorkloadTemplate(content) {
-			continue
-		}
-		hasWorkload = true
-
-		for _, field := range restrictedFields {
-			if !strings.Contains(content, field) {
-				violations = append(violations, PSSViolation{
-					Template: path,
-					Field:    field,
-					Message:  fmt.Sprintf("template %s missing %s", path, field),
-				})
-			}
-		}
-	}
-
-	if !hasWorkload {
-		return PSSReport{Level: PSSRestricted}
-	}
-
-	if len(violations) == 0 {
-		return PSSReport{Level: PSSRestricted}
-	}
-
-	// Check if at least baseline fields are present.
-	hasBaselineViolation := false
-	for _, v := range violations {
-		for _, bf := range baselineFields {
-			if v.Field == bf {
-				hasBaselineViolation = true
-				break
-			}
-		}
-	}
-
-	if hasBaselineViolation {
-		return PSSReport{Level: PSSPrivileged, Violations: violations}
-	}
-
-	return PSSReport{Level: PSSBaseline, Violations: violations}
 }
 
 // InjectPSSDefaults adds Pod Security Standards fields to workload templates.

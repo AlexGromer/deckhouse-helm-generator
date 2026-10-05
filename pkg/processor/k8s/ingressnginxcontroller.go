@@ -93,16 +93,7 @@ metadata:
   name: %s
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  ingressClass: {{ .ingressClass | quote }}
-  inlet: {{ .inlet | quote }}
-  {{- with .controllerVersion }}
-  controllerVersion: {{ . | quote }}
-  {{- end }}
-  {{- with .resourcesRequests }}
-  resourcesRequests:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-{{- end }}
-`, sanitized, serviceName, ctx.ChartName)
+%s{{- end }}
+`, sanitized, processor.ObjectName(obj.GetName()), ctx.ChartName,
+		processor.SpecOverlay(".", "ingressClass", "inlet", "controllerVersion", "resourcesRequests"))
 }

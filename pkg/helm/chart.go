@@ -2,24 +2,26 @@
 package helm
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
 // ChartMetadata contains metadata for a Helm chart.
 type ChartMetadata struct {
-	Name        string
-	Version     string
-	APIVersion  string
-	AppVersion  string
-	Description string
-	Type        string
-	Keywords    []string
-	Home        string
-	Sources     []string
-	Maintainers []Maintainer
-	Icon        string
-	KubeVersion string
+	Name         string
+	Version      string
+	APIVersion   string
+	AppVersion   string
+	Description  string
+	Type         string
+	Keywords     []string
+	Home         string
+	Sources      []string
+	Maintainers  []Maintainer
+	Icon         string
+	KubeVersion  string
 	Dependencies []Dependency
 }
 
@@ -50,57 +52,57 @@ func GenerateChartYAML(meta ChartMetadata) string {
 	if apiVersion == "" {
 		apiVersion = "v2"
 	}
-	sb.WriteString(fmt.Sprintf("apiVersion: %s\n", apiVersion))
+	fmt.Fprintf(&sb, "apiVersion: %s\n", apiVersion)
 
 	// Name
-	sb.WriteString(fmt.Sprintf("name: %s\n", meta.Name))
+	fmt.Fprintf(&sb, "name: %s\n", meta.Name)
 
 	// Description
 	description := meta.Description
 	if description == "" {
 		description = fmt.Sprintf("A Helm chart for %s", meta.Name)
 	}
-	sb.WriteString(fmt.Sprintf("description: %s\n", description))
+	fmt.Fprintf(&sb, "description: %s\n", description)
 
 	// Type
 	chartType := meta.Type
 	if chartType == "" {
 		chartType = "application"
 	}
-	sb.WriteString(fmt.Sprintf("type: %s\n", chartType))
+	fmt.Fprintf(&sb, "type: %s\n", chartType)
 
 	// Version
 	version := meta.Version
 	if version == "" {
 		version = "0.1.0"
 	}
-	sb.WriteString(fmt.Sprintf("version: %s\n", version))
+	fmt.Fprintf(&sb, "version: %s\n", version)
 
 	// AppVersion
 	appVersion := meta.AppVersion
 	if appVersion == "" {
 		appVersion = "1.0.0"
 	}
-	sb.WriteString(fmt.Sprintf("appVersion: %s\n", appVersion))
+	fmt.Fprintf(&sb, "appVersion: %s\n", appVersion)
 
 	// Keywords
 	if len(meta.Keywords) > 0 {
 		sb.WriteString("keywords:\n")
 		for _, kw := range meta.Keywords {
-			sb.WriteString(fmt.Sprintf("  - %s\n", kw))
+			fmt.Fprintf(&sb, "  - %s\n", kw)
 		}
 	}
 
 	// Home
 	if meta.Home != "" {
-		sb.WriteString(fmt.Sprintf("home: %s\n", meta.Home))
+		fmt.Fprintf(&sb, "home: %s\n", meta.Home)
 	}
 
 	// Sources
 	if len(meta.Sources) > 0 {
 		sb.WriteString("sources:\n")
 		for _, src := range meta.Sources {
-			sb.WriteString(fmt.Sprintf("  - %s\n", src))
+			fmt.Fprintf(&sb, "  - %s\n", src)
 		}
 	}
 
@@ -108,44 +110,44 @@ func GenerateChartYAML(meta ChartMetadata) string {
 	if len(meta.Maintainers) > 0 {
 		sb.WriteString("maintainers:\n")
 		for _, m := range meta.Maintainers {
-			sb.WriteString(fmt.Sprintf("  - name: %s\n", m.Name))
+			fmt.Fprintf(&sb, "  - name: %s\n", m.Name)
 			if m.Email != "" {
-				sb.WriteString(fmt.Sprintf("    email: %s\n", m.Email))
+				fmt.Fprintf(&sb, "    email: %s\n", m.Email)
 			}
 			if m.URL != "" {
-				sb.WriteString(fmt.Sprintf("    url: %s\n", m.URL))
+				fmt.Fprintf(&sb, "    url: %s\n", m.URL)
 			}
 		}
 	}
 
 	// Icon
 	if meta.Icon != "" {
-		sb.WriteString(fmt.Sprintf("icon: %s\n", meta.Icon))
+		fmt.Fprintf(&sb, "icon: %s\n", meta.Icon)
 	}
 
 	// KubeVersion
 	if meta.KubeVersion != "" {
-		sb.WriteString(fmt.Sprintf("kubeVersion: %s\n", meta.KubeVersion))
+		fmt.Fprintf(&sb, "kubeVersion: %s\n", meta.KubeVersion)
 	}
 
 	// Dependencies
 	if len(meta.Dependencies) > 0 {
 		sb.WriteString("dependencies:\n")
 		for _, dep := range meta.Dependencies {
-			sb.WriteString(fmt.Sprintf("  - name: %s\n", dep.Name))
-			sb.WriteString(fmt.Sprintf("    version: %s\n", dep.Version))
-			sb.WriteString(fmt.Sprintf("    repository: %s\n", dep.Repository))
+			fmt.Fprintf(&sb, "  - name: %s\n", dep.Name)
+			fmt.Fprintf(&sb, "    version: %s\n", dep.Version)
+			fmt.Fprintf(&sb, "    repository: %s\n", dep.Repository)
 			if dep.Condition != "" {
-				sb.WriteString(fmt.Sprintf("    condition: %s\n", dep.Condition))
+				fmt.Fprintf(&sb, "    condition: %s\n", dep.Condition)
 			}
 			if len(dep.Tags) > 0 {
 				sb.WriteString("    tags:\n")
 				for _, tag := range dep.Tags {
-					sb.WriteString(fmt.Sprintf("      - %s\n", tag))
+					fmt.Fprintf(&sb, "      - %s\n", tag)
 				}
 			}
 			if dep.Alias != "" {
-				sb.WriteString(fmt.Sprintf("    alias: %s\n", dep.Alias))
+				fmt.Fprintf(&sb, "    alias: %s\n", dep.Alias)
 			}
 		}
 	}
@@ -165,7 +167,7 @@ func GenerateNOTES(chartName string, services []string, ctx NOTESContext) string
 	var sb strings.Builder
 
 	sb.WriteString("===================================================================\n")
-	sb.WriteString(fmt.Sprintf("  %s has been installed successfully!\n", chartName))
+	fmt.Fprintf(&sb, "  %s has been installed successfully!\n", chartName)
 	sb.WriteString("===================================================================\n\n")
 
 	sb.WriteString("To verify the deployment, run:\n\n")
@@ -174,7 +176,7 @@ func GenerateNOTES(chartName string, services []string, ctx NOTESContext) string
 	if len(services) > 0 {
 		sb.WriteString("Installed services:\n\n")
 		for _, svc := range services {
-			sb.WriteString(fmt.Sprintf("  - %s\n", svc))
+			fmt.Fprintf(&sb, "  - %s\n", svc)
 		}
 		sb.WriteString("\n")
 	}
@@ -204,7 +206,7 @@ func GenerateNOTES(chartName string, services []string, ctx NOTESContext) string
 	}
 	if !hasLB && !ctx.HasIngress {
 		sb.WriteString("Access the application via port-forward:\n\n")
-		sb.WriteString(fmt.Sprintf("  kubectl port-forward svc/%s 8080:80 -n {{ .Release.Namespace }}\n\n", chartName))
+		fmt.Fprintf(&sb, "  kubectl port-forward svc/%s 8080:80 -n {{ .Release.Namespace }}\n\n", chartName)
 	}
 
 	// Dynamic section: Auth configuration notice
@@ -214,42 +216,41 @@ func GenerateNOTES(chartName string, services []string, ctx NOTESContext) string
 	}
 
 	sb.WriteString("To customize the installation, edit the values.yaml file and upgrade:\n\n")
-	sb.WriteString(fmt.Sprintf("  helm upgrade {{ .Release.Name }} ./%s -n {{ .Release.Namespace }}\n\n", chartName))
+	fmt.Fprintf(&sb, "  helm upgrade {{ .Release.Name }} ./%s -n {{ .Release.Namespace }}\n\n", chartName)
 
 	sb.WriteString("For more information, see the chart README.md\n")
 
 	return sb.String()
 }
 
-// GenerateREADME generates a basic README.md for the chart.
-func GenerateREADME(meta ChartMetadata, services []string) string {
+// GenerateREADME generates the chart's README.md with a parameter table
+// built from its default values (one row per leaf, dot-notation paths usable
+// with --set).
+func GenerateREADME(meta ChartMetadata, values map[string]interface{}) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# %s\n\n", meta.Name))
+	fmt.Fprintf(&sb, "# %s\n\n", meta.Name)
 
 	description := meta.Description
 	if description == "" {
 		description = fmt.Sprintf("A Helm chart for %s", meta.Name)
 	}
-	sb.WriteString(fmt.Sprintf("%s\n\n", description))
+	fmt.Fprintf(&sb, "%s\n\n", description)
 
 	sb.WriteString("## Installation\n\n")
 	sb.WriteString("```bash\n")
-	sb.WriteString(fmt.Sprintf("helm install my-release ./%s\n", meta.Name))
+	fmt.Fprintf(&sb, "helm install my-release ./%s\n", meta.Name)
 	sb.WriteString("```\n\n")
 
-	sb.WriteString("## Configuration\n\n")
-	sb.WriteString("The following table lists the configurable parameters:\n\n")
-	sb.WriteString("| Parameter | Description | Default |\n")
-	sb.WriteString("|-----------|-------------|----------|\n")
-	sb.WriteString("| `global.imageRegistry` | Global Docker image registry | `\"\"` |\n")
-	sb.WriteString("| `global.imagePullSecrets` | Global image pull secrets | `[]` |\n\n")
-
-	if len(services) > 0 {
-		sb.WriteString("## Services\n\n")
-		sb.WriteString("This chart includes the following services:\n\n")
-		for _, svc := range services {
-			sb.WriteString(fmt.Sprintf("- **%s**: Enabled by default\n", svc))
+	sb.WriteString("## Parameters\n\n")
+	rows := flattenValues("", values, nil)
+	if len(rows) == 0 {
+		sb.WriteString("This chart has no configurable parameters.\n\n")
+	} else {
+		sb.WriteString("| Parameter | Default |\n")
+		sb.WriteString("|-----------|---------|\n")
+		for _, r := range rows {
+			fmt.Fprintf(&sb, "| `%s` | `%s` |\n", r[0], r[1])
 		}
 		sb.WriteString("\n")
 	}
@@ -260,7 +261,41 @@ func GenerateREADME(meta ChartMetadata, services []string) string {
 	sb.WriteString("```\n\n")
 
 	sb.WriteString("## Generated by\n\n")
-	sb.WriteString("This chart was generated by [Deckhouse Helm Generator](https://github.com/deckhouse/deckhouse-helm-generator)\n")
+	sb.WriteString("This chart was generated by [Deckhouse Helm Generator](https://github.com/AlexGromer/deckhouse-helm-generator)\n")
 
 	return sb.String()
+}
+
+// flattenValues lists leaf values as (path, JSON default) rows, sorted by
+// path. Lists and empty maps are leaves; long defaults are shortened.
+func flattenValues(prefix string, v interface{}, rows [][2]string) [][2]string {
+	if m, ok := v.(map[string]interface{}); ok && len(m) > 0 {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			// --set syntax: dots inside a key are escaped.
+			path := strings.ReplaceAll(k, ".", `\.`)
+			if prefix != "" {
+				path = prefix + "." + path
+			}
+			rows = flattenValues(path, m[k], rows)
+		}
+		return rows
+	}
+	if prefix == "" {
+		return rows
+	}
+	data, err := json.Marshal(v)
+	def := string(data)
+	if err != nil {
+		def = fmt.Sprint(v)
+	}
+	if len(def) > 60 {
+		def = def[:57] + "..."
+	}
+	def = strings.NewReplacer("|", "\\|", "`", "'").Replace(def)
+	return append(rows, [2]string{prefix, def})
 }

@@ -651,90 +651,9 @@ func TestWorkload_BatchProdProfile(t *testing.T) {
 // ============================================================
 
 // TestWorkload_MergeEnvProfiles_DeepMerge — nested maps are merged, not replaced
-func TestWorkload_MergeEnvProfiles_DeepMerge(t *testing.T) {
-	base := map[string]interface{}{
-		"resources": map[string]interface{}{
-			"requests": map[string]interface{}{
-				"cpu":    "100m",
-				"memory": "128Mi",
-			},
-		},
-	}
-	overrides := map[string]interface{}{
-		"resources": map[string]interface{}{
-			"limits": map[string]interface{}{
-				"cpu":    "500m",
-				"memory": "512Mi",
-			},
-		},
-	}
-
-	merged := MergeEnvProfiles(base, overrides)
-
-	resources, ok := merged["resources"]
-	if !ok {
-		t.Fatal("merged result missing 'resources' key")
-	}
-	resMap, ok := resources.(map[string]interface{})
-	if !ok {
-		t.Fatal("merged 'resources' is not a map")
-	}
-
-	// Both requests (from base) and limits (from overrides) must be present
-	if _, hasRequests := resMap["requests"]; !hasRequests {
-		t.Error("deep merge: 'resources.requests' from base was lost")
-	}
-	if _, hasLimits := resMap["limits"]; !hasLimits {
-		t.Error("deep merge: 'resources.limits' from overrides was not merged in")
-	}
-}
 
 // TestWorkload_MergeEnvProfiles_OverrideScalars — scalar values from override win;
 // map values are merged (not replaced by the override's map).
-func TestWorkload_MergeEnvProfiles_OverrideScalars(t *testing.T) {
-	base := map[string]interface{}{
-		"replicaCount": 1,
-		"logLevel":     "info",
-		"nested": map[string]interface{}{
-			"keyA": "from-base",
-			"keyB": "base-only",
-		},
-	}
-	overrides := map[string]interface{}{
-		"replicaCount": 3,
-		"nested": map[string]interface{}{
-			"keyA": "from-override",
-		},
-	}
-
-	merged := MergeEnvProfiles(base, overrides)
-
-	// Scalar override: replicaCount from override wins
-	if toInt(merged["replicaCount"]) != 3 {
-		t.Errorf("scalar override: replicaCount got %v, want 3", merged["replicaCount"])
-	}
-
-	// Scalar not overridden: logLevel from base is preserved
-	if merged["logLevel"] != "info" {
-		t.Errorf("unoverridden scalar: logLevel got %v, want info", merged["logLevel"])
-	}
-
-	// Deep map merge: nested.keyA overridden, nested.keyB from base preserved
-	nested, ok := merged["nested"]
-	if !ok {
-		t.Fatal("merged result missing 'nested' key")
-	}
-	nestedMap, ok := nested.(map[string]interface{})
-	if !ok {
-		t.Fatal("merged 'nested' is not a map")
-	}
-	if nestedMap["keyA"] != "from-override" {
-		t.Errorf("nested scalar override: keyA got %v, want from-override", nestedMap["keyA"])
-	}
-	if nestedMap["keyB"] != "base-only" {
-		t.Errorf("nested base preservation: keyB got %v, want base-only", nestedMap["keyB"])
-	}
-}
 
 // ============================================================
 // Workload Test Helpers

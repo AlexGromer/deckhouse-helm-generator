@@ -1,320 +1,28 @@
 package extractor
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
-	"sigs.k8s.io/yaml"
 )
 
-// GitAuthType represents the type of git authentication.
-type GitAuthType string
-
-const (
-	GitAuthTypeToken      GitAuthType = "token"
-	GitAuthTypeSSHKey     GitAuthType = "ssh-key"
-	GitAuthTypeCredHelper GitAuthType = "credential-helper"
-)
-
-// TokenAuth holds token-based authentication details.
-type TokenAuth struct {
-	// Token is the personal access token or OAuth token.
-	Token string
-	// Username is optional; defaults to "git" for GitHub/GitLab.
-	Username string
-}
-
-// SSHKeyAuth holds SSH key authentication details.
-type SSHKeyAuth struct {
-	// KeyPath is the path to the SSH private key.
-	KeyPath string
-	// Passphrase is the key passphrase (empty if none).
-	Passphrase string
-	// KnownHostsPath overrides the default known_hosts file.
-	KnownHostsPath string
-}
-
-// CredentialHelper holds git credential helper configuration.
-type CredentialHelper struct {
-	// Helper is the credential helper command (e.g., "store", "cache", "osxkeychain").
-	Helper string
-}
-
-// GitAuth holds authentication details for git operations.
-type GitAuth struct {
-	// Type indicates which auth method to use.
-	Type GitAuthType
-
-	// Token holds token-based auth (when Type == GitAuthTypeToken).
-	Token *TokenAuth
-
-	// SSHKey holds SSH key auth (when Type == GitAuthTypeSSHKey).
-	SSHKey *SSHKeyAuth
-
-	// CredHelper holds credential helper config (when Type == GitAuthTypeCredHelper).
-	CredHelper *CredentialHelper
-}
-
-// Validate checks if the GitAuth is properly configured.
-func (a *GitAuth) Validate() error {
-	if a == nil {
-		return nil
-	}
-	switch a.Type {
-	case GitAuthTypeToken:
-		if a.Token == nil || a.Token.Token == "" {
-			return fmt.Errorf("token auth requires a non-empty token")
-		}
-	case GitAuthTypeSSHKey:
-		if a.SSHKey == nil || a.SSHKey.KeyPath == "" {
-			return fmt.Errorf("ssh-key auth requires a key path")
-		}
-		if _, err := os.Stat(a.SSHKey.KeyPath); err != nil {
-			return fmt.Errorf("ssh key not found at %s: %w", a.SSHKey.KeyPath, err)
-		}
-	case GitAuthTypeCredHelper:
-		if a.CredHelper == nil || a.CredHelper.Helper == "" {
-			return fmt.Errorf("credential-helper auth requires a helper name")
-		}
-	case "":
-		// No auth — fine for public repos
-	default:
-		return fmt.Errorf("unknown git auth type: %q", a.Type)
-	}
-	return nil
-}
-
-// GitOpsManifestType represents the type of a detected GitOps manifest.
-type GitOpsManifestType string
-
-const (
-	GitOpsManifestArgoApplication   GitOpsManifestType = "argocd-application"
-	GitOpsManifestFluxGitRepository GitOpsManifestType = "flux-gitrepository"
-	GitOpsManifestFluxKustomization GitOpsManifestType = "flux-kustomization"
-)
-
-// GitOpsManifest represents a detected GitOps manifest in a directory.
-type GitOpsManifest struct {
-	// Type is the kind of GitOps manifest.
-	Type GitOpsManifestType
-
-	// Path is the file path where the manifest was found.
-	Path string
-
-	// Name is the metadata.name of the manifest.
-	Name string
-
-	// Namespace is the metadata.namespace of the manifest.
-	Namespace string
-}
-
-// GitOpsExtractorConfig holds configuration for extracting resources from a git repository.
-type GitOpsExtractorConfig struct {
-	// RepoURL is the URL of the git repository.
-	RepoURL string
-
-	// Branch is the branch to check out (default: main).
-	Branch string
-
-	// SSHKey is the path to an SSH private key for authentication.
-	SSHKey string
-
-	// Depth limits the clone depth (0 = full clone).
-	Depth int
-
-	// Auth holds structured authentication config.
-	Auth *GitAuth
-
-	// ExcludeDirs lists directory names to exclude during YAML discovery.
-	ExcludeDirs []string
-}
-
-// DefaultExcludeDirs returns the default directories to exclude from YAML discovery.
-func DefaultExcludeDirs() []string {
-	return []string{".git", "vendor", "node_modules", ".github", ".gitlab"}
-}
-
-// Validate checks if the GitOpsExtractorConfig is valid.
-func (c *GitOpsExtractorConfig) Validate() error {
-	if c.RepoURL == "" {
-		return fmt.Errorf("repo URL is required")
-	}
-
-	if c.Depth < 0 {
-		return fmt.Errorf("clone depth must be non-negative, got %d", c.Depth)
-	}
-
-	if c.Auth != nil {
-		if err := c.Auth.Validate(); err != nil {
-			return fmt.Errorf("auth config: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// DiscoverYAMLFiles recursively discovers YAML files under rootDir,
-// excluding directories whose names appear in the excludes list.
-// If excludes is nil, DefaultExcludeDirs() is used.
-func DiscoverYAMLFiles(rootDir string, excludes []string) ([]string, error) {
-	if excludes == nil {
-		excludes = DefaultExcludeDirs()
-	}
-
-	// Build a set for O(1) lookup
-	excludeSet := make(map[string]bool, len(excludes))
-	for _, e := range excludes {
-		excludeSet[e] = true
-	}
-
-	info, err := os.Stat(rootDir)
-	if err != nil {
-		return nil, fmt.Errorf("cannot access root dir %s: %w", rootDir, err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("%s is not a directory", rootDir)
-	}
-
-	var files []string
-	err = filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if excludeSet[info.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if isYAMLFile(path) {
-			files = append(files, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walking %s: %w", rootDir, err)
-	}
-
-	return files, nil
-}
-
-// DetectKustomization checks if a kustomization.yaml (or kustomization.yml, Kustomization)
-// exists in the given directory.
-func DetectKustomization(dir string) bool {
-	kustomizationFiles := []string{
-		"kustomization.yaml",
-		"kustomization.yml",
-		"Kustomization",
-	}
-	for _, name := range kustomizationFiles {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			return true
-		}
-	}
-	return false
-}
-
-// DetectGitOpsManifests scans a directory (non-recursively) for GitOps manifests:
-// ArgoCD Application, Flux GitRepository, Flux Kustomization.
-func DetectGitOpsManifests(dir string) ([]GitOpsManifest, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("reading directory %s: %w", dir, err)
-	}
-
-	var manifests []GitOpsManifest
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !isYAMLFile(entry.Name()) {
-			continue
-		}
-
-		path := filepath.Join(dir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue // skip unreadable files
-		}
-
-		// Split multi-doc YAML
-		docs := splitYAMLDocuments(data)
-		for _, doc := range docs {
-			manifest, ok := parseGitOpsManifest(doc, path)
-			if ok {
-				manifests = append(manifests, manifest)
-			}
-		}
-	}
-
-	return manifests, nil
-}
-
-// parseGitOpsManifest tries to parse a YAML document as a GitOps manifest.
-func parseGitOpsManifest(data []byte, path string) (GitOpsManifest, bool) {
-	var meta struct {
-		APIVersion string `json:"apiVersion"`
-		Kind       string `json:"kind"`
-		Metadata   struct {
-			Name      string `json:"name"`
-			Namespace string `json:"namespace"`
-		} `json:"metadata"`
-	}
-
-	if err := yaml.Unmarshal(data, &meta); err != nil {
-		return GitOpsManifest{}, false
-	}
-
-	var manifestType GitOpsManifestType
-
-	switch {
-	case meta.Kind == "Application" && strings.HasPrefix(meta.APIVersion, "argoproj.io/"):
-		manifestType = GitOpsManifestArgoApplication
-	case meta.Kind == "GitRepository" && strings.HasPrefix(meta.APIVersion, "source.toolkit.fluxcd.io/"):
-		manifestType = GitOpsManifestFluxGitRepository
-	case meta.Kind == "Kustomization" && strings.HasPrefix(meta.APIVersion, "kustomize.toolkit.fluxcd.io/"):
-		manifestType = GitOpsManifestFluxKustomization
-	default:
-		return GitOpsManifest{}, false
-	}
-
-	return GitOpsManifest{
-		Type:      manifestType,
-		Path:      path,
-		Name:      meta.Metadata.Name,
-		Namespace: meta.Metadata.Namespace,
-	}, true
-}
-
-// GitOpsExtractor extracts Kubernetes resources from a git repository.
+// GitOpsExtractor extracts manifests from a Git repository: it makes a
+// shallow clone with the git CLI and reads the YAML files below GitPath like
+// the file extractor, with the same filters.
 type GitOpsExtractor struct {
-	config GitOpsExtractorConfig
+	// git is the git executable; tests may override it.
+	git string
 }
 
-// NewGitOpsExtractor creates a new gitops extractor with default config.
+// NewGitOpsExtractor creates a GitOps extractor using git from PATH.
 func NewGitOpsExtractor() *GitOpsExtractor {
-	return &GitOpsExtractor{
-		config: GitOpsExtractorConfig{
-			Branch: "main",
-		},
-	}
-}
-
-// NewGitOpsExtractorWithConfig creates a new gitops extractor with the given config.
-func NewGitOpsExtractorWithConfig(cfg GitOpsExtractorConfig) *GitOpsExtractor {
-	if cfg.Branch == "" {
-		cfg.Branch = "main"
-	}
-	return &GitOpsExtractor{config: cfg}
-}
-
-// Config returns a copy of the extractor's configuration.
-func (e *GitOpsExtractor) Config() GitOpsExtractorConfig {
-	return e.config
+	return &GitOpsExtractor{git: "git"}
 }
 
 // Source returns the source type.
@@ -322,25 +30,101 @@ func (e *GitOpsExtractor) Source() types.Source {
 	return types.SourceGitOps
 }
 
-// Validate checks if the git repository configuration is valid.
-func (e *GitOpsExtractor) Validate(ctx context.Context, opts Options) error {
-	if err := e.config.Validate(); err != nil {
-		return fmt.Errorf("invalid gitops config: %w", err)
+// Validate checks the options and that git is available.
+func (e *GitOpsExtractor) Validate(_ context.Context, opts Options) error {
+	if opts.GitURL == "" {
+		return fmt.Errorf("--git-repo is required for gitops extraction")
 	}
-	return fmt.Errorf("gitops extraction not yet implemented (use --file instead)")
+	if filepath.IsAbs(opts.GitPath) || strings.Contains(filepath.ToSlash(opts.GitPath), "..") {
+		return fmt.Errorf("--git-path must be a relative path inside the repository, got %q", opts.GitPath)
+	}
+	if opts.GitAuth != nil && opts.GitAuth.SSHKeyPath != "" {
+		if _, err := os.Stat(opts.GitAuth.SSHKeyPath); err != nil {
+			return fmt.Errorf("ssh key: %w", err)
+		}
+	}
+	if _, err := exec.LookPath(e.git); err != nil {
+		return fmt.Errorf("gitops extraction needs the git CLI: %w", err)
+	}
+	return nil
 }
 
-// Extract extracts resources from a git repository.
+// Extract clones the repository and streams the manifests found in it.
 func (e *GitOpsExtractor) Extract(ctx context.Context, opts Options) (<-chan *types.ExtractedResource, <-chan error) {
-	resources := make(chan *types.ExtractedResource)
-	errors := make(chan error, 1)
+	resources := make(chan *types.ExtractedResource, 100)
+	errs := make(chan error, 10)
 
 	go func() {
 		defer close(resources)
-		defer close(errors)
+		defer close(errs)
 
-		errors <- fmt.Errorf("gitops extraction not yet implemented (use --file instead)")
+		dir, err := os.MkdirTemp("", "dhg-gitops-")
+		if err != nil {
+			errs <- err
+			return
+		}
+		defer os.RemoveAll(dir)
+
+		if err := e.clone(ctx, opts, dir); err != nil {
+			errs <- err
+			return
+		}
+
+		root := filepath.Join(dir, filepath.FromSlash(opts.GitPath))
+		if _, err := os.Stat(root); err != nil {
+			errs <- fmt.Errorf("path %q not found in %s: %w", opts.GitPath, opts.GitURL, err)
+			return
+		}
+
+		fileOpts := opts
+		fileOpts.Paths = []string{root}
+		fileOpts.Recursive = true
+		fileRes, fileErrs := NewFileExtractor().Extract(ctx, fileOpts)
+		ref := opts.GitURL
+		if opts.GitBranch != "" {
+			ref += "@" + opts.GitBranch
+		}
+		for fileRes != nil || fileErrs != nil {
+			select {
+			case r, ok := <-fileRes:
+				if !ok {
+					fileRes = nil
+					continue
+				}
+				rel, _ := filepath.Rel(dir, r.SourcePath)
+				r.Source = types.SourceGitOps
+				r.SourcePath = ref + ":" + filepath.ToSlash(rel)
+				resources <- r
+			case err, ok := <-fileErrs:
+				if !ok {
+					fileErrs = nil
+					continue
+				}
+				errs <- err
+			}
+		}
 	}()
 
-	return resources, errors
+	return resources, errs
+}
+
+// clone makes a shallow, single-branch clone of opts.GitURL into dir.
+func (e *GitOpsExtractor) clone(ctx context.Context, opts Options, dir string) error {
+	args := []string{"clone", "--depth", "1", "--single-branch"}
+	if opts.GitBranch != "" {
+		args = append(args, "--branch", opts.GitBranch)
+	}
+	args = append(args, "--", opts.GitURL, dir)
+
+	cmd := exec.CommandContext(ctx, e.git, args...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if opts.GitAuth != nil && opts.GitAuth.SSHKeyPath != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %q -o IdentitiesOnly=yes", opts.GitAuth.SSHKeyPath))
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git clone %s failed: %w: %s", opts.GitURL, err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }

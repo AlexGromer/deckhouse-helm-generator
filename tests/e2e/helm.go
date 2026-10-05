@@ -210,26 +210,6 @@ func WithTemplateValues(path string) TemplateOption {
 	return func(c *templateConfig) { c.valuesFile = path }
 }
 
-// WithTemplateNamespace specifies the namespace for template.
-func WithTemplateNamespace(ns string) TemplateOption {
-	return func(c *templateConfig) { c.namespace = ns }
-}
-
-// WithTemplateSet adds a --set value.
-func WithTemplateSet(kv string) TemplateOption {
-	return func(c *templateConfig) { c.setValues = append(c.setValues, kv) }
-}
-
-// WithTemplateShowOnly filters to a single template.
-func WithTemplateShowOnly(path string) TemplateOption {
-	return func(c *templateConfig) { c.showOnly = path }
-}
-
-// WithTemplateDebug enables debug output.
-func WithTemplateDebug() TemplateOption {
-	return func(c *templateConfig) { c.debug = true }
-}
-
 type installConfig struct {
 	valuesFile      string
 	namespace       string
@@ -242,34 +222,14 @@ type installConfig struct {
 // InstallOption configures an install invocation.
 type InstallOption func(*installConfig)
 
-// WithInstallValues specifies a values file.
-func WithInstallValues(path string) InstallOption {
-	return func(c *installConfig) { c.valuesFile = path }
-}
-
 // WithInstallNamespace specifies the namespace.
 func WithInstallNamespace(ns string) InstallOption {
 	return func(c *installConfig) { c.namespace = ns }
 }
 
-// WithInstallCreateNamespace creates the namespace if it doesn't exist.
-func WithInstallCreateNamespace() InstallOption {
-	return func(c *installConfig) { c.createNamespace = true }
-}
-
-// WithInstallSet adds a --set value.
-func WithInstallSet(kv string) InstallOption {
-	return func(c *installConfig) { c.setValues = append(c.setValues, kv) }
-}
-
 // WithInstallDebug enables debug output.
 func WithInstallDebug() InstallOption {
 	return func(c *installConfig) { c.debug = true }
-}
-
-// WithInstallDryRunServer uses server-side dry-run (requires K8s cluster).
-func WithInstallDryRunServer() InstallOption {
-	return func(c *installConfig) { c.dryRun = "server" }
 }
 
 // ============================================================
@@ -297,16 +257,6 @@ func findHelmBinary() string {
 	}
 
 	return ""
-}
-
-// RequireHelm skips the test if helm is not available.
-func RequireHelm(t *testing.T) *HelmClient {
-	t.Helper()
-	client, err := NewHelmClient()
-	if err != nil {
-		t.Skipf("Skipping: %v", err)
-	}
-	return client
 }
 
 // WriteValuesFile writes a values override YAML file to a temporary location.

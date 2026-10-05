@@ -43,7 +43,7 @@ func (p *VPAProcessor) Process(ctx processor.Context, obj *unstructured.Unstruct
 
 	values, deps := p.extractValues(obj)
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -107,8 +107,7 @@ func (p *VPAProcessor) extractValues(obj *unstructured.Unstructured) (map[string
 	return values, deps
 }
 
-func (p *VPAProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
+func (p *VPAProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -116,7 +115,7 @@ func (p *VPAProcessor) generateTemplate(ctx processor.Context, serviceName strin
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -125,7 +124,7 @@ spec:
   targetRef:
     apiVersion: {{ .targetRef.apiVersion | default "apps/v1" }}
     kind: {{ .targetRef.kind | default "Deployment" }}
-    name: %s-{{ .targetRef.name }}
+    name: {{ .targetRef.name }}
   {{- with .updatePolicy }}
   updatePolicy:
     {{- toYaml . | nindent 4 }}
@@ -136,5 +135,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName, fullnameHelper)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
 }

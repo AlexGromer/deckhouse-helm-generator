@@ -627,13 +627,13 @@ func (c *StatefulSetPatternChecker) Check(graph *types.ResourceGraph) []BestPrac
 			recommendations = append(recommendations, "Review StatefulSet documentation for production best practices")
 
 			practices = append(practices, BestPractice{
-				ID:          "BP-SS-001",
-				Title:       "StatefulSet Best Practices",
-				Description: "StatefulSet is missing recommended configuration items",
-				Category:    c.Category(),
-				Severity:    SeverityWarning,
-				Compliant:   false,
-				Recommendations: recommendations,
+				ID:                "BP-SS-001",
+				Title:             "StatefulSet Best Practices",
+				Description:       "StatefulSet is missing recommended configuration items",
+				Category:          c.Category(),
+				Severity:          SeverityWarning,
+				Compliant:         false,
+				Recommendations:   recommendations,
 				AffectedResources: []types.ResourceKey{key},
 				AutoFixable:       false,
 			})
@@ -706,13 +706,13 @@ func (c *DaemonSetPatternChecker) Check(graph *types.ResourceGraph) []BestPracti
 			recommendations = append(recommendations, "DaemonSets run on every node — resource limits are critical")
 
 			practices = append(practices, BestPractice{
-				ID:          "BP-DS-001",
-				Title:       "DaemonSet Best Practices",
-				Description: "DaemonSet is missing recommended configuration items",
-				Category:    c.Category(),
-				Severity:    SeverityWarning,
-				Compliant:   false,
-				Recommendations: recommendations,
+				ID:                "BP-DS-001",
+				Title:             "DaemonSet Best Practices",
+				Description:       "DaemonSet is missing recommended configuration items",
+				Category:          c.Category(),
+				Severity:          SeverityWarning,
+				Compliant:         false,
+				Recommendations:   recommendations,
 				AffectedResources: []types.ResourceKey{key},
 				AutoFixable:       false,
 			})

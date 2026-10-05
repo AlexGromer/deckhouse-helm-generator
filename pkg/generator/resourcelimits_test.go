@@ -54,7 +54,7 @@ spec:
 
 func TestResourceLimits_WebProfile(t *testing.T) {
 	chart := makeChartWithContainerNoResources()
-	result := InjectResourceLimits(chart, WorkloadWeb)
+	result := applyResourceProfile(chart, WorkloadWeb)
 
 	deployment := result.Templates["templates/deployment.yaml"]
 	requiredFields := []string{
@@ -80,7 +80,7 @@ func TestResourceLimits_WebProfile(t *testing.T) {
 
 func TestResourceLimits_DatabaseProfile(t *testing.T) {
 	chart := makeChartWithContainerNoResources()
-	result := InjectResourceLimits(chart, WorkloadDatabase)
+	result := applyResourceProfile(chart, WorkloadDatabase)
 
 	deployment := result.Templates["templates/deployment.yaml"]
 	if !strings.Contains(deployment, "500m") {
@@ -96,7 +96,7 @@ func TestResourceLimits_DatabaseProfile(t *testing.T) {
 
 func TestResourceLimits_WorkerProfile(t *testing.T) {
 	chart := makeChartWithContainerNoResources()
-	result := InjectResourceLimits(chart, WorkloadWorker)
+	result := applyResourceProfile(chart, WorkloadWorker)
 
 	deployment := result.Templates["templates/deployment.yaml"]
 	if !strings.Contains(deployment, "250m") {
@@ -114,7 +114,7 @@ func TestResourceLimits_SkipsExistingLimits(t *testing.T) {
 	chart := makeChartWithExistingResources()
 	origDeployment := chart.Templates["templates/deployment.yaml"]
 
-	result := InjectResourceLimits(chart, WorkloadWeb)
+	result := applyResourceProfile(chart, WorkloadWeb)
 
 	// Template with existing resources should be preserved as-is.
 	if result.Templates["templates/deployment.yaml"] != origDeployment {
@@ -126,7 +126,7 @@ func TestResourceLimits_CopyOnWrite(t *testing.T) {
 	chart := makeChartWithContainerNoResources()
 	origDeployment := chart.Templates["templates/deployment.yaml"]
 
-	_ = InjectResourceLimits(chart, WorkloadWeb)
+	_ = applyResourceProfile(chart, WorkloadWeb)
 
 	if chart.Templates["templates/deployment.yaml"] != origDeployment {
 		t.Error("original chart was mutated — copy-on-write violated")
@@ -135,7 +135,7 @@ func TestResourceLimits_CopyOnWrite(t *testing.T) {
 
 func TestResourceLimits_CacheProfile(t *testing.T) {
 	chart := makeChartWithContainerNoResources()
-	result := InjectResourceLimits(chart, WorkloadCache)
+	result := applyResourceProfile(chart, WorkloadCache)
 
 	deployment := result.Templates["templates/deployment.yaml"]
 	if !strings.Contains(deployment, "64Mi") {
@@ -144,4 +144,20 @@ func TestResourceLimits_CacheProfile(t *testing.T) {
 	if !strings.Contains(deployment, "256Mi") {
 		t.Error("cache profile should have memory limit 256Mi")
 	}
+}
+
+// applyResourceProfile applies injectResources (used by `dhg fix`) with the
+// profile of a workload type to every workload template without resources.
+func applyResourceProfile(chart *types.GeneratedChart, workloadType WorkloadType) *types.GeneratedChart {
+	profile, ok := resourceProfiles[workloadType]
+	if !ok {
+		profile = resourceProfiles[WorkloadWeb]
+	}
+	out := cloneChart(chart)
+	for path, content := range out.Templates {
+		if isWorkloadTemplate(content) && !strings.Contains(content, "resources:") {
+			out.Templates[path] = injectResources(content, profile)
+		}
+	}
+	return out
 }

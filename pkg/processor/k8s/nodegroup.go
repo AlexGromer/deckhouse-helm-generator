@@ -84,20 +84,7 @@ metadata:
   name: %s
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  nodeType: {{ .nodeType }}
-  {{- with .disruptions }}
-  disruptions:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .kubelet }}
-  kubelet:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .cloudInstances }}
-  cloudInstances:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-{{- end }}
-`, sanitized, name, ctx.ChartName)
+%s{{- end }}
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "nodeType", "disruptions", "kubelet", "cloudInstances"))
 }

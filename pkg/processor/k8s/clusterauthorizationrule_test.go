@@ -162,7 +162,7 @@ func TestClusterAuthorizationRuleProcessor_Template(t *testing.T) {
 	}
 	testutil.AssertContains(t, tpl, "apiVersion: deckhouse.io/v1", "template apiVersion")
 	testutil.AssertContains(t, tpl, "kind: ClusterAuthorizationRule", "template kind")
-	testutil.AssertContains(t, tpl, ".accessLevel", "template should reference accessLevel")
+	testutil.AssertContains(t, tpl, `"accessLevel"`, "template should reference accessLevel")
 }
 
 func TestClusterAuthorizationRuleProcessor_ServiceName(t *testing.T) {

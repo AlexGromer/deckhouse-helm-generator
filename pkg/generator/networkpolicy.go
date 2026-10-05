@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
@@ -32,7 +33,11 @@ var envPortMapping = map[string]int{
 
 // GenerateAutoNetworkPolicies creates fine-grained NetworkPolicies from service relationship analysis.
 // Returns map of template path → template content.
-func GenerateAutoNetworkPolicies(graph *types.ResourceGraph, groups []*ServiceGroup) map[string]string {
+// Each workload of a group gets a policy selecting its pods by the
+// workload's selector from the input (generated charts keep the input's pod
+// labels and selectors). Groups without selectable workloads get no policy.
+// chartName is the helper prefix.
+func GenerateAutoNetworkPolicies(chartName string, graph *types.ResourceGraph, groups []*ServiceGroup) map[string]string {
 	if len(groups) == 0 {
 		return make(map[string]string)
 	}
@@ -52,8 +57,21 @@ func GenerateAutoNetworkPolicies(graph *types.ResourceGraph, groups []*ServiceGr
 		// Check if this group has cross-namespace relationships
 		crossNamespaces := crossNS[group.Name]
 
+		var docs []string
+		workloads := selectableWorkloads(group)
+		for _, w := range workloads {
+			name := processor.ResourceNameSuffix(group.Name)
+			if len(workloads) > 1 {
+				name += "-" + w.name
+			}
+			docs = append(docs, generateNetworkPolicy(chartName, name, w.selector, ingressPorts, egressPorts, crossNamespaces))
+		}
+		if len(docs) == 0 {
+			continue
+		}
+
 		path := fmt.Sprintf("templates/%s-networkpolicy.yaml", group.Name)
-		result[path] = generateNetworkPolicy(group, ingressPorts, egressPorts, crossNamespaces)
+		result[path] = strings.Join(docs, "---\n")
 	}
 
 	return result
@@ -253,19 +271,24 @@ func buildCrossNamespaceIndex(graph *types.ResourceGraph, groups []*ServiceGroup
 	return result
 }
 
-// generateNetworkPolicy builds a NetworkPolicy YAML template.
-func generateNetworkPolicy(group *ServiceGroup, ingressPorts, egressPorts []portInfo, crossNamespaces []string) string {
+// generateNetworkPolicy builds a NetworkPolicy YAML template for the pods
+// selected by podSelector. name is appended to the release name.
+func generateNetworkPolicy(chartName, name string, podSelector map[string]interface{}, ingressPorts, egressPorts []portInfo, crossNamespaces []string) string {
 	var sb strings.Builder
 
+	sb.WriteString("{{- if .Values.namespace.networkPolicy.enabled }}\n")
 	sb.WriteString("apiVersion: networking.k8s.io/v1\n")
 	sb.WriteString("kind: NetworkPolicy\n")
 	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: %s-netpol\n", group.Name))
+	fmt.Fprintf(&sb, "  name: {{ include \"%s.fullname\" . }}-%s-netpol\n", chartName, name)
 	sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
+	sb.WriteString("  labels:\n")
+	fmt.Fprintf(&sb, "    {{- include \"%s.labels\" . | nindent 4 }}\n", chartName)
 	sb.WriteString("spec:\n")
 	sb.WriteString("  podSelector:\n")
-	sb.WriteString("    matchLabels:\n")
-	sb.WriteString(fmt.Sprintf("      app.kubernetes.io/name: %s\n", group.Name))
+	for _, l := range selectorYAML(podSelector, 4) {
+		sb.WriteString(l + "\n")
+	}
 	sb.WriteString("  policyTypes:\n")
 	sb.WriteString("    - Ingress\n")
 	sb.WriteString("    - Egress\n")
@@ -277,8 +300,8 @@ func generateNetworkPolicy(group *ServiceGroup, ingressPorts, egressPorts []port
 		sb.WriteString("        - podSelector: {}\n")
 		sb.WriteString("      ports:\n")
 		for _, p := range ingressPorts {
-			sb.WriteString(fmt.Sprintf("        - port: %d\n", p.Port))
-			sb.WriteString(fmt.Sprintf("          protocol: %s\n", p.Protocol))
+			fmt.Fprintf(&sb, "        - port: %d\n", p.Port)
+			fmt.Fprintf(&sb, "          protocol: %s\n", p.Protocol)
 		}
 	} else {
 		sb.WriteString("    - from:\n")
@@ -290,7 +313,7 @@ func generateNetworkPolicy(group *ServiceGroup, ingressPorts, egressPorts []port
 		sb.WriteString("    - from:\n")
 		sb.WriteString("        - namespaceSelector:\n")
 		sb.WriteString("            matchLabels:\n")
-		sb.WriteString(fmt.Sprintf("              kubernetes.io/metadata.name: %s\n", ns))
+		fmt.Fprintf(&sb, "              kubernetes.io/metadata.name: %s\n", ns)
 	}
 
 	// Egress rules
@@ -313,8 +336,8 @@ func generateNetworkPolicy(group *ServiceGroup, ingressPorts, egressPorts []port
 		sb.WriteString("    # Detected service dependencies\n")
 		sb.WriteString("    - ports:\n")
 		for _, p := range egressPorts {
-			sb.WriteString(fmt.Sprintf("        - port: %d\n", p.Port))
-			sb.WriteString(fmt.Sprintf("          protocol: %s\n", p.Protocol))
+			fmt.Fprintf(&sb, "        - port: %d\n", p.Port)
+			fmt.Fprintf(&sb, "          protocol: %s\n", p.Protocol)
 		}
 	}
 
@@ -322,47 +345,25 @@ func generateNetworkPolicy(group *ServiceGroup, ingressPorts, egressPorts []port
 	sb.WriteString("    # Allow same-namespace\n")
 	sb.WriteString("    - to:\n")
 	sb.WriteString("        - podSelector: {}\n")
+	sb.WriteString("{{- end }}\n")
 
 	return sb.String()
 }
 
-// GenerateDefaultDenyPolicy generates a default-deny-all NetworkPolicy for the given namespace.
-// Ingress: deny all except from same namespace.
-// Egress: deny all except DNS (UDP+TCP 53 to kube-system).
-func GenerateDefaultDenyPolicy(namespace string) string {
-	var sb strings.Builder
+// policyWorkload is a workload of a group whose pods a policy can select.
+type policyWorkload struct {
+	name     string
+	selector map[string]interface{}
+}
 
-	sb.WriteString("apiVersion: networking.k8s.io/v1\n")
-	sb.WriteString("kind: NetworkPolicy\n")
-	sb.WriteString("metadata:\n")
-	sb.WriteString("  name: default-deny-all\n")
-	if namespace != "" {
-		sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
-	} else {
-		sb.WriteString("  namespace: {{ .Release.Namespace }}\n")
+// selectableWorkloads returns the group's pod-creating resources with the
+// label selector of their pods, in a stable order.
+func selectableWorkloads(group *ServiceGroup) []policyWorkload {
+	var out []policyWorkload
+	for _, r := range sortedWorkloads(group) {
+		if sel := workloadPodSelector(r); len(sel) > 0 {
+			out = append(out, policyWorkload{name: r.Original.Object.GetName(), selector: sel})
+		}
 	}
-	sb.WriteString("spec:\n")
-	sb.WriteString("  podSelector: {}\n")
-	sb.WriteString("  policyTypes:\n")
-	sb.WriteString("    - Ingress\n")
-	sb.WriteString("    - Egress\n")
-
-	// Ingress: allow only from same namespace
-	sb.WriteString("  ingress:\n")
-	sb.WriteString("    - from:\n")
-	sb.WriteString("        - podSelector: {}\n")
-
-	// Egress: allow only DNS to kube-system
-	sb.WriteString("  egress:\n")
-	sb.WriteString("    - to:\n")
-	sb.WriteString("        - namespaceSelector:\n")
-	sb.WriteString("            matchLabels:\n")
-	sb.WriteString("              kubernetes.io/metadata.name: kube-system\n")
-	sb.WriteString("      ports:\n")
-	sb.WriteString("        - port: 53\n")
-	sb.WriteString("          protocol: UDP\n")
-	sb.WriteString("        - port: 53\n")
-	sb.WriteString("          protocol: TCP\n")
-
-	return sb.String()
+	return out
 }

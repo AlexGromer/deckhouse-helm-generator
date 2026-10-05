@@ -80,11 +80,11 @@ func WithImage(image string) DeploymentOption {
 // WithLabels sets labels on the Deployment
 func WithLabels(labels map[string]string) DeploymentOption {
 	return func(d *appsv1.Deployment) {
-		if d.ObjectMeta.Labels == nil {
-			d.ObjectMeta.Labels = make(map[string]string)
+		if d.Labels == nil {
+			d.Labels = make(map[string]string)
 		}
 		for k, v := range labels {
-			d.ObjectMeta.Labels[k] = v
+			d.Labels[k] = v
 		}
 	}
 }
@@ -92,11 +92,11 @@ func WithLabels(labels map[string]string) DeploymentOption {
 // WithPodLabels sets labels on the Pod template
 func WithPodLabels(labels map[string]string) DeploymentOption {
 	return func(d *appsv1.Deployment) {
-		if d.Spec.Template.ObjectMeta.Labels == nil {
-			d.Spec.Template.ObjectMeta.Labels = make(map[string]string)
+		if d.Spec.Template.Labels == nil {
+			d.Spec.Template.Labels = make(map[string]string)
 		}
 		for k, v := range labels {
-			d.Spec.Template.ObjectMeta.Labels[k] = v
+			d.Spec.Template.Labels[k] = v
 		}
 	}
 }
@@ -104,11 +104,11 @@ func WithPodLabels(labels map[string]string) DeploymentOption {
 // WithAnnotations sets annotations on the Deployment
 func WithAnnotations(annotations map[string]string) DeploymentOption {
 	return func(d *appsv1.Deployment) {
-		if d.ObjectMeta.Annotations == nil {
-			d.ObjectMeta.Annotations = make(map[string]string)
+		if d.Annotations == nil {
+			d.Annotations = make(map[string]string)
 		}
 		for k, v := range annotations {
-			d.ObjectMeta.Annotations[k] = v
+			d.Annotations[k] = v
 		}
 	}
 }

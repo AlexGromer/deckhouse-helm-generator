@@ -156,10 +156,10 @@ func DetectWorkloadType(group *ServiceGroup) WorkloadType {
 	)
 
 	// Flags for image/env-based heuristics.
-	hasCacheImage    := false
-	hasDBImage       := false
-	hasWebPort       := false
-	hasAMQPKafkaEnv  := false
+	hasCacheImage := false
+	hasDBImage := false
+	hasWebPort := false
+	hasAMQPKafkaEnv := false
 
 	for _, res := range group.Resources {
 		if res == nil || res.Original == nil {
@@ -467,27 +467,4 @@ func buildCacheProfile(env string) map[string]interface{} {
 			},
 		}
 	}
-}
-
-// MergeEnvProfiles performs a deep merge of two values maps.
-// For each key in overrides:
-//   - If both base[key] and overrides[key] are maps, the maps are recursively merged.
-//   - Otherwise, overrides[key] wins.
-//
-// Keys present only in base are preserved in the result.
-func MergeEnvProfiles(base map[string]interface{}, overrides map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{}, len(base)+len(overrides))
-	for k, v := range base {
-		result[k] = v
-	}
-	for k, v := range overrides {
-		if baseMap, ok := result[k].(map[string]interface{}); ok {
-			if overrideMap, ok := v.(map[string]interface{}); ok {
-				result[k] = MergeEnvProfiles(baseMap, overrideMap)
-				continue
-			}
-		}
-		result[k] = v
-	}
-	return result
 }

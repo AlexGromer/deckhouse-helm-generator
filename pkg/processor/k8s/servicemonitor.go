@@ -42,7 +42,7 @@ func (p *ServiceMonitorProcessor) Process(ctx processor.Context, obj *unstructur
 	namespace := obj.GetNamespace()
 
 	values, deps := p.extractValues(obj)
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -93,7 +93,7 @@ func (p *ServiceMonitorProcessor) extractValues(obj *unstructured.Unstructured) 
 	return values, deps
 }
 
-func (p *ServiceMonitorProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
+func (p *ServiceMonitorProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 	sanitized := processor.SanitizeServiceName(serviceName)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
@@ -106,20 +106,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .endpoints }}
-  endpoints:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .namespaceSelector }}
-  namespaceSelector:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .selector }}
-  selector:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, serviceName, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "endpoints", "namespaceSelector", "selector"))
 }

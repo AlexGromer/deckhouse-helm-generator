@@ -103,7 +103,7 @@ func TestGenerateHelmHooks_HookAnnotations(t *testing.T) {
 		}
 
 		// Verify Helm template syntax for name
-		if !strings.Contains(content, `{{ include "chartname.fullname" . }}`) {
+		if !strings.Contains(content, `{{ include "myapp.fullname" . }}`) {
 			t.Errorf("%s: missing Helm template fullname include", tc.path)
 		}
 

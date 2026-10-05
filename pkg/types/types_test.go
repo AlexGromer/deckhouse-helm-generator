@@ -237,7 +237,10 @@ func TestResourceGraph_AddOrphan(t *testing.T) {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 func TestSource_Constants(t *testing.T) {
-	tests := []struct{ c Source; w string }{
+	tests := []struct {
+		c Source
+		w string
+	}{
 		{SourceCluster, "cluster"},
 		{SourceFile, "file"},
 		{SourceGitOps, "gitops"},
@@ -250,7 +253,10 @@ func TestSource_Constants(t *testing.T) {
 }
 
 func TestOutputMode_Constants(t *testing.T) {
-	tests := []struct{ c OutputMode; w string }{
+	tests := []struct {
+		c OutputMode
+		w string
+	}{
 		{OutputModeUniversal, "universal"},
 		{OutputModeSeparate, "separate"},
 		{OutputModeLibrary, "library"},
@@ -264,7 +270,10 @@ func TestOutputMode_Constants(t *testing.T) {
 }
 
 func TestRelationshipType_Constants(t *testing.T) {
-	tests := []struct{ c RelationshipType; w string }{
+	tests := []struct {
+		c RelationshipType
+		w string
+	}{
 		{RelationLabelSelector, "label_selector"},
 		{RelationNameReference, "name_reference"},
 		{RelationVolumeMount, "volume_mount"},

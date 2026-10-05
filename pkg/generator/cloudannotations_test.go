@@ -303,60 +303,6 @@ func TestCloudAnnotations_InjectIntoChart_IngressGetsALBAnnotations(t *testing.T
 // Section 6: generateCloudValues — values map structure
 // ============================================================
 
-func TestCloudAnnotations_ValuesStructure(t *testing.T) {
-	config := CloudAnnotationConfig{
-		Provider: CloudGCP,
-		Internal: true,
-		Scheme:   "internal",
-	}
-
-	values := generateCloudValues(config)
-
-	if values == nil {
-		t.Fatal("generateCloudValues must return a non-nil map")
-	}
-
-	// Must contain top-level "cloud" key.
-	cloud, ok := values["cloud"]
-	if !ok {
-		t.Fatal("expected top-level 'cloud' key in cloud values map")
-	}
-
-	cloudMap, ok := cloud.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected 'cloud' to be map[string]interface{}, got %T", cloud)
-	}
-
-	// cloud.provider
-	provider, ok := cloudMap["provider"]
-	if !ok {
-		t.Error("expected 'cloud.provider' key in cloud values")
-	} else if provider != string(CloudGCP) {
-		t.Errorf("expected cloud.provider='gcp', got '%v'", provider)
-	}
-
-	// cloud.loadBalancer
-	lb, ok := cloudMap["loadBalancer"]
-	if !ok {
-		t.Fatal("expected 'cloud.loadBalancer' key in cloud values")
-	}
-
-	lbMap, ok := lb.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected 'cloud.loadBalancer' to be map[string]interface{}, got %T", lb)
-	}
-
-	// cloud.loadBalancer.internal
-	if _, ok := lbMap["internal"]; !ok {
-		t.Error("expected 'cloud.loadBalancer.internal' key in cloud values")
-	}
-
-	// cloud.loadBalancer.scheme
-	if _, ok := lbMap["scheme"]; !ok {
-		t.Error("expected 'cloud.loadBalancer.scheme' key in cloud values")
-	}
-}
-
 // ============================================================
 // Section 7: InjectCloudAnnotations — multi-service and nil
 // ============================================================
@@ -421,11 +367,11 @@ func TestInjectAnnotations_Idempotent_NoDoubleBlock(t *testing.T) {
 	}
 
 	// Both keys must be present.
-	if !strings.Contains(result, "first-key: first-value") {
-		t.Error("expected 'first-key: first-value' in merged annotations")
+	if !strings.Contains(result, `first-key: "first-value"`) {
+		t.Error("expected 'first-key: \"first-value\"' in merged annotations")
 	}
-	if !strings.Contains(result, "second-key: second-value") {
-		t.Error("expected 'second-key: second-value' in merged annotations")
+	if !strings.Contains(result, `second-key: "second-value"`) {
+		t.Error("expected 'second-key: \"second-value\"' in merged annotations")
 	}
 }
 
@@ -515,7 +461,7 @@ func TestInjectAnnotations_HelmExpressionName(t *testing.T) {
 	if !strings.Contains(result, "annotations:") {
 		t.Fatalf("expected annotations block to be injected for Helm-expression name, got:\n%s", result)
 	}
-	if !strings.Contains(result, "aws-load-balancer-type: nlb") {
+	if !strings.Contains(result, `aws-load-balancer-type: "nlb"`) {
 		t.Errorf("expected 'aws-load-balancer-type: nlb' in result, got:\n%s", result)
 	}
 	// Verify the Helm expression name is preserved.
@@ -558,5 +504,27 @@ func TestCloudAnnotations_NilChart_ReturnsNil(t *testing.T) {
 
 	if result != nil {
 		t.Errorf("expected nil return for nil chart input, got %+v", result)
+	}
+}
+
+// dhg processor templates take annotations from values; injected annotations
+// must merge under them in a single annotations key, also across injections.
+func TestInjectAnnotations_ValuesBlockMerged(t *testing.T) {
+	tmpl := "apiVersion: v1\nkind: Service\nmetadata:\n  name: x\n  {{- with .annotations }}\n  annotations:\n    {{- toYaml . | nindent 4 }}\n  {{- end }}\nspec: {}\n"
+
+	result := injectAnnotationsIntoTemplate(tmpl, map[string]string{"cloud.google.com/neg": `{"ingress": true}`})
+	result = injectAnnotationsIntoTemplate(result, map[string]string{"second": "2"})
+
+	if n := strings.Count(result, "annotations:"); n != 1 {
+		t.Errorf("expected one annotations key, got %d:\n%s", n, result)
+	}
+	for _, want := range []string{
+		`set $dhgAnnotations "cloud.google.com/neg" "{\"ingress\": true}"`,
+		`set $dhgAnnotations "second" "2"`,
+		`merge (deepCopy .) $dhgAnnotations`,
+	} {
+		if !strings.Contains(result, want) {
+			t.Errorf("missing %q in:\n%s", want, result)
+		}
 	}
 }

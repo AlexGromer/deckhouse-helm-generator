@@ -2,288 +2,333 @@ package generator
 
 import (
 	"fmt"
+	"net"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// EgressOptions configures egress policy generation.
-type EgressOptions struct {
-	// DetectFromEnv controls whether URL env vars are parsed for hosts.
-	DetectFromEnv bool
-	// AllowedHosts lists explicit external hosts to permit.
-	AllowedHosts []string
+// Istio egress (feature "istio-egress").
+//
+// In meshes with outboundTrafficPolicy REGISTRY_ONLY, calls to hosts outside
+// the mesh need a ServiceEntry. The feature detects external hosts from the
+// workloads' literal env values (URLs, and *_URL/_URI/_ENDPOINT/_ADDR/_HOST
+// variables) and renders one MESH_EXTERNAL ServiceEntry per host from values,
+// where more hosts can be added. Kubernetes NetworkPolicies cannot select by
+// host name; namespace-level NetworkPolicies are produced by
+// --namespace-resources.
+
+// egressEnvSuffixes are env var name suffixes that indicate an address.
+var egressEnvSuffixes = []string{"_URL", "_URI", "_ENDPOINT", "_ADDR", "_ADDRESS", "_HOST"}
+
+// egressSchemePorts are default ports of URL schemes.
+var egressSchemePorts = map[string]int{
+	"http": 80, "https": 443, "ws": 80, "wss": 443, "grpc": 443, "grpcs": 443,
+	"postgres": 5432, "postgresql": 5432, "mysql": 3306, "redis": 6379, "rediss": 6379,
+	"mongodb": 27017, "amqp": 5672, "amqps": 5671, "nats": 4222, "kafka": 9092,
+	"ldap": 389, "ldaps": 636, "smtp": 25, "smtps": 465,
 }
 
-// EgressResult holds generated egress policy templates.
-type EgressResult struct {
-	// ServiceEntries maps filename → Istio ServiceEntry YAML.
-	ServiceEntries map[string]string
-	// NetworkPolicies maps filename → Kubernetes NetworkPolicy YAML.
-	NetworkPolicies map[string]string
-	// DetectedURLs lists raw URL strings extracted from env vars.
-	DetectedURLs []string
-	NOTESTxt     string
+// egressPort is one port of a ServiceEntry.
+type egressPort struct {
+	Number   int
+	Protocol string
 }
 
-// urlEnvVarSuffixes are env var name fragments that indicate a URL value.
-var urlEnvVarSuffixes = []string{"_URL", "_ADDR", "_HOST", "_ENDPOINT"}
-
-// GenerateEgressPolicies generates Istio ServiceEntry and Kubernetes NetworkPolicy
-// egress rules based on the resource graph.
-func GenerateEgressPolicies(graph *types.ResourceGraph, opts EgressOptions) *EgressResult {
-	result := &EgressResult{
-		ServiceEntries:  make(map[string]string),
-		NetworkPolicies: make(map[string]string),
-		DetectedURLs:    []string{},
-	}
-
-	// Collect hosts to allow
-	seenHosts := make(map[string]bool)
-	deploymentNames := []string{}
-
-	// Step 1: detect from env vars
-	if opts.DetectFromEnv && graph != nil {
-		for _, r := range graph.Resources {
-			if r == nil || r.Original == nil {
-				continue
-			}
-			if r.Original.GVK.Kind != "Deployment" {
-				continue
-			}
-			name := r.Original.Object.GetName()
-			deploymentNames = append(deploymentNames, name)
-
-			envVars := extractEgressEnvVars(r)
-			for envName, envVal := range envVars {
-				if isURLEnvVar(envName) {
-					host := extractHostFromURL(envVal)
-					if host != "" && !seenHosts[host] {
-						seenHosts[host] = true
-						result.DetectedURLs = append(result.DetectedURLs, envVal)
-					}
-				}
-			}
-		}
-	} else if graph != nil {
-		// Collect deployment names even when DetectFromEnv=false
-		for _, r := range graph.Resources {
-			if r == nil || r.Original == nil {
-				continue
-			}
-			if r.Original.GVK.Kind == "Deployment" {
-				deploymentNames = append(deploymentNames, r.Original.Object.GetName())
-			}
-		}
-	}
-
-	// Step 2: add explicit AllowedHosts
-	for _, h := range opts.AllowedHosts {
-		if !seenHosts[h] {
-			seenHosts[h] = true
-		}
-	}
-
-	// Step 3: build ServiceEntries for all known hosts
-	hostList := make([]string, 0)
-	for h := range seenHosts {
-		hostList = append(hostList, h)
-	}
-	// Also add AllowedHosts that may not have been added above
-	for _, h := range opts.AllowedHosts {
-		alreadyIn := false
-		for _, existing := range hostList {
-			if existing == h {
-				alreadyIn = true
-				break
-			}
-		}
-		if !alreadyIn {
-			hostList = append(hostList, h)
-		}
-	}
-
-	for _, host := range hostList {
-		yaml := generateServiceEntryYAML(host)
-		key := fmt.Sprintf("templates/istio-se-%s.yaml", sanitizeHostForFilename(host))
-		result.ServiceEntries[key] = yaml
-	}
-
-	// Step 4: generate NetworkPolicy with egress for each Deployment
-	for _, depName := range deploymentNames {
-		np := generateEgressNetworkPolicyYAML(depName)
-		key := fmt.Sprintf("templates/netpol-egress-%s.yaml", depName)
-		result.NetworkPolicies[key] = np
-	}
-
-	// Build NOTESTxt only when there is something to report
-	if len(result.ServiceEntries) > 0 || len(result.NetworkPolicies) > 0 || len(result.DetectedURLs) > 0 {
-		result.NOTESTxt = buildEgressNOTESTxt(result)
-	}
-
-	return result
+// egressHost is one external host with the ports used to reach it.
+type egressHost struct {
+	Host  string
+	Ports []egressPort
 }
 
-// InjectEgressPolicies merges EgressResult templates into an existing chart.
-// It is copy-on-write (original chart is not modified).
-func InjectEgressPolicies(chart *types.GeneratedChart, result *EgressResult) (*types.GeneratedChart, int) {
-	if chart == nil {
-		return nil, 0
+// egressEndpoint parses an address ("https://h/p", "h:5432", "h") into host
+// and port. scheme-less addresses without a port yield port 0.
+func egressEndpoint(raw string) (host string, port egressPort, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.ContainsAny(raw, " \t\n,;") {
+		return "", port, false
 	}
-
-	newChart := copyChartTemplates(chart)
-	count := 0
-
-	if result != nil {
-		for k, v := range result.ServiceEntries {
-			if _, exists := newChart.Templates[k]; !exists {
-				newChart.Templates[k] = v
-				count++
-			}
-		}
-		for k, v := range result.NetworkPolicies {
-			if _, exists := newChart.Templates[k]; !exists {
-				newChart.Templates[k] = v
-				count++
-			}
-		}
-	}
-
-	return newChart, count
-}
-
-// extractEgressEnvVars returns env var name→value map from a Deployment-style ProcessedResource.
-func extractEgressEnvVars(r *types.ProcessedResource) map[string]string {
-	result := make(map[string]string)
-	if r == nil || r.Original == nil || r.Original.Object == nil {
-		return result
-	}
-	spec, ok := r.Original.Object.Object["spec"].(map[string]interface{})
-	if !ok {
-		return result
-	}
-	template, ok := spec["template"].(map[string]interface{})
-	if !ok {
-		return result
-	}
-	podSpec, ok := template["spec"].(map[string]interface{})
-	if !ok {
-		return result
-	}
-	containers, ok := podSpec["containers"].([]interface{})
-	if !ok {
-		return result
-	}
-	for _, c := range containers {
-		cMap, ok := c.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		envList, ok := cMap["env"].([]interface{})
-		if !ok {
-			continue
-		}
-		for _, e := range envList {
-			eMap, ok := e.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			name, _ := eMap["name"].(string)
-			value, _ := eMap["value"].(string)
-			if name != "" && value != "" {
-				result[name] = value
-			}
-		}
-	}
-	return result
-}
-
-// isURLEnvVar returns true if the env var name suggests it holds a URL/address.
-func isURLEnvVar(name string) bool {
-	upper := strings.ToUpper(name)
-	for _, suffix := range urlEnvVarSuffixes {
-		if strings.HasSuffix(upper, suffix) {
-			return true
-		}
-	}
-	return false
-}
-
-// extractHostFromURL parses a raw URL string and returns only the hostname.
-func extractHostFromURL(raw string) string {
-	// Handle scheme-less values like "hostname:port"
-	if !strings.Contains(raw, "://") {
-		// Try adding a dummy scheme
-		raw = "dummy://" + raw
+	scheme := ""
+	if i := strings.Index(raw, "://"); i > 0 {
+		scheme = strings.ToLower(raw[:i])
+	} else {
+		raw = "tcp://" + raw
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Hostname() == "" {
-		return ""
+		return "", port, false
 	}
-	return u.Hostname()
+	host = strings.ToLower(u.Hostname())
+	if p := u.Port(); p != "" {
+		n, err := strconv.Atoi(p)
+		if err != nil || n <= 0 || n > 65535 {
+			return "", port, false
+		}
+		port.Number = n
+	} else {
+		port.Number = egressSchemePorts[scheme]
+	}
+	switch {
+	case scheme == "http" || scheme == "ws":
+		port.Protocol = "HTTP"
+	case scheme == "https" || scheme == "wss" || scheme == "grpcs":
+		port.Protocol = "TLS"
+	case scheme == "grpc":
+		port.Protocol = "GRPC"
+	case port.Number == 443:
+		port.Protocol = "TLS"
+	default:
+		port.Protocol = "TCP"
+	}
+	return host, port, true
 }
 
-// sanitizeHostForFilename replaces dots and colons with dashes.
-func sanitizeHostForFilename(host string) string {
-	r := strings.NewReplacer(".", "-", ":", "-")
-	return r.Replace(host)
-}
-
-// generateServiceEntryYAML builds a minimal Istio ServiceEntry YAML for a host.
-func generateServiceEntryYAML(host string) string {
-	return fmt.Sprintf(`apiVersion: networking.istio.io/v1beta1
-kind: ServiceEntry
-metadata:
-  name: egress-%s
-spec:
-  hosts:
-  - %s
-  location: MESH_EXTERNAL
-  resolution: DNS
-  ports:
-  - number: 443
-    name: https
-    protocol: HTTPS
-  - number: 80
-    name: http
-    protocol: HTTP
-`, sanitizeHostForFilename(host), host)
-}
-
-// generateEgressNetworkPolicyYAML builds a NetworkPolicy with egress rules.
-func generateEgressNetworkPolicyYAML(name string) string {
-	return fmt.Sprintf(`apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: %s-egress
-spec:
-  podSelector:
-    matchLabels:
-      app: %s
-  policyTypes:
-  - Egress
-  egress:
-  - {}
-`, name, name)
-}
-
-// buildEgressNOTESTxt returns usage instructions for generated egress policies.
-func buildEgressNOTESTxt(result *EgressResult) string {
-	var sb strings.Builder
-	sb.WriteString("Egress Policies\n")
-	sb.WriteString("===============\n")
-	fmt.Fprintf(&sb, "Generated %d ServiceEntry resource(s) and %d NetworkPolicy resource(s).\n",
-		len(result.ServiceEntries), len(result.NetworkPolicies))
-	if len(result.DetectedURLs) > 0 {
-		sb.WriteString("\nDetected external URLs from env vars:\n")
-		for _, u := range result.DetectedURLs {
-			fmt.Fprintf(&sb, "  - %s\n", u)
+// egressIsExternal reports whether host is outside the cluster: a DNS name
+// with a dot that is not a cluster-local name or "<service>.<namespace>".
+func egressIsExternal(host string, services, namespaces map[string]bool) bool {
+	if host == "" || !strings.Contains(host, ".") || net.ParseIP(host) != nil {
+		return false
+	}
+	if strings.Contains(host, ".svc.") {
+		return false
+	}
+	for _, suffix := range []string{".svc", ".local", ".localhost", ".internal"} {
+		if strings.HasSuffix(host, suffix) {
+			return false
 		}
 	}
-	sb.WriteString(`
-Apply these templates to allow egress traffic to detected external services.
-Review each ServiceEntry and NetworkPolicy before applying to production.
-`)
-	return sb.String()
+	labels := strings.Split(host, ".")
+	if len(labels) == 2 && (namespaces[labels[1]] || services[labels[0]]) {
+		return false
+	}
+	return true
+}
+
+// egressDetectHosts returns the external hosts used by the given workloads.
+func egressDetectHosts(workloads []secWorkload, graph *types.ResourceGraph) map[string]map[egressPort]bool {
+	services := map[string]bool{}
+	namespaces := map[string]bool{}
+	if graph != nil {
+		for _, r := range graph.Resources {
+			if r == nil || r.Original == nil || r.Original.Object == nil {
+				continue
+			}
+			if ns := r.Original.Object.GetNamespace(); ns != "" {
+				namespaces[ns] = true
+			}
+			if r.Original.Object.GetKind() == "Service" {
+				services[r.Original.Object.GetName()] = true
+			}
+		}
+	}
+
+	hosts := map[string]map[egressPort]bool{}
+	for _, w := range workloads {
+		for _, c := range secContainers(w.podSpec) {
+			env := map[string]string{}
+			envList, _ := c["env"].([]interface{})
+			for _, e := range envList {
+				em, _ := e.(map[string]interface{})
+				name, _ := em["name"].(string)
+				value, _ := em["value"].(string)
+				if name != "" && value != "" {
+					env[name] = value
+				}
+			}
+			for name, value := range env {
+				upper := strings.ToUpper(name)
+				hasSuffix := false
+				for _, s := range egressEnvSuffixes {
+					if strings.HasSuffix(upper, s) {
+						hasSuffix = true
+						break
+					}
+				}
+				if !hasSuffix && !strings.Contains(value, "://") {
+					continue
+				}
+				host, port, ok := egressEndpoint(value)
+				if !ok || !egressIsExternal(host, services, namespaces) {
+					continue
+				}
+				if port.Number == 0 && strings.HasSuffix(upper, "_HOST") {
+					// FOO_HOST=db.example.com with FOO_PORT=5432
+					if p, err := strconv.Atoi(env[name[:len(name)-len("_HOST")]+"_PORT"]); err == nil && p > 0 && p <= 65535 {
+						port = egressPort{Number: p, Protocol: "TCP"}
+						if p == 443 {
+							port.Protocol = "TLS"
+						}
+					}
+				}
+				if port.Number == 0 {
+					continue // no way to know the port
+				}
+				if hosts[host] == nil {
+					hosts[host] = map[egressPort]bool{}
+				}
+				hosts[host][port] = true
+			}
+		}
+	}
+	return hosts
+}
+
+// egressOwnedHosts returns the hosts the chart declares. A host used by
+// workloads of several charts (separate/umbrella mode) is declared, with the
+// union of its ports, by the chart of the first such workload only, so that
+// one release never duplicates another's entries.
+func egressOwnedHosts(chart *types.GeneratedChart, graph *types.ResourceGraph) []egressHost {
+	mine := map[string]bool{} // host -> owned by this chart
+	ports := map[string]map[egressPort]bool{}
+	for _, w := range secAllWorkloads(graph) {
+		for host, hostPorts := range egressDetectHosts([]secWorkload{w}, graph) {
+			if ports[host] == nil {
+				ports[host] = map[egressPort]bool{}
+				mine[host] = w.inChart(chart)
+			}
+			for p := range hostPorts {
+				ports[host][p] = true
+			}
+		}
+	}
+	owned := map[string]map[egressPort]bool{}
+	for host, ok := range mine {
+		if ok {
+			owned[host] = ports[host]
+		}
+	}
+	return egressSortHosts(owned)
+}
+
+func egressSortHosts(m map[string]map[egressPort]bool) []egressHost {
+	out := make([]egressHost, 0, len(m))
+	for host, ports := range m {
+		h := egressHost{Host: host}
+		for p := range ports {
+			h.Ports = append(h.Ports, p)
+		}
+		sort.Slice(h.Ports, func(i, j int) bool {
+			if h.Ports[i].Number != h.Ports[j].Number {
+				return h.Ports[i].Number < h.Ports[j].Number
+			}
+			return h.Ports[i].Protocol < h.Ports[j].Protocol
+		})
+		out = append(out, h)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	return out
+}
+
+func applyIstioEgressFeature(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {
+	apiVersion := fc.Param("api-version")
+	if !strings.HasPrefix(apiVersion, "networking.istio.io/") {
+		return nil, fmt.Errorf("api-version must be in the networking.istio.io group, got %q", apiVersion)
+	}
+	// Explicit hosts: "host", "host:port" or "scheme://host[:port]".
+	explicit := map[string]map[egressPort]bool{}
+	for _, raw := range fc.ListParam("hosts") {
+		host, port, ok := egressEndpoint(raw)
+		if !ok {
+			return nil, fmt.Errorf("invalid host %q in hosts", raw)
+		}
+		if port.Number == 0 {
+			port = egressPort{Number: 443, Protocol: "TLS"}
+		}
+		if explicit[host] == nil {
+			explicit[host] = map[egressPort]bool{}
+		}
+		explicit[host][port] = true
+	}
+
+	// Charts without workloads (e.g. an umbrella parent) make no calls.
+	if len(secChartWorkloads(chart, fc.Graph)) == 0 && !secHasWorkloadTemplate(chart) {
+		return chart, nil
+	}
+
+	var hosts []egressHost
+	if fc.BoolParam("detect") {
+		hosts = egressOwnedHosts(chart, fc.Graph)
+	}
+	merged := map[string]map[egressPort]bool{}
+	for _, h := range hosts {
+		merged[h.Host] = map[egressPort]bool{}
+		for _, p := range h.Ports {
+			merged[h.Host][p] = true
+		}
+	}
+	for host, ports := range explicit {
+		if merged[host] == nil {
+			merged[host] = map[egressPort]bool{}
+		}
+		for p := range ports {
+			merged[host][p] = true
+		}
+	}
+
+	entries := make([]interface{}, 0, len(merged))
+	for _, h := range egressSortHosts(merged) {
+		ports := make([]interface{}, 0, len(h.Ports))
+		for _, p := range h.Ports {
+			ports = append(ports, map[string]interface{}{
+				"number":   p.Number,
+				"name":     fmt.Sprintf("%s-%d", strings.ToLower(p.Protocol), p.Number),
+				"protocol": p.Protocol,
+			})
+		}
+		entry := map[string]interface{}{"host": h.Host, "ports": ports}
+		if strings.HasPrefix(h.Host, "*.") {
+			entry["resolution"] = "NONE"
+		}
+		entries = append(entries, entry)
+	}
+	exportTo := make([]interface{}, 0)
+	for _, e := range fc.ListParam("export-to") {
+		exportTo = append(exportTo, e)
+	}
+
+	out := cloneChart(chart)
+	if err := secAddValues(out, "istioEgress",
+		"# Istio ServiceEntries for external hosts (dhg feature: istio-egress).\n"+
+			"# Each entry: host, ports (number/name/protocol), optional resolution (default DNS).\n",
+		map[string]interface{}{
+			"enabled":        true,
+			"exportTo":       exportTo,
+			"serviceEntries": entries,
+		}); err != nil {
+		return nil, err
+	}
+	if err := secAddTemplate(out, "templates/istio-egress.yaml", istioEgressTemplate(newSecChartHelpers(chart), apiVersion)); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func istioEgressTemplate(h secChartHelpers, apiVersion string) string {
+	return `{{- /* Generated by dhg feature "istio-egress". Requires Istio. */}}
+{{- $eg := .Values.istioEgress }}
+{{- if and $eg $eg.enabled }}
+{{- range $eg.serviceEntries }}
+---
+apiVersion: ` + apiVersion + `
+kind: ServiceEntry
+metadata:
+  name: ` + h.name(`(printf "egress-%s" (.host | replace "*." "wildcard-" | replace "." "-"))`) + `
+  namespace: {{ $.Release.Namespace }}
+` + h.labels(4) + `spec:
+  hosts:
+    - {{ .host | quote }}
+  {{- with $eg.exportTo }}
+  exportTo:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  location: MESH_EXTERNAL
+  resolution: {{ .resolution | default "DNS" }}
+  ports:
+    {{- toYaml .ports | nindent 4 }}
+{{- end }}
+{{- end }}
+`
 }

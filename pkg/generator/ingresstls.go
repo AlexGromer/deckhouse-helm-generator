@@ -8,128 +8,128 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-var hostRegex = regexp.MustCompile(`(?m)^\s*-\s*host:\s*(.+)`)
+const ingressTLSValuesKey = "ingressTLS"
 
-// InjectTLSConfig adds TLS configuration to every Ingress template in the chart.
-// For each Ingress template it:
-//   - Adds spec.tls section with secretName derived from host
-//   - Adds cert-manager.io/cluster-issuer annotation
-//   - Adds force-ssl-redirect annotation
+// IngressTLSOptions configures the defaults written to values.yaml
+// (ingressTLS.*). All of them can be changed at install time.
+type IngressTLSOptions struct {
+	// Issuer is the cert-manager issuer name (default "letsencrypt-prod").
+	Issuer string
+	// IssuerKind is "ClusterIssuer" (default) or "Issuer"; it selects the
+	// cert-manager.io/cluster-issuer or cert-manager.io/issuer annotation.
+	IssuerKind string
+}
+
+var (
+	// ingressAnnotationsBlockRe matches the values-driven metadata
+	// annotations block of the Ingress processor's template.
+	ingressAnnotationsBlockRe = regexp.MustCompile(`(?m)^  \{\{- with \.annotations \}\}\n  annotations:\n    \{\{- toYaml \. \| nindent 4 \}\}\n  \{\{- end \}\}\n`)
+	ingressNameRe             = regexp.MustCompile(`(?m)^metadata:\n  name: (.+)$`)
+)
+
+// InjectIngressTLS enables TLS on every Ingress template whose values do not
+// already define a tls section: it adds a tls entry covering all rule hosts
+// with a per-Ingress certificate secret ("<ingress name>-tls") and the
+// cert-manager issuer annotation, so cert-manager's ingress-shim issues the
+// certificate. Ingresses that already have tls are left as they are (their
+// certificates may be managed differently), as are user-set annotations.
+// Everything is controlled by ingressTLS.* in values.yaml.
 //
-// Returns a new chart (copy-on-write). If chart is nil, nil is returned.
-func InjectTLSConfig(chart *types.GeneratedChart, issuer string) *types.GeneratedChart {
+// It returns the new chart and the template paths that were changed.
+func InjectIngressTLS(chart *types.GeneratedChart, opts IngressTLSOptions) (*types.GeneratedChart, []string, error) {
 	if chart == nil {
-		return nil
+		return nil, nil, nil
+	}
+	if opts.Issuer == "" {
+		opts.Issuer = "letsencrypt-prod"
+	}
+	if opts.IssuerKind == "" {
+		opts.IssuerKind = "ClusterIssuer"
+	}
+	if opts.IssuerKind != "ClusterIssuer" && opts.IssuerKind != "Issuer" {
+		return nil, nil, fmt.Errorf("invalid issuer kind %q (want ClusterIssuer or Issuer)", opts.IssuerKind)
 	}
 
-	if issuer == "" {
-		issuer = "letsencrypt-prod"
-	}
-
-	newTemplates := make(map[string]string, len(chart.Templates))
-	for path, content := range chart.Templates {
-		if extractKind(content) == "Ingress" {
-			content = addTLSAnnotations(content, issuer)
-			content = addTLSSection(content)
+	out := cloneChart(chart)
+	var changed []string
+	for _, path := range opsSortedTemplatePaths(chart) {
+		content := chart.Templates[path]
+		if opsTemplateKind(content) != "Ingress" || strings.Contains(content, "dhgIngressTLS") {
+			continue
 		}
-		newTemplates[path] = content
+		updated, ok := injectIngressTLSBlocks(content)
+		if !ok {
+			continue
+		}
+		out.Templates[path] = updated
+		changed = append(changed, path)
 	}
-
-	return &types.GeneratedChart{
-		Name:          chart.Name,
-		Path:          chart.Path,
-		ChartYAML:     chart.ChartYAML,
-		ValuesYAML:    chart.ValuesYAML,
-		Templates:     newTemplates,
-		Helpers:       chart.Helpers,
-		Notes:         chart.Notes,
-		ValuesSchema:  chart.ValuesSchema,
-		ExternalFiles: chart.ExternalFiles,
+	if len(changed) == 0 {
+		return chart, nil, nil
 	}
+	values, err := appendTopLevelValues(out.ValuesYAML, ingressTLSValuesKey, map[string]interface{}{
+		"enabled":    true,
+		"issuer":     opts.Issuer,
+		"issuerKind": opts.IssuerKind,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	out.ValuesYAML = values
+	return out, changed, nil
 }
 
-// addTLSAnnotations injects cert-manager and ssl-redirect annotations into Ingress YAML.
-func addTLSAnnotations(content, issuer string) string {
-	tlsAnnotations := map[string]string{
-		"cert-manager.io/cluster-issuer":                 issuer,
-		"nginx.ingress.kubernetes.io/force-ssl-redirect": "true",
+// injectIngressTLSBlocks rewrites the annotations block and extends the tls
+// block of an Ingress template. It returns false if the template does not
+// have the expected shape.
+func injectIngressTLSBlocks(content string) (string, bool) {
+	nameMatch := ingressNameRe.FindStringSubmatch(content)
+	loc := ingressAnnotationsBlockRe.FindStringIndex(content)
+	if nameMatch == nil || loc == nil {
+		return content, false
 	}
+	secretName := suffixedName(strings.TrimSpace(nameMatch[1]), "-tls")
 
-	return injectAnnotationsIntoTemplate(content, tlsAnnotations)
-}
+	annotations := strings.Join([]string{
+		`  {{- $dhgIngressTLS := $.Values.ingressTLS | default dict }}`,
+		`  {{- $dhgTLSHosts := list }}`,
+		`  {{- range .rules }}{{ if .host }}{{ $dhgTLSHosts = append $dhgTLSHosts .host }}{{ end }}{{ end }}`,
+		`  {{- $dhgTLSHosts = $dhgTLSHosts | uniq }}`,
+		`  {{- $dhgAutoTLS := and $dhgIngressTLS.enabled (not .tls) (gt (len $dhgTLSHosts) 0) }}`,
+		`  {{- $dhgAnnotations := .annotations | default dict }}`,
+		`  {{- if and $dhgAutoTLS $dhgIngressTLS.issuer }}`,
+		`  {{- $dhgIssuerKey := ternary "cert-manager.io/issuer" "cert-manager.io/cluster-issuer" (eq ($dhgIngressTLS.issuerKind | default "ClusterIssuer") "Issuer") }}`,
+		`  {{- $dhgAnnotations = merge (dict) $dhgAnnotations (dict $dhgIssuerKey $dhgIngressTLS.issuer) }}`,
+		`  {{- end }}`,
+		`  {{- with $dhgAnnotations }}`,
+		`  annotations:`,
+		`    {{- toYaml . | nindent 4 }}`,
+		`  {{- end }}`,
+		``,
+	}, "\n")
+	content = content[:loc[0]] + annotations + content[loc[1]:]
 
-// addTLSSection appends a spec.tls block to the Ingress YAML based on detected hosts.
-func addTLSSection(content string) string {
-	// Already has tls section
-	if strings.Contains(content, "tls:") {
-		return content
-	}
+	tls := strings.Join([]string{
+		`  {{- if $dhgAutoTLS }}`,
+		`  tls:`,
+		`    - hosts:`,
+		`        {{- range $dhgTLSHosts }}`,
+		`        - {{ . | quote }}`,
+		`        {{- end }}`,
+		`      secretName: ` + secretName,
+		`  {{- end }}`,
+	}, "\n")
 
-	hosts := extractHosts(content)
-	if len(hosts) == 0 {
-		return content
-	}
-
-	// Build TLS section
-	var tlsBlock strings.Builder
-	tlsBlock.WriteString("  tls:\n")
-	for _, host := range hosts {
-		secretName := hostToSecretName(host)
-		tlsBlock.WriteString(fmt.Sprintf("    - secretName: %s\n", secretName))
-		tlsBlock.WriteString("      hosts:\n")
-		tlsBlock.WriteString(fmt.Sprintf("        - %s\n", host))
-	}
-
-	// Insert before the end of spec (after rules section)
-	// Find last line that starts with "  rules:" or insert at end
+	// The generated tls block renders only when the values have no tls, so it
+	// never collides with the template's own `{{- if .tls }}` block.
 	lines := strings.Split(content, "\n")
-	var result []string
-	inserted := false
-
 	for i, line := range lines {
-		result = append(result, line)
-		// Insert after the rules block ends (next line at spec level or EOF)
-		if !inserted && strings.TrimSpace(line) == "" && i > 0 {
-			prevTrimmed := strings.TrimSpace(lines[i-1])
-			// Check if we just finished a block under spec
-			if prevTrimmed != "" && !strings.HasPrefix(prevTrimmed, "#") {
-				// Continue looking
-			}
+		if line == "spec:" {
+			out := append([]string{}, lines[:i+1]...)
+			out = append(out, tls)
+			out = append(out, lines[i+1:]...)
+			return strings.Join(out, "\n"), true
 		}
 	}
-
-	if !inserted {
-		// Append at the end
-		result = append(result, tlsBlock.String())
-	}
-
-	return strings.Join(result, "\n")
-}
-
-// extractHosts finds all host values from Ingress rules.
-func extractHosts(content string) []string {
-	matches := hostRegex.FindAllStringSubmatch(content, -1)
-	var hosts []string
-	seen := make(map[string]bool)
-
-	for _, m := range matches {
-		if len(m) >= 2 {
-			host := strings.TrimSpace(m[1])
-			host = strings.Trim(host, "\"'")
-			if host != "" && !seen[host] {
-				seen[host] = true
-				hosts = append(hosts, host)
-			}
-		}
-	}
-
-	return hosts
-}
-
-// hostToSecretName converts a hostname to a TLS secret name.
-// e.g., "app.example.com" → "app-example-com-tls"
-func hostToSecretName(host string) string {
-	name := strings.ReplaceAll(host, ".", "-")
-	name = strings.ReplaceAll(name, "*", "wildcard")
-	return name + "-tls"
+	return content, false
 }

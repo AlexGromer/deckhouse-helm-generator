@@ -144,7 +144,7 @@ func TestGenerateHelmTests_EmptyChart(t *testing.T) {
 		Name: "myapp",
 		Templates: map[string]string{
 			"templates/_helpers.tpl": "{{- define \"myapp.name\" -}}myapp{{- end -}}",
-			"templates/NOTES.txt":   "Thank you for installing.",
+			"templates/NOTES.txt":    "Thank you for installing.",
 		},
 	}
 	tests = GenerateHelmTests(chart)

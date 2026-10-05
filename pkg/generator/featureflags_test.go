@@ -151,8 +151,8 @@ func TestFeatureFlags_ChartWithPVC_StorageFlag(t *testing.T) {
 
 func TestFeatureFlags_ChartWithRBACResources_RBACFlag(t *testing.T) {
 	chart := makeChart("myapp", map[string]string{
-		"templates/role.yaml": "apiVersion: rbac.authorization.k8s.io/v1\nkind: Role\nmetadata:\n  name: myapp\nrules:\n  - apiGroups: [\"\"]\n    resources: [\"pods\"]\n    verbs: [\"get\", \"list\"]",
-		"templates/rolebinding.yaml": "apiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: myapp\nroleRef:\n  kind: Role\n  name: myapp\nsubjects:\n  - kind: ServiceAccount\n    name: myapp",
+		"templates/role.yaml":           "apiVersion: rbac.authorization.k8s.io/v1\nkind: Role\nmetadata:\n  name: myapp\nrules:\n  - apiGroups: [\"\"]\n    resources: [\"pods\"]\n    verbs: [\"get\", \"list\"]",
+		"templates/rolebinding.yaml":    "apiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: myapp\nroleRef:\n  kind: Role\n  name: myapp\nsubjects:\n  - kind: ServiceAccount\n    name: myapp",
 		"templates/serviceaccount.yaml": "apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: myapp",
 	})
 
@@ -271,10 +271,10 @@ func TestFeatureFlags_CustomConfig_OverridesDefault(t *testing.T) {
 
 func TestFeatureFlags_EmptyChart_NoOp(t *testing.T) {
 	chart := &types.GeneratedChart{
-		Name:      "empty",
-		ChartYAML: "apiVersion: v2\nname: empty\nversion: 0.1.0\n",
+		Name:       "empty",
+		ChartYAML:  "apiVersion: v2\nname: empty\nversion: 0.1.0\n",
 		ValuesYAML: "replicaCount: 1\n",
-		Templates: map[string]string{},
+		Templates:  map[string]string{},
 	}
 
 	config := DefaultFeatureFlagConfig()
@@ -357,23 +357,23 @@ func TestFeatureFlags_DefaultConfig_HasAllMappings(t *testing.T) {
 
 	expectedMappings := map[string]FeatureCategory{
 		// monitoring
-		"ServiceMonitor":    FeatureMonitoring,
-		"PodMonitor":        FeatureMonitoring,
-		"PrometheusRule":    FeatureMonitoring,
-		"GrafanaDashboard":  FeatureMonitoring,
+		"ServiceMonitor":   FeatureMonitoring,
+		"PodMonitor":       FeatureMonitoring,
+		"PrometheusRule":   FeatureMonitoring,
+		"GrafanaDashboard": FeatureMonitoring,
 		// ingress
-		"Ingress":    FeatureIngress,
-		"HTTPRoute":  FeatureIngress,
-		"Gateway":    FeatureIngress,
-		"GRPCRoute":  FeatureIngress,
+		"Ingress":   FeatureIngress,
+		"HTTPRoute": FeatureIngress,
+		"Gateway":   FeatureIngress,
+		"GRPCRoute": FeatureIngress,
 		// autoscaling
 		"HorizontalPodAutoscaler": FeatureAutoscaling,
 		"VerticalPodAutoscaler":   FeatureAutoscaling,
 		"ScaledObject":            FeatureAutoscaling,
 		"TriggerAuthentication":   FeatureAutoscaling,
 		// security
-		"NetworkPolicy":        FeatureSecurity,
-		"PodDisruptionBudget":  FeatureSecurity,
+		"NetworkPolicy":       FeatureSecurity,
+		"PodDisruptionBudget": FeatureSecurity,
 		// storage
 		"PersistentVolumeClaim": FeatureStorage,
 		// rbac
@@ -408,44 +408,6 @@ func TestFeatureFlags_DefaultConfig_HasAllMappings(t *testing.T) {
 // ============================================================
 // Test 12: generateFeatureValues returns all categories as true by default
 // ============================================================
-
-func TestFeatureFlags_GenerateFeatureValues_DefaultTrue(t *testing.T) {
-	config := DefaultFeatureFlagConfig()
-	vals := generateFeatureValues(config)
-
-	if vals == nil {
-		t.Fatal("generateFeatureValues must not return nil")
-	}
-
-	expectedCategories := []FeatureCategory{
-		FeatureMonitoring,
-		FeatureIngress,
-		FeatureAutoscaling,
-		FeatureSecurity,
-		FeatureStorage,
-		FeatureRBAC,
-	}
-
-	for _, cat := range expectedCategories {
-		v, ok := vals[string(cat)]
-		if !ok {
-			t.Errorf("generateFeatureValues missing entry for category %q", cat)
-			continue
-		}
-		boolVal, ok := v.(bool)
-		if !ok {
-			t.Errorf("category %q value must be bool, got %T", cat, v)
-			continue
-		}
-		if !boolVal {
-			t.Errorf("category %q must default to true, got false", cat)
-		}
-	}
-
-	if len(vals) != len(expectedCategories) {
-		t.Errorf("expected %d entries in feature values, got %d", len(expectedCategories), len(vals))
-	}
-}
 
 // ============================================================
 // Test 13: Already-guarded NetworkPolicy is NOT double-wrapped

@@ -11,16 +11,12 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer/detector"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer/pattern"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/extractor"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/generator"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor/k8s"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor/value"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
@@ -60,6 +56,8 @@ It supports extracting resources from:
   - Live Kubernetes clusters
   - GitOps repositories`,
 		Version: fmt.Sprintf("%s (built: %s)", version, buildTime),
+		// Runtime errors are not usage errors: print the error, not the help.
+		SilenceUsage: true,
 	}
 
 	rootCmd.AddCommand(newGenerateCmd())
@@ -69,36 +67,39 @@ It supports extracting resources from:
 	rootCmd.AddCommand(newMigrateCmd())
 	rootCmd.AddCommand(newFixCmd())
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newFeaturesCmd())
+	rootCmd.AddCommand(newGraphCmd())
 
 	return rootCmd
 }
 
 func newGenerateCmd() *cobra.Command {
 	var (
-		paths           []string
-		outputDir       string
-		chartName       string
-		chartVersion    string
-		appVersion      string
-		mode            string
-		source          string
-		namespace       string
-		namespaces      []string
-		labelSelector   string
-		includeKinds    []string
-		excludeKinds    []string
-		recursive       bool
+		paths              []string
+		outputDir          string
+		chartName          string
+		chartVersion       string
+		appVersion         string
+		mode               string
+		source             string
+		namespace          string
+		namespaces         []string
+		labelSelector      string
+		includeKinds       []string
+		excludeKinds       []string
+		recursive          bool
 		kubeConfig         string
 		kubeContext        string
-		clusterNamespace   string
+		clusterSecrets     string
+		gitPath            string
 		gitRepo            string
 		gitBranch          string
 		sshKey             string
 		includeTests       bool
-		includeREADME   bool
-		includeSchema   bool
-		verbose         bool
-		envValues       bool
+		includeREADME      bool
+		includeSchema      bool
+		verbose            bool
+		envValues          bool
 		deckhouseModule    bool
 		dryRun             bool
 		airgapRegistry     string
@@ -115,9 +116,14 @@ func newGenerateCmd() *cobra.Command {
 		postRenderer       bool
 		autoDeps           bool
 		tenantCount        int
-		templateStyle      string
+		templateDir        string
+		templateStrategy   string
+		plugins            []string
+		configPath         string
 		includeHooks       bool
 		valuesFlat         bool
+		withFeatures       []string
+		featureOpts        []string
 	)
 
 	cmd := &cobra.Command{
@@ -129,37 +135,41 @@ Examples:
   # Generate from YAML files
   dhg generate -f ./manifests -o ./chart --chart-name myapp
 
-  # Generate from live cluster
-  dhg generate -s cluster -n production --kubeconfig ~/.kube/config
+  # Generate from a live cluster (system namespaces kube-*/d8-* are skipped)
+  dhg generate -s cluster -n production --kubeconfig ~/.kube/config --chart-name myapp
+
+  # Generate from a Git repository
+  dhg generate -s gitops --git-repo https://github.com/org/manifests --git-path apps/web --chart-name web
 
   # Generate with filtering
   dhg generate -f ./manifests --include-kinds Deployment,Service,Ingress`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGenerate(cmd.Context(), generateOptions{
-				paths:           paths,
-				outputDir:       outputDir,
-				chartName:       chartName,
-				chartVersion:    chartVersion,
-				appVersion:      appVersion,
-				mode:            mode,
-				source:          source,
-				namespace:       namespace,
-				namespaces:      namespaces,
-				labelSelector:   labelSelector,
-				includeKinds:    includeKinds,
-				excludeKinds:    excludeKinds,
-				recursive:       recursive,
-				kubeConfig:       kubeConfig,
-				kubeContext:      kubeContext,
-				clusterNamespace: clusterNamespace,
-				gitRepo:          gitRepo,
-				gitBranch:        gitBranch,
-				sshKey:           sshKey,
-				includeTests:    includeTests,
-				includeREADME:   includeREADME,
-				includeSchema:   includeSchema,
-				verbose:         verbose,
-				envValues:       envValues,
+				paths:              paths,
+				outputDir:          outputDir,
+				chartName:          chartName,
+				chartVersion:       chartVersion,
+				appVersion:         appVersion,
+				mode:               mode,
+				source:             source,
+				namespace:          namespace,
+				namespaces:         namespaces,
+				labelSelector:      labelSelector,
+				includeKinds:       includeKinds,
+				excludeKinds:       excludeKinds,
+				recursive:          recursive,
+				kubeConfig:         kubeConfig,
+				kubeContext:        kubeContext,
+				clusterSecrets:     clusterSecrets,
+				gitPath:            gitPath,
+				gitRepo:            gitRepo,
+				gitBranch:          gitBranch,
+				sshKey:             sshKey,
+				includeTests:       includeTests,
+				includeREADME:      includeREADME,
+				includeSchema:      includeSchema,
+				verbose:            verbose,
+				envValues:          envValues,
 				deckhouseModule:    deckhouseModule,
 				dryRun:             dryRun,
 				airgapRegistry:     airgapRegistry,
@@ -176,20 +186,24 @@ Examples:
 				postRenderer:       postRenderer,
 				autoDeps:           autoDeps,
 				tenantCount:        tenantCount,
-				templateStyle:      templateStyle,
+				templateDir:        templateDir,
+				templateStrategy:   templateStrategy,
+				plugins:            plugins,
 				includeHooks:       includeHooks,
 				valuesFlat:         valuesFlat,
+				withFeatures:       withFeatures,
+				featureOpts:        featureOpts,
 			})
 		},
 	}
 
 	cmd.Flags().StringSliceVarP(&paths, "file", "f", []string{}, "Path(s) to YAML files or directories")
 	cmd.Flags().StringVarP(&outputDir, "output", "o", "./chart", "Output directory for the chart")
-	cmd.Flags().StringVar(&chartName, "chart-name", "", "Name of the chart (required)")
+	cmd.Flags().StringVar(&chartName, "chart-name", "", "Name of the chart (required; may come from the config file)")
 	cmd.Flags().StringVar(&chartVersion, "chart-version", "0.1.0", "Chart version")
 	cmd.Flags().StringVar(&appVersion, "app-version", "1.0.0", "Application version")
 	cmd.Flags().StringVar(&mode, "mode", "universal", "Output mode: universal, separate, library, umbrella")
-	cmd.Flags().StringVarP(&source, "source", "s", "file", "Source type: file (default). cluster and gitops are not yet implemented.")
+	cmd.Flags().StringVarP(&source, "source", "s", "file", "Source type: file, cluster (live cluster via kubeconfig) or gitops (shallow git clone)")
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
 	cmd.Flags().StringSliceVar(&namespaces, "namespaces", []string{}, "Filter by multiple namespaces")
 	cmd.Flags().StringVarP(&labelSelector, "selector", "l", "", "Label selector filter")
@@ -198,10 +212,11 @@ Examples:
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", true, "Recursively scan directories")
 	cmd.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to kubeconfig file")
 	cmd.Flags().StringVar(&kubeContext, "context", "", "Kubeconfig context to use")
-	cmd.Flags().StringVar(&clusterNamespace, "cluster-namespace", "", "Namespace for cluster extraction (not yet implemented)")
-	cmd.Flags().StringVar(&gitRepo, "git-repo", "", "Git repository URL for gitops extraction (not yet implemented)")
-	cmd.Flags().StringVar(&gitBranch, "git-branch", "main", "Git branch for gitops extraction (not yet implemented)")
-	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "Path to SSH key for git authentication (not yet implemented)")
+	cmd.Flags().StringVar(&clusterSecrets, "cluster-secrets", "skip", "Secrets in cluster extraction: skip, mask (values replaced with REDACTED) or include")
+	cmd.Flags().StringVar(&gitRepo, "git-repo", "", "Git repository URL for gitops extraction (any URL git clone accepts)")
+	cmd.Flags().StringVar(&gitBranch, "git-branch", "", "Git branch or tag for gitops extraction (default: the remote's default branch)")
+	cmd.Flags().StringVar(&gitPath, "git-path", "", "Directory inside the repository to read manifests from (default: repository root)")
+	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH private key for gitops extraction over ssh")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Generate test templates")
 	cmd.Flags().BoolVar(&includeREADME, "include-readme", true, "Generate README.md")
 	cmd.Flags().BoolVar(&includeSchema, "include-schema", false, "Generate values.schema.json")
@@ -218,45 +233,60 @@ Examples:
 	cmd.Flags().BoolVar(&detectIngress, "detect-ingress", false, "Auto-detect ingress controller and generate controller-specific annotations")
 	cmd.Flags().BoolVar(&monorepo, "monorepo", false, "Generate monorepo layout with Makefile, .helmignore, and ct.yaml")
 	cmd.Flags().BoolVar(&spot, "spot", false, "Inject spot/preemptible instance tolerations and PDB")
-	cmd.Flags().IntVar(&spotGracePeriod, "spot-grace-period", 15, "Grace period in seconds for spot instance preStop hook")
+	cmd.Flags().IntVar(&spotGracePeriod, "spot-grace-period", 15, "terminationGracePeriodSeconds for pods on spot nodes (spot.terminationGracePeriodSeconds)")
 	cmd.Flags().BoolVar(&kustomize, "kustomize", false, "Generate Kustomize layout with base and dev/staging/prod overlays")
-	cmd.Flags().BoolVar(&postRenderer, "post-renderer", false, "Generate Kustomize overlays compatible with Helm post-rendering (Flux CD postBuild)")
+	cmd.Flags().BoolVar(&postRenderer, "post-renderer", false, "Generate a Helm post-renderer (post-renderer/kustomize.sh) applying per-environment Kustomize overlays")
 	cmd.Flags().BoolVar(&autoDeps, "auto-deps", false, "Auto-detect infrastructure dependencies (PostgreSQL, Redis, etc.)")
-	cmd.Flags().IntVar(&tenantCount, "tenant-count", 2, "Number of tenant examples to scaffold (default: 2)")
-	cmd.Flags().StringVar(&templateStyle, "template-style", "standard", "Template output style: standard, helm")
+	cmd.Flags().IntVar(&tenantCount, "tenant-count", 2, "Number of tenant examples to scaffold")
+	cmd.Flags().StringVar(&templateDir, "template-dir", "", "Directory of template overrides merged into every chart (<dir>/x.yaml → templates/x.yaml; _helpers.tpl and NOTES.txt allowed)")
+	cmd.Flags().StringVar(&templateStrategy, "template-strategy", "override", "How --template-dir files are merged: override, append, prepend")
+	cmd.Flags().StringArrayVar(&plugins, "plugin", nil, "External processor <apiVersion>/<Kind>[,...]=<executable> (repeatable), e.g. example.com/v1/Widget=./bin/widget")
+	cmd.Flags().StringVar(&configPath, "config", "", "Config file whose keys are flag names (default: .dhg.yaml in the working directory, if present)")
 	cmd.Flags().BoolVar(&includeHooks, "hooks", false, "Generate Helm lifecycle hook Job templates (pre-upgrade, post-install, pre-delete)")
 	cmd.Flags().BoolVar(&valuesFlat, "values-flat", false, "Add inline dot-notation path comments to values.yaml for --set reference")
+	cmd.Flags().StringSliceVar(&withFeatures, "with", nil, "Enable optional features, applied in order (list them with: dhg features)")
+	cmd.Flags().StringArrayVar(&featureOpts, "feature-opt", nil, "Feature parameter as <feature>.<key>=<value> (repeatable)")
 
-	_ = cmd.MarkFlagRequired("chart-name")
+	// chart-name may come from the config file, so it is checked after loading it.
+	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		if err := applyConfigFile(cmd, configPath); err != nil {
+			return err
+		}
+		if chartName == "" {
+			return fmt.Errorf("--chart-name is required (flag or config file)")
+		}
+		return nil
+	}
 
 	return cmd
 }
 
 type generateOptions struct {
-	paths           []string
-	outputDir       string
-	chartName       string
-	chartVersion    string
-	appVersion      string
-	mode            string
-	source          string
-	namespace       string
-	namespaces      []string
-	labelSelector   string
-	includeKinds    []string
-	excludeKinds    []string
-	recursive       bool
-	kubeConfig       string
-	kubeContext      string
-	clusterNamespace string
-	gitRepo          string
-	gitBranch        string
-	sshKey           string
-	includeTests     bool
-	includeREADME   bool
-	includeSchema   bool
-	verbose         bool
-	envValues       bool
+	paths              []string
+	outputDir          string
+	chartName          string
+	chartVersion       string
+	appVersion         string
+	mode               string
+	source             string
+	namespace          string
+	namespaces         []string
+	labelSelector      string
+	includeKinds       []string
+	excludeKinds       []string
+	recursive          bool
+	kubeConfig         string
+	kubeContext        string
+	clusterSecrets     string
+	gitPath            string
+	gitRepo            string
+	gitBranch          string
+	sshKey             string
+	includeTests       bool
+	includeREADME      bool
+	includeSchema      bool
+	verbose            bool
+	envValues          bool
 	deckhouseModule    bool
 	dryRun             bool
 	airgapRegistry     string
@@ -273,9 +303,13 @@ type generateOptions struct {
 	postRenderer       bool
 	autoDeps           bool
 	tenantCount        int
-	templateStyle      string
+	templateDir        string
+	templateStrategy   string
+	plugins            []string
 	includeHooks       bool
 	valuesFlat         bool
+	withFeatures       []string
+	featureOpts        []string
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -311,10 +345,8 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		}
 	case "cluster":
 		sourceType = types.SourceCluster
-		fmt.Fprintln(os.Stderr, "WARNING: cluster extraction is not yet implemented. Use --source=file instead.")
 	case "gitops":
 		sourceType = types.SourceGitOps
-		fmt.Fprintln(os.Stderr, "WARNING: gitops extraction is not yet implemented. Use --source=file instead.")
 	default:
 		return fmt.Errorf("invalid source: %s (must be file, cluster, or gitops)", opts.source)
 	}
@@ -324,12 +356,11 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		return fmt.Errorf("--monorepo and --kustomize are mutually exclusive")
 	}
 
-	// Validate template style
-	switch opts.templateStyle {
-	case "standard", "helm":
-		// valid
+	// Validate template override strategy
+	switch opts.templateStrategy {
+	case "", "override", "append", "prepend":
 	default:
-		return fmt.Errorf("unknown template style: %q (must be standard or helm)", opts.templateStyle)
+		return fmt.Errorf("unknown template strategy: %q (must be override, append or prepend)", opts.templateStrategy)
 	}
 
 	// Validate cloud provider
@@ -342,153 +373,41 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		}
 	}
 
-	// Step 1: Extract resources
-	if opts.verbose {
-		fmt.Printf("\n[1/5] Extracting resources from source...\n")
-	}
-
-	extractorRegistry := extractor.DefaultRegistry()
-	ext, ok := extractorRegistry.Get(sourceType)
-	if !ok {
-		return fmt.Errorf("no extractor available for source type: %s", sourceType)
-	}
-
 	extractOpts := extractor.Options{
-		Paths:         opts.paths,
-		Namespace:     opts.namespace,
-		Namespaces:    opts.namespaces,
-		LabelSelector: opts.labelSelector,
-		IncludeKinds:  opts.includeKinds,
-		ExcludeKinds:  opts.excludeKinds,
-		Recursive:     opts.recursive,
-		KubeConfig:    opts.kubeConfig,
-		KubeContext:   opts.kubeContext,
+		Paths:          opts.paths,
+		Namespace:      opts.namespace,
+		Namespaces:     opts.namespaces,
+		LabelSelector:  opts.labelSelector,
+		IncludeKinds:   opts.includeKinds,
+		ExcludeKinds:   opts.excludeKinds,
+		Recursive:      opts.recursive,
+		KubeConfig:     opts.kubeConfig,
+		KubeContext:    opts.kubeContext,
+		ClusterSecrets: opts.clusterSecrets,
+		GitURL:         opts.gitRepo,
+		GitBranch:      opts.gitBranch,
+		GitPath:        opts.gitPath,
+	}
+	if opts.sshKey != "" {
+		extractOpts.GitAuth = &extractor.GitAuthOptions{SSHKeyPath: opts.sshKey}
 	}
 
-	if err := ext.Validate(ctx, extractOpts); err != nil {
-		return fmt.Errorf("extractor validation failed: %w", err)
-	}
-
-	resourceChan, errChan := ext.Extract(ctx, extractOpts)
-
-	var extractedResources []*types.ExtractedResource
-	extractErrors := make([]error, 0)
-
-drain:
-	for {
-		select {
-		case resource, ok := <-resourceChan:
-			if !ok {
-				resourceChan = nil
-				if errChan == nil {
-					break drain
-				}
-				continue
-			}
-			extractedResources = append(extractedResources, resource)
-			if opts.verbose {
-				fmt.Printf("  Extracted: %s\n", resource.ResourceKey().String())
-			}
-		case err, ok := <-errChan:
-			if !ok {
-				errChan = nil
-				if resourceChan == nil {
-					break drain
-				}
-				continue
-			}
-			extractErrors = append(extractErrors, err)
-			fmt.Fprintf(os.Stderr, "  Warning: %v\n", err)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	if len(extractedResources) == 0 {
-		return fmt.Errorf("no resources extracted")
-	}
-
-	if opts.verbose {
-		fmt.Printf("  Total extracted: %d resources\n", len(extractedResources))
-		if len(extractErrors) > 0 {
-			fmt.Printf("  Warnings: %d\n", len(extractErrors))
-		}
-	}
-
-	// Step 2: Process resources
-	if opts.verbose {
-		fmt.Printf("\n[2/5] Processing resources...\n")
-	}
-
-	processorRegistry := processor.NewRegistry()
-	k8s.RegisterAll(processorRegistry)
-
-	// Initialize value processor and external file manager
-	valueProcessor := value.DefaultProcessor()
-	externalFileManager := value.NewExternalFileManager()
-
-	var processedResources []*types.ProcessedResource
-	allResourcesMap := make(map[types.ResourceKey]*types.ExtractedResource)
-	for _, r := range extractedResources {
-		allResourcesMap[r.ResourceKey()] = r
-	}
-
-	for _, extracted := range extractedResources {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		procCtx := processor.Context{
-			Ctx:                 ctx,
-			ChartName:           opts.chartName,
-			OutputMode:          outputMode,
-			Namespace:           extracted.Object.GetNamespace(),
-			AllResources:        allResourcesMap,
-			ExternalFileManager: externalFileManager,
-			ValueProcessor:      valueProcessor,
-		}
-
-		result, err := processorRegistry.Process(procCtx, extracted.Object)
-		if err != nil {
-			return fmt.Errorf("failed to process %s: %w", extracted.ResourceKey().String(), err)
-		}
-
-		processed := &types.ProcessedResource{
-			Original:        extracted,
-			ServiceName:     result.ServiceName,
-			TemplatePath:    result.TemplatePath,
-			TemplateContent: result.TemplateContent,
-			ValuesPath:      result.ValuesPath,
-			Values:          result.Values,
-			Dependencies:    result.Dependencies,
-		}
-
-		processedResources = append(processedResources, processed)
-
-		if opts.verbose {
-			fmt.Printf("  Processed: %s -> service: %s\n", extracted.ResourceKey().String(), result.ServiceName)
-		}
-	}
-
-	if opts.verbose {
-		fmt.Printf("  Total processed: %d resources\n", len(processedResources))
-	}
-
-	// Step 3: Analyze relationships
-	if opts.verbose {
-		fmt.Printf("\n[3/5] Analyzing relationships...\n")
-	}
-
-	analyzer := analyzer.NewDefaultAnalyzer()
-	detector.RegisterAll(analyzer)
-
-	graph, err := analyzer.Analyze(ctx, processedResources)
+	pipeline, err := runPipeline(ctx, pipelineOptions{
+		source:     sourceType,
+		extract:    extractOpts,
+		chartName:  opts.chartName,
+		outputMode: outputMode,
+		plugins:    opts.plugins,
+		verbose:    opts.verbose,
+	})
 	if err != nil {
-		return fmt.Errorf("analysis failed: %w", err)
+		return err
 	}
+	graph := pipeline.graph
+	processedResources := pipeline.processed
+	externalFileManager := pipeline.externalFiles
 
 	if opts.verbose {
-		fmt.Printf("  Detected relationships: %d\n", len(graph.Relationships))
-		fmt.Printf("  Service groups: %d\n", len(graph.Groups))
 		for _, group := range graph.Groups {
 			fmt.Printf("    - %s (%d resources)\n", group.Name, len(group.Resources))
 		}
@@ -518,7 +437,6 @@ drain:
 		ExternalFileManager: externalFileManager,
 		EnvValues:           opts.envValues,
 		DeckhouseModule:     opts.deckhouseModule,
-		TemplateStyle:       opts.templateStyle,
 		IncludeHooks:        opts.includeHooks,
 		ValuesFlat:          opts.valuesFlat,
 	}
@@ -594,62 +512,12 @@ drain:
 			LimitRange:    true,
 			NetworkPolicy: true,
 		}
-		nsTemplates := generator.GenerateNamespaceResources(groupingResult.Groups, nsOpts)
-
-		// Also generate auto-NetworkPolicies from service analysis.
-		// NOTE: If --multi-tenant is also active, GenerateMultiTenantOverlay (applied later)
-		// adds tenant-networkpolicies.yaml. Auto-NP uses per-group paths
-		// (<group>-networkpolicy.yaml), so there is no key collision, but both
-		// sets of policies will coexist in the final chart. This is intentional:
-		// auto-NP handles service-level ingress/egress while tenant-NP handles
-		// cross-tenant isolation.
-		autoNP := generator.GenerateAutoNetworkPolicies(graph, groupingResult.Groups)
-
-		// Build a set of group names that have fine-grained auto-NP policies.
-		// When a group has a fine-grained NP (e.g. templates/<group>-networkpolicy.yaml),
-		// we skip the broad default NP from namespace resources
-		// (templates/<group>-networkpolicy-default.yaml) to avoid conflicting policies.
-		autoNPGroups := make(map[string]struct{}, len(autoNP))
-		for path := range autoNP {
-			// Extract group name from "templates/<group>-networkpolicy.yaml"
-			name := strings.TrimPrefix(path, "templates/")
-			name = strings.TrimSuffix(name, "-networkpolicy.yaml")
-			if name != path { // successfully trimmed both
-				autoNPGroups[name] = struct{}{}
-			}
-		}
-
-		// Copy-on-write: build a new Templates map instead of mutating in place.
 		for i, chart := range charts {
-			templates := make(map[string]string, len(chart.Templates)+len(nsTemplates)+len(autoNP))
-			for k, v := range chart.Templates {
-				templates[k] = v
+			updated, err := generator.ApplyNamespaceResources(chart, graph, groupingResult.Groups, nsOpts)
+			if err != nil {
+				return fmt.Errorf("namespace resources for %s: %w", chart.Name, err)
 			}
-			for path, content := range nsTemplates {
-				// Skip default NP for groups that have fine-grained auto-NP
-				if strings.HasSuffix(path, "-networkpolicy-default.yaml") {
-					groupName := strings.TrimPrefix(path, "templates/")
-					groupName = strings.TrimSuffix(groupName, "-networkpolicy-default.yaml")
-					if _, has := autoNPGroups[groupName]; has {
-						continue
-					}
-				}
-				templates[path] = content
-			}
-			for path, content := range autoNP {
-				templates[path] = content
-			}
-			charts[i] = &types.GeneratedChart{
-				Name:          chart.Name,
-				Path:          chart.Path,
-				ChartYAML:     chart.ChartYAML,
-				ValuesYAML:    chart.ValuesYAML,
-				Templates:     templates,
-				Helpers:       chart.Helpers,
-				Notes:         chart.Notes,
-				ValuesSchema:  chart.ValuesSchema,
-				ExternalFiles: chart.ExternalFiles,
-			}
+			charts[i] = updated
 		}
 	}
 
@@ -730,7 +598,11 @@ drain:
 			spotConfig.Provider = generator.SpotAzure
 		}
 		for i, chart := range charts {
-			charts[i] = generator.InjectSpotConfig(chart, spotConfig)
+			updated, err := generator.InjectSpotConfig(chart, spotConfig)
+			if err != nil {
+				return fmt.Errorf("spot configuration for %s: %w", chart.Name, err)
+			}
+			charts[i] = updated
 		}
 	}
 
@@ -745,6 +617,46 @@ drain:
 		}
 		for i, chart := range charts {
 			charts[i] = generator.InjectDependencies(chart, detected)
+		}
+	}
+
+	// Helm post-renderer layout (post-renderer/kustomize.sh + overlays).
+	if opts.postRenderer {
+		if opts.verbose {
+			fmt.Println("\nGenerating Helm post-renderer layout (post-renderer/)...")
+		}
+		for i, chart := range charts {
+			charts[i] = generator.InjectPostRenderer(chart, []string{"dev", "staging", "prod"})
+		}
+	}
+
+	// Apply optional features (--with)
+	if len(opts.withFeatures) > 0 {
+		if opts.verbose {
+			fmt.Printf("\n[4k/5] Applying features: %s\n", strings.Join(opts.withFeatures, ", "))
+		}
+		featureOptions, err := generator.ParseFeatureOptions(opts.featureOpts)
+		if err != nil {
+			return err
+		}
+		charts, err = generator.ApplyFeatures(charts, opts.withFeatures, featureOptions, graph)
+		if err != nil {
+			return err
+		}
+	} else if len(opts.featureOpts) > 0 {
+		return fmt.Errorf("--feature-opt requires the feature to be enabled with --with")
+	}
+
+	// Apply template overrides (--template-dir)
+	if opts.templateDir != "" {
+		overrides, err := generator.LoadTemplateOverrides(opts.templateDir)
+		if err != nil {
+			return err
+		}
+		for i, chart := range charts {
+			if !strings.Contains(chart.ChartYAML, "\ntype: library") {
+				charts[i] = generator.ApplyTemplateOverrides(chart, overrides, opts.templateStrategy)
+			}
 		}
 	}
 
@@ -877,7 +789,8 @@ drain:
 			fmt.Printf("\n[5d/5] Generating Kustomize layout...\n")
 		}
 		for _, chart := range charts {
-			kustomizeOutput, err := generator.GenerateKustomizeLayout(chart)
+			objects := chartObjects(chart, processedResources)
+			kustomizeOutput, err := generator.GenerateKustomizeLayout(objects)
 			if err != nil {
 				if opts.verbose {
 					fmt.Fprintf(os.Stderr, "  Warning: Kustomize generation skipped for %s: %v\n", chart.Name, err)
@@ -885,43 +798,19 @@ drain:
 				continue
 			}
 			kustomizeDir := filepath.Join(opts.outputDir, chart.Name, "kustomize")
-			// Write base
-			baseDir := filepath.Join(kustomizeDir, "base")
-			if err := os.MkdirAll(baseDir, 0755); err != nil {
-				return fmt.Errorf("failed to create base dir: %w", err)
+			dirs := []*generator.KustomizeDir{kustomizeOutput.Base}
+			for _, overlay := range kustomizeOutput.Overlays {
+				dirs = append(dirs, overlay)
 			}
-			if err := os.WriteFile(filepath.Join(baseDir, "kustomization.yaml"), []byte(kustomizeOutput.Base.Kustomization), 0644); err != nil {
-				return fmt.Errorf("failed to write base kustomization: %w", err)
-			}
-			// Write overlays
-			for envName, overlay := range kustomizeOutput.Overlays {
-				overlayDir := filepath.Join(kustomizeDir, "overlays", envName)
-				if err := os.MkdirAll(overlayDir, 0755); err != nil {
-					return fmt.Errorf("failed to create overlay dir: %w", err)
-				}
-				if err := os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(overlay.Kustomization), 0644); err != nil {
-					return fmt.Errorf("failed to write overlay kustomization: %w", err)
-				}
-				for _, patch := range overlay.Patches {
-					if err := os.WriteFile(filepath.Join(overlayDir, patch.Target), []byte(patch.Patch), 0644); err != nil {
-						return fmt.Errorf("failed to write patch %s: %w", patch.Target, err)
-					}
+			for _, dir := range dirs {
+				if err := writeKustomizeDir(filepath.Join(kustomizeDir, dir.Path), dir); err != nil {
+					return err
 				}
 			}
 			if opts.verbose {
 				fmt.Printf("  Written: kustomize layout for %s\n", chart.Name)
 			}
 		}
-	}
-
-	// Post-renderer mode: when enabled, Kustomize overlays are generated with
-	// Flux CD postBuild-compatible structure. Currently infrastructure-only.
-	if opts.postRenderer {
-		if opts.verbose {
-			fmt.Println("\nPost-renderer mode enabled: Kustomize overlays will be compatible with Helm post-rendering.")
-		}
-		// TODO: Integrate actual post-renderer pipeline (Flux CD postBuild, kustomize --enable-helm).
-		// For now, --post-renderer implies --kustomize behavior with Flux-compatible annotations.
 	}
 
 	fmt.Printf("\n✓ Successfully generated %d chart(s) in %s\n", len(charts), opts.outputDir)
@@ -933,17 +822,17 @@ drain:
 
 func newAnalyzeCmd() *cobra.Command {
 	var (
-		paths         []string
-		outputFormat  string
-		outputFile    string
-		summaryOnly   bool
-		color         bool
-		verbose       bool
-		namespace     string
-		namespaces    []string
-		includeKinds  []string
-		excludeKinds  []string
-		recursive     bool
+		paths        []string
+		outputFormat string
+		outputFile   string
+		summaryOnly  bool
+		color        bool
+		verbose      bool
+		namespace    string
+		namespaces   []string
+		includeKinds []string
+		excludeKinds []string
+		recursive    bool
 	)
 
 	cmd := &cobra.Command{
@@ -1000,133 +889,25 @@ type analyzeOptions struct {
 }
 
 func runAnalyze(ctx context.Context, opts analyzeOptions) error {
-	// Step 1: Extract resources
-	if opts.verbose {
-		fmt.Printf("[1/4] Extracting resources...\n")
-	}
-
-	extractorRegistry := extractor.DefaultRegistry()
-	ext, ok := extractorRegistry.Get(types.SourceFile)
-	if !ok {
-		return fmt.Errorf("file extractor not available")
-	}
-
-	extractOpts := extractor.Options{
-		Paths:        opts.paths,
-		Namespace:    opts.namespace,
-		Namespaces:   opts.namespaces,
-		IncludeKinds: opts.includeKinds,
-		ExcludeKinds: opts.excludeKinds,
-		Recursive:    opts.recursive,
-	}
-
-	if err := ext.Validate(ctx, extractOpts); err != nil {
-		return fmt.Errorf("validation failed: %w", err)
-	}
-
-	resourceChan, errChan := ext.Extract(ctx, extractOpts)
-
-	var extractedResources []*types.ExtractedResource
-
-drainExtract:
-	for {
-		select {
-		case resource, ok := <-resourceChan:
-			if !ok {
-				resourceChan = nil
-				if errChan == nil {
-					break drainExtract
-				}
-				continue
-			}
-			extractedResources = append(extractedResources, resource)
-			if opts.verbose {
-				fmt.Printf("  Extracted: %s\n", resource.ResourceKey().String())
-			}
-		case err, ok := <-errChan:
-			if !ok {
-				errChan = nil
-				if resourceChan == nil {
-					break drainExtract
-				}
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "  Warning: %v\n", err)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	if len(extractedResources) == 0 {
-		return fmt.Errorf("no resources extracted")
-	}
-
-	if opts.verbose {
-		fmt.Printf("  Total: %d resources\n", len(extractedResources))
-	}
-
-	// Step 2: Process resources
-	if opts.verbose {
-		fmt.Printf("\n[2/4] Processing resources...\n")
-	}
-
-	processorRegistry := processor.NewRegistry()
-	k8s.RegisterAll(processorRegistry)
-
-	var processedResources []*types.ProcessedResource
-	allResourcesMap := make(map[types.ResourceKey]*types.ExtractedResource)
-	for _, r := range extractedResources {
-		allResourcesMap[r.ResourceKey()] = r
-	}
-
-	for _, extracted := range extractedResources {
-		procCtx := processor.Context{
-			Ctx:          ctx,
-			ChartName:    "analysis",
-			OutputMode:   types.OutputModeUniversal,
-			Namespace:    extracted.Object.GetNamespace(),
-			AllResources: allResourcesMap,
-		}
-
-		result, err := processorRegistry.Process(procCtx, extracted.Object)
-		if err != nil {
-			if opts.verbose {
-				fmt.Fprintf(os.Stderr, "  Warning: Failed to process %s: %v\n", extracted.ResourceKey(), err)
-			}
-			continue
-		}
-
-		processed := &types.ProcessedResource{
-			Original:        extracted,
-			ServiceName:     result.ServiceName,
-			TemplatePath:    result.TemplatePath,
-			TemplateContent: result.TemplateContent,
-			ValuesPath:      result.ValuesPath,
-			Values:          result.Values,
-		}
-		processedResources = append(processedResources, processed)
-
-		if opts.verbose {
-			fmt.Printf("  Processed: %s\n", extracted.ResourceKey().String())
-		}
-	}
-
-	if opts.verbose {
-		fmt.Printf("  Total: %d processed\n", len(processedResources))
-	}
-
-	// Step 3: Analyze relationships
-	if opts.verbose {
-		fmt.Printf("\n[3/4] Analyzing relationships...\n")
-	}
-
-	relationshipAnalyzer := analyzer.NewDefaultAnalyzer()
-	detector.RegisterAll(relationshipAnalyzer)
-
-	resourceGraph, err := relationshipAnalyzer.Analyze(ctx, processedResources)
+	pipeline, err := runPipeline(ctx, pipelineOptions{
+		source: types.SourceFile,
+		extract: extractor.Options{
+			Paths:        opts.paths,
+			Namespace:    opts.namespace,
+			Namespaces:   opts.namespaces,
+			IncludeKinds: opts.includeKinds,
+			ExcludeKinds: opts.excludeKinds,
+			Recursive:    opts.recursive,
+		},
+		chartName:  "analysis",
+		outputMode: types.OutputModeUniversal,
+		lenient:    true,
+		verbose:    opts.verbose,
+	})
 	if err != nil {
-		return fmt.Errorf("analysis failed: %w", err)
+		return err
 	}
+	resourceGraph := pipeline.graph
 
 	if opts.verbose {
 		fmt.Printf("  Detected: %d relationships\n", len(resourceGraph.Relationships))
@@ -1179,154 +960,15 @@ drainExtract:
 	return nil
 }
 
-func newValidateCmd() *cobra.Command {
-	var (
-		paths   []string
-		verbose bool
-	)
-
-	cmd := &cobra.Command{
-		Use:   "validate",
-		Short: "Validate Helm chart structure and templates",
-		Long: `Validate Helm chart for common issues:
-  - Chart.yaml presence and required fields
-  - values.yaml syntax
-  - Template syntax (Go template parsing)
-  - Required files presence`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runValidate(cmd.Context(), validateOptions{
-				paths:   paths,
-				verbose: verbose,
-			})
-		},
-	}
-
-	cmd.Flags().StringSliceVarP(&paths, "file", "f", []string{"."}, "Path(s) to chart directories to validate")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
-
-	return cmd
-}
-
-type validateOptions struct {
-	paths   []string
-	verbose bool
-}
-
-func runValidate(_ context.Context, opts validateOptions) error {
-	totalErrors := 0
-	totalWarnings := 0
-
-	for _, chartPath := range opts.paths {
-		fmt.Printf("Validating chart at: %s\n", chartPath)
-
-		// Check Chart.yaml
-		chartYAMLPath := filepath.Join(chartPath, "Chart.yaml")
-		if _, err := os.Stat(chartYAMLPath); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "  ERROR: Chart.yaml not found at %s\n", chartYAMLPath)
-			totalErrors++
-		} else {
-			data, err := os.ReadFile(chartYAMLPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  ERROR: Cannot read Chart.yaml: %v\n", err)
-				totalErrors++
-			} else {
-				if opts.verbose {
-					fmt.Printf("  OK: Chart.yaml found (%d bytes)\n", len(data))
-				}
-				// Check required fields
-				content := string(data)
-				requiredFields := []string{"apiVersion:", "name:", "version:"}
-				for _, field := range requiredFields {
-					if !strings.Contains(content, field) {
-						fmt.Fprintf(os.Stderr, "  ERROR: Chart.yaml missing required field: %s\n", strings.TrimSuffix(field, ":"))
-						totalErrors++
-					}
-				}
-			}
-		}
-
-		// Check values.yaml
-		valuesPath := filepath.Join(chartPath, "values.yaml")
-		if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "  WARNING: values.yaml not found\n")
-			totalWarnings++
-		} else {
-			data, err := os.ReadFile(valuesPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  ERROR: Cannot read values.yaml: %v\n", err)
-				totalErrors++
-			} else {
-				// Try to parse YAML
-				var values map[string]interface{}
-				if err := yaml.Unmarshal(data, &values); err != nil {
-					fmt.Fprintf(os.Stderr, "  ERROR: Invalid YAML in values.yaml: %v\n", err)
-					totalErrors++
-				} else if opts.verbose {
-					fmt.Printf("  OK: values.yaml valid (%d bytes)\n", len(data))
-				}
-			}
-		}
-
-		// Check templates directory
-		templatesDir := filepath.Join(chartPath, "templates")
-		if _, err := os.Stat(templatesDir); os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "  WARNING: templates/ directory not found\n")
-			totalWarnings++
-		} else {
-			// Parse templates for syntax
-			entries, err := os.ReadDir(templatesDir)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  ERROR: Cannot read templates directory: %v\n", err)
-				totalErrors++
-			} else {
-				templateCount := 0
-				for _, entry := range entries {
-					if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-						continue
-					}
-					templateCount++
-					tmplPath := filepath.Join(templatesDir, entry.Name())
-					data, err := os.ReadFile(tmplPath)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "  ERROR: Cannot read template %s: %v\n", entry.Name(), err)
-						totalErrors++
-						continue
-					}
-					// Basic Go template syntax check (check balanced {{ }})
-					content := string(data)
-					opens := strings.Count(content, "{{")
-					closes := strings.Count(content, "}}")
-					if opens != closes {
-						fmt.Fprintf(os.Stderr, "  ERROR: Unbalanced template delimiters in %s ({{ count: %d, }} count: %d)\n", entry.Name(), opens, closes)
-						totalErrors++
-					} else if opts.verbose {
-						fmt.Printf("  OK: %s (%d template expressions)\n", entry.Name(), opens)
-					}
-				}
-				if opts.verbose {
-					fmt.Printf("  Templates: %d files checked\n", templateCount)
-				}
-			}
-		}
-	}
-
-	// Summary
-	fmt.Printf("\nValidation complete: %d error(s), %d warning(s)\n", totalErrors, totalWarnings)
-	if totalErrors > 0 {
-		return fmt.Errorf("validation failed with %d error(s)", totalErrors)
-	}
-	return nil
-}
-
 func newMigrateCmd() *cobra.Command {
 	var (
-		fromDir string
-		sourceFiles []string
-		chartName   string
+		fromDir      string
+		sourceFiles  []string
+		chartName    string
 		chartVersion string
-		appVersion  string
-		mode        string
-		verbose     bool
+		appVersion   string
+		mode         string
+		verbose      bool
 	)
 
 	cmd := &cobra.Command{
@@ -1417,101 +1059,16 @@ func runMigrate(ctx context.Context, opts migrateOptions) error {
 		return fmt.Errorf("invalid mode: %s", opts.mode)
 	}
 
-	// Extract resources
-	extractorRegistry := extractor.DefaultRegistry()
-	ext, ok := extractorRegistry.Get(types.SourceFile)
-	if !ok {
-		return fmt.Errorf("no extractor available for file source")
-	}
-
-	extractOpts := extractor.Options{
-		Paths:     opts.sourceFiles,
-		Recursive: true,
-	}
-
-	if err := ext.Validate(ctx, extractOpts); err != nil {
-		return fmt.Errorf("extractor validation failed: %w", err)
-	}
-
-	resourceChan, errChan := ext.Extract(ctx, extractOpts)
-
-	var extractedResources []*types.ExtractedResource
-drain:
-	for {
-		select {
-		case resource, ok := <-resourceChan:
-			if !ok {
-				resourceChan = nil
-				if errChan == nil {
-					break drain
-				}
-				continue
-			}
-			extractedResources = append(extractedResources, resource)
-		case err, ok := <-errChan:
-			if !ok {
-				errChan = nil
-				if resourceChan == nil {
-					break drain
-				}
-				continue
-			}
-			if opts.verbose {
-				fmt.Fprintf(os.Stderr, "  Warning: %v\n", err)
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	if len(extractedResources) == 0 {
-		return fmt.Errorf("no resources extracted from source files")
-	}
-
-	// Process resources
-	processorRegistry := processor.NewRegistry()
-	k8s.RegisterAll(processorRegistry)
-	valueProcessor := value.DefaultProcessor()
-	externalFileManager := value.NewExternalFileManager()
-
-	allResourcesMap := make(map[types.ResourceKey]*types.ExtractedResource)
-	for _, r := range extractedResources {
-		allResourcesMap[r.ResourceKey()] = r
-	}
-
-	var processedResources []*types.ProcessedResource
-	for _, extracted := range extractedResources {
-		procCtx := processor.Context{
-			Ctx:                 ctx,
-			ChartName:           opts.chartName,
-			OutputMode:          outputMode,
-			Namespace:           extracted.Object.GetNamespace(),
-			AllResources:        allResourcesMap,
-			ExternalFileManager: externalFileManager,
-			ValueProcessor:      valueProcessor,
-		}
-		result, err := processorRegistry.Process(procCtx, extracted.Object)
-		if err != nil {
-			return fmt.Errorf("failed to process %s: %w", extracted.ResourceKey().String(), err)
-		}
-		processedResources = append(processedResources, &types.ProcessedResource{
-			Original:        extracted,
-			ServiceName:     result.ServiceName,
-			TemplatePath:    result.TemplatePath,
-			TemplateContent: result.TemplateContent,
-			ValuesPath:      result.ValuesPath,
-			Values:          result.Values,
-			Dependencies:    result.Dependencies,
-		})
-	}
-
-	// Analyze relationships
-	a := analyzer.NewDefaultAnalyzer()
-	detector.RegisterAll(a)
-	graph, err := a.Analyze(ctx, processedResources)
+	pipeline, err := runPipeline(ctx, pipelineOptions{
+		source:     types.SourceFile,
+		extract:    extractor.Options{Paths: opts.sourceFiles, Recursive: true},
+		chartName:  opts.chartName,
+		outputMode: outputMode,
+	})
 	if err != nil {
-		return fmt.Errorf("analysis failed: %w", err)
+		return err
 	}
+	graph := pipeline.graph
 
 	// Generate new chart
 	generatorRegistry := generator.DefaultRegistry()
@@ -1907,107 +1464,16 @@ func runFix(ctx context.Context, opts fixOptions) error {
 		fmt.Printf("Auto-fix: reading manifests from %v\n", opts.paths)
 	}
 
-	// Step 1: Extract resources
-	extractorRegistry := extractor.DefaultRegistry()
-	ext, ok := extractorRegistry.Get(types.SourceFile)
-	if !ok {
-		return fmt.Errorf("file extractor not available")
-	}
-
-	extractOpts := extractor.Options{
-		Paths:     opts.paths,
-		Recursive: opts.recursive,
-	}
-
-	if err := ext.Validate(ctx, extractOpts); err != nil {
-		return fmt.Errorf("validation failed: %w", err)
-	}
-
-	resourceChan, errChan := ext.Extract(ctx, extractOpts)
-
-	var extractedResources []*types.ExtractedResource
-drainFix:
-	for {
-		select {
-		case resource, ok := <-resourceChan:
-			if !ok {
-				resourceChan = nil
-				if errChan == nil {
-					break drainFix
-				}
-				continue
-			}
-			extractedResources = append(extractedResources, resource)
-		case err, ok := <-errChan:
-			if !ok {
-				errChan = nil
-				if resourceChan == nil {
-					break drainFix
-				}
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	if len(extractedResources) == 0 {
-		return fmt.Errorf("no resources extracted from %v", opts.paths)
-	}
-
-	if opts.verbose {
-		fmt.Printf("Extracted %d resources\n", len(extractedResources))
-	}
-
-	// Step 2: Process resources
-	processorRegistry := processor.NewRegistry()
-	k8s.RegisterAll(processorRegistry)
-
-	valueProcessor := value.DefaultProcessor()
-	externalFileManager := value.NewExternalFileManager()
-
-	allResourcesMap := make(map[types.ResourceKey]*types.ExtractedResource)
-	for _, r := range extractedResources {
-		allResourcesMap[r.ResourceKey()] = r
-	}
-
-	var processedResources []*types.ProcessedResource
-	for _, extracted := range extractedResources {
-		procCtx := processor.Context{
-			Ctx:                 ctx,
-			ChartName:           opts.chartName,
-			OutputMode:          types.OutputModeUniversal,
-			Namespace:           extracted.Object.GetNamespace(),
-			AllResources:        allResourcesMap,
-			ExternalFileManager: externalFileManager,
-			ValueProcessor:      valueProcessor,
-		}
-
-		result, err := processorRegistry.Process(procCtx, extracted.Object)
-		if err != nil {
-			return fmt.Errorf("failed to process %s: %w", extracted.ResourceKey().String(), err)
-		}
-
-		processedResources = append(processedResources, &types.ProcessedResource{
-			Original:        extracted,
-			ServiceName:     result.ServiceName,
-			TemplatePath:    result.TemplatePath,
-			TemplateContent: result.TemplateContent,
-			ValuesPath:      result.ValuesPath,
-			Values:          result.Values,
-			Dependencies:    result.Dependencies,
-		})
-	}
-
-	// Step 3: Analyze relationships
-	anlzr := analyzer.NewDefaultAnalyzer()
-	detector.RegisterAll(anlzr)
-
-	graph, err := anlzr.Analyze(ctx, processedResources)
+	pipeline, err := runPipeline(ctx, pipelineOptions{
+		source:     types.SourceFile,
+		extract:    extractor.Options{Paths: opts.paths, Recursive: opts.recursive},
+		chartName:  opts.chartName,
+		outputMode: types.OutputModeUniversal,
+	})
 	if err != nil {
-		return fmt.Errorf("analysis failed: %w", err)
+		return err
 	}
+	graph := pipeline.graph
 
 	// Step 4: Generate chart
 	generatorRegistry := generator.DefaultRegistry()
@@ -2108,4 +1574,64 @@ func newVersionCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "dhg version %s (built: %s)\n", version, buildTime)
 		},
 	}
+}
+
+func newFeaturesCmd() *cobra.Command {
+	var namesOnly bool
+	cmd := &cobra.Command{
+		Use:   "features",
+		Short: "List optional features available to `generate --with`",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			for _, f := range generator.Features() {
+				if namesOnly {
+					fmt.Fprintln(out, f.Name)
+					continue
+				}
+				fmt.Fprintf(out, "%s\n    %s\n", f.Name, f.Description)
+				keys := make([]string, 0, len(f.Params))
+				for k := range f.Params {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					fmt.Fprintf(out, "    --feature-opt %s.%s=%q\n", f.Name, k, f.Params[k])
+				}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&namesOnly, "names", false, "Print feature names only")
+	return cmd
+}
+
+// chartObjects returns the input objects rendered by the chart's templates.
+func chartObjects(chart *types.GeneratedChart, processed []*types.ProcessedResource) []*unstructured.Unstructured {
+	var objects []*unstructured.Unstructured
+	for _, pr := range processed {
+		if pr.Original == nil || pr.Original.Object == nil {
+			continue
+		}
+		if _, ok := chart.Templates[pr.TemplatePath]; ok {
+			objects = append(objects, pr.Original.Object)
+		}
+	}
+	return objects
+}
+
+// writeKustomizeDir writes a kustomization.yaml and its resources to dir.
+func writeKustomizeDir(dir string, kd *generator.KustomizeDir) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", dir, err)
+	}
+	files := map[string]string{"kustomization.yaml": kd.Kustomization}
+	for name, content := range kd.Resources {
+		files[name] = content
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", filepath.Join(dir, name), err)
+		}
+	}
+	return nil
 }

@@ -101,10 +101,9 @@ metadata:
     grafana_dashboard: "1"
 data:
   {{- range $key, $value := .dashboards }}
-  {{ $key }}: |
-    {{ $value | nindent 4 }}
+  {{ $key | toJson }}: {{ $value | toString | toJson }}
   {{- end }}
 {{- end }}
 {{- end }}
-`, sanitized, name, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName)
 }

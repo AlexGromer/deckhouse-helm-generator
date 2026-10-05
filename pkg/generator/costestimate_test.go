@@ -8,14 +8,17 @@ package generator
 //  3. TestCostEstimate_Job_Parallelism4                 — happy   Job with parallelism=4 → treated as 4 replicas, cost > 0
 //  4. TestCostEstimate_CronJob_Default                  — happy   CronJob → Replicas=1 (default), cost > 0
 //  5. TestCostEstimate_ProviderPrices_AWS_GCP_Azure     — happy   3 providers produce different prices (overrides respected)
-//  6. TestCostEstimate_IncludeStorage_PVC               — happy   IncludeStorage=true + PVC annotation → StorageCost > 0
+//  6. TestCostEstimate_IncludeStorage_PVC               — happy   IncludeStorage=true + 10Gi PVC → StorageCost > 0
 //  7. TestCostEstimate_NoRequests_FallbackWarning       — edge    container without resource requests → warning generated, cost uses defaults
 //  8. TestCostEstimate_ParseCPU_Integer                 — unit    "2" → 2000 millicores
 //  9. TestCostEstimate_ParseMemory_GiB                  — unit    "1Gi" → 1024 MiB
 // 10. TestCostEstimate_EmptyGraph_ZeroReport            — edge    empty graph → GrandTotal == 0.0
 // 11. TestCostEstimate_EmptyRegion_UsesDefault          — edge    empty Region → report Region is non-empty (default applied)
 // 12. TestCostEstimate_MalformedQuantity_Warning        — error   "garbage" CPU quantity → workload-level warning emitted
-// 13. TestInjectCostNotes_Idempotent                    — integration second inject does not duplicate NOTES content
+// 13. TestCostEstimate_DecodedYAMLReplicas             — replicas decoded from YAML (float64) are honoured
+// 14. TestCostEstimate_DecimalMemoryUnits              — "1G" is 10^9 bytes, not 1000 MiB
+// 15. TestCostEstimate_VolumeClaimTemplates            — StatefulSet volumeClaimTemplates cost one volume per replica
+// 16. TestCostEstimateReport_Markdown                  — Markdown section lists workloads, volumes and assumptions
 // ============================================================
 
 import (
@@ -27,18 +30,6 @@ import (
 )
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-func makeTestChartCost() *types.GeneratedChart {
-	return &types.GeneratedChart{
-		Name:       "test-chart",
-		Path:       "/tmp/test-chart",
-		ChartYAML:  "apiVersion: v2\nname: test-chart\nversion: 0.1.0",
-		ValuesYAML: "replicaCount: 1",
-		Templates: map[string]string{
-			"templates/deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test-app\nspec:\n  replicas: 3\n  template:\n    spec:\n      containers:\n      - name: app\n        image: app:latest\n        resources:\n          requests:\n            cpu: 100m\n            memory: 128Mi\n          limits:\n            cpu: 500m\n            memory: 256Mi",
-		},
-	}
-}
 
 // makeTestGraphWithWorkload builds a ResourceGraph with one workload ProcessedResource.
 // cpuReq/cpuLim/memReq/memLim use Kubernetes quantity strings ("100m", "1Gi", "" for unset).
@@ -292,7 +283,7 @@ func TestCostEstimate_ProviderPrices_AWS_GCP_Azure(t *testing.T) {
 func TestCostEstimate_IncludeStorage_PVC(t *testing.T) {
 	graph := makeTestGraphWithWorkload("StatefulSet", "db", "default", 1, "250m", "500m", "256Mi", "512Mi")
 
-	// Add a PVC resource to the graph with storage annotation.
+	// Add a 10Gi PVC resource to the graph.
 	pvcObj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "v1",
@@ -300,9 +291,6 @@ func TestCostEstimate_IncludeStorage_PVC(t *testing.T) {
 			"metadata": map[string]interface{}{
 				"name":      "db-data",
 				"namespace": "default",
-				"annotations": map[string]interface{}{
-					"dhg.deckhouse.io/storage-gi": "10",
-				},
 			},
 			"spec": map[string]interface{}{
 				"accessModes": []interface{}{"ReadWriteOnce"},
@@ -438,7 +426,7 @@ func TestCostEstimate_EmptyRegion_UsesDefault(t *testing.T) {
 	if report == nil {
 		t.Fatal("GenerateCostEstimate must not return nil when Region is empty")
 	}
-	if string(report.Region) == "" {
+	if report.Region == "" {
 		t.Error("expected report.Region to be non-empty (implementation must apply default region)")
 	}
 }
@@ -508,44 +496,75 @@ func TestCostEstimate_MalformedQuantity_Warning(t *testing.T) {
 	}
 }
 
-// ─── Section 9: InjectCostNotes — idempotency ────────────────────────────────
+// ─── Section 9: real-world inputs and rendering ──────────────────────────────
 
-func TestInjectCostNotes_Idempotent(t *testing.T) {
-	graph := makeTestGraphWithWorkload("Deployment", "web", "default", 2, "200m", "500m", "128Mi", "256Mi")
-	opts := CostEstimateOptions{
-		Provider: CloudProviderAWS,
-		Region:   "us-east-1",
-		Unit:     CostUnitMonthly,
+func TestCostEstimate_DecodedYAMLReplicas(t *testing.T) {
+	graph := makeTestGraphWithWorkload("Deployment", "web", "default", 1, "100m", "", "128Mi", "")
+	for _, r := range graph.Resources {
+		// The file extractor decodes YAML numbers as float64.
+		r.Original.Object.Object["spec"].(map[string]interface{})["replicas"] = float64(4)
 	}
-	report := GenerateCostEstimate(graph, opts)
-	if report == nil {
-		t.Fatal("GenerateCostEstimate must not return nil")
+	report := GenerateCostEstimate(graph, CostEstimateOptions{Provider: CloudProviderAWS, Unit: CostUnitHourly})
+	if got := report.Workloads[0].Replicas; got != 4 {
+		t.Errorf("Replicas = %d, want 4", got)
 	}
+	want := 4 * (100*cloudPrices[CloudProviderAWS].CPUPerMillicorePerHour + 128*cloudPrices[CloudProviderAWS].MemPerMiBPerHour)
+	if diff := report.GrandTotal - want; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("GrandTotal = %f, want %f", report.GrandTotal, want)
+	}
+}
 
-	chart := makeTestChartCost()
+func TestCostEstimate_DecimalMemoryUnits(t *testing.T) {
+	for in, want := range map[string]int64{"1G": 953, "512M": 488, "1Gi": 1024, "1048576": 1, "1.5Gi": 1536} {
+		got, err := parseResourceQuantity(in, false)
+		if err != nil || got != want {
+			t.Errorf("parseResourceQuantity(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	if got, _ := parseResourceQuantity("250m", true); got != 250 {
+		t.Errorf("CPU 250m = %d", got)
+	}
+	if _, err := parseResourceQuantity("12 cores", true); err == nil {
+		t.Error("expected an error for an invalid quantity")
+	}
+}
 
-	result1, injected1 := InjectCostNotes(chart, report)
-	if result1 == nil {
-		t.Fatal("InjectCostNotes returned nil on first call")
+func TestCostEstimate_VolumeClaimTemplates(t *testing.T) {
+	graph := makeTestGraphWithWorkload("StatefulSet", "db", "default", 3, "100m", "", "128Mi", "")
+	for _, r := range graph.Resources {
+		spec := r.Original.Object.Object["spec"].(map[string]interface{})
+		spec["volumeClaimTemplates"] = []interface{}{map[string]interface{}{
+			"metadata": map[string]interface{}{"name": "data"},
+			"spec": map[string]interface{}{
+				"resources": map[string]interface{}{"requests": map[string]interface{}{"storage": "20Gi"}},
+			},
+		}}
 	}
-	if !injected1 {
-		t.Error("expected injected=true on first InjectCostNotes call")
+	report := GenerateCostEstimate(graph, CostEstimateOptions{Provider: CloudProviderGCP, Unit: CostUnitMonthly, IncludeStorage: true})
+	if len(report.Storage) != 1 || report.Storage[0].SizeGiB != 60 || report.Storage[0].Owner != "StatefulSet/db" {
+		t.Fatalf("Storage = %+v", report.Storage)
 	}
+	if want := 60 * cloudPrices[CloudProviderGCP].StoragePerGiBPerMonth; report.TotalStorageCost != want {
+		t.Errorf("TotalStorageCost = %f, want %f", report.TotalStorageCost, want)
+	}
+}
 
-	// Second injection on already-injected chart must not duplicate content.
-	result2, injected2 := InjectCostNotes(result1, report)
-	if result2 == nil {
-		t.Fatal("InjectCostNotes returned nil on second call")
+func TestCostEstimateReport_Markdown(t *testing.T) {
+	graph := makeTestGraphWithWorkload("Deployment", "web", "default", 2, "", "", "256Mi", "")
+	md := GenerateCostEstimate(graph, CostEstimateOptions{Provider: CloudProviderAzure, Unit: CostUnitMonthly}).Markdown()
+	for _, want := range []string{
+		"## Estimated cost",
+		"AZURE (eastus), USD per month",
+		"| Deployment/web | 2 | 100m | 256Mi |",
+		"**Total: $",
+		"- Deployment/web: app: no CPU request; assuming 100m",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("Markdown misses %q:\n%s", want, md)
+		}
 	}
-	_ = injected2 // second call may return false — that is acceptable
-
-	// Notes content must not be duplicated.
-	if result1.Notes == "" {
-		t.Fatal("expected Notes to be non-empty after first inject")
-	}
-	count1 := strings.Count(result1.Notes, "Cost Estimate")
-	count2 := strings.Count(result2.Notes, "Cost Estimate")
-	if count2 > count1 {
-		t.Errorf("second InjectCostNotes duplicated content: count before=%d, after=%d", count1, count2)
+	empty := GenerateCostEstimate(types.NewResourceGraph(), CostEstimateOptions{Provider: CloudProviderAWS}).Markdown()
+	if !strings.Contains(empty, "No workloads or volumes.") {
+		t.Errorf("empty report:\n%s", empty)
 	}
 }

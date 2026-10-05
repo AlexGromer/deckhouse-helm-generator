@@ -1,191 +1,105 @@
 package generator
 
 import (
-	"fmt"
-	"strings"
+	"sort"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// ReloaderOptions configures Stakater Reloader annotation injection.
-type ReloaderOptions struct {
-	AutoReload      bool
-	WatchConfigMaps bool
-	WatchSecrets    bool
-}
+// Stakater Reloader integration (`dhg generate --with reloader`).
+//
+// Reloader watches ConfigMaps and Secrets and performs a rolling restart of
+// the workloads that use them. The feature annotates the workload (not its
+// pod template, which is where Reloader reads its annotations) with
+// `reloader.stakater.com/auto: "true"`, guarded by `.Values.reloader.enabled`.
 
-// ReloaderCandidate represents a workload that should receive reloader annotations.
+// ReloaderCandidate is a workload that references ConfigMaps or Secrets.
 type ReloaderCandidate struct {
-	WorkloadName      string
-	MountedConfigMaps []string
-	MountedSecrets    []string
+	Key        types.ResourceKey
+	ConfigMaps []string
+	Secrets    []string
 }
 
-// DetectReloaderCandidates scans the resource graph for workloads that mount
-// ConfigMaps or Secrets and returns them as reloader candidates.
-// It detects mounts both from graph relationships and from spec.template.spec.volumes.
+// DetectReloaderCandidates returns the Deployments, StatefulSets and
+// DaemonSets of the graph that reference a ConfigMap or Secret (volumes,
+// projected volumes, env valueFrom, envFrom), sorted by resource key.
 func DetectReloaderCandidates(graph *types.ResourceGraph) []ReloaderCandidate {
 	if graph == nil {
 		return nil
 	}
-
-	var candidates []ReloaderCandidate
-
-	for _, r := range graph.Resources {
-		kind := r.Original.GVK.Kind
-		if kind != "Deployment" && kind != "StatefulSet" && kind != "DaemonSet" {
+	var out []ReloaderCandidate
+	for key, r := range graph.Resources {
+		if r == nil || r.Original == nil || r.Original.Object == nil || !podWorkloadKinds[r.Original.GVK.Kind] {
 			continue
 		}
-		name := r.Original.Object.GetName()
-
-		var configMaps, secrets []string
-
-		// Strategy 1: parse volumes from object spec.
-		configMaps, secrets = extractVolumeMounts(r.Original.Object.Object)
-
-		// Strategy 2: check graph relationships for ConfigMap/Secret resources.
-		if len(configMaps) == 0 && len(secrets) == 0 {
-			key := r.Original.ResourceKey()
-			for _, rel := range graph.GetRelationshipsFrom(key) {
-				for _, target := range graph.Resources {
-					if target.Original.ResourceKey() == rel.To {
-						targetKind := target.Original.GVK.Kind
-						targetName := target.Original.Object.GetName()
-						switch targetKind {
-						case "ConfigMap":
-							configMaps = append(configMaps, targetName)
-						case "Secret":
-							secrets = append(secrets, targetName)
-						}
-					}
-				}
+		var cms, secrets []string
+		for _, ref := range configReferences(r) {
+			if ref.GVK.Kind == "ConfigMap" {
+				cms = append(cms, ref.Name)
+			} else {
+				secrets = append(secrets, ref.Name)
 			}
 		}
-
-		if len(configMaps) > 0 || len(secrets) > 0 {
-			candidates = append(candidates, ReloaderCandidate{
-				WorkloadName:      name,
-				MountedConfigMaps: configMaps,
-				MountedSecrets:    secrets,
-			})
+		sort.Strings(cms)
+		sort.Strings(secrets)
+		if len(cms) > 0 || len(secrets) > 0 {
+			out = append(out, ReloaderCandidate{Key: key, ConfigMaps: cms, Secrets: secrets})
 		}
 	}
-
-	return candidates
+	sort.Slice(out, func(i, j int) bool { return out[i].Key.String() < out[j].Key.String() })
+	return out
 }
 
-// extractVolumeMounts parses configmap and secret volume names from a workload object's
-// spec.template.spec.volumes list.
-func extractVolumeMounts(obj map[string]interface{}) (configMaps, secrets []string) {
-	spec, ok := obj["spec"].(map[string]interface{})
-	if !ok {
-		return
+func nestedMap(obj map[string]interface{}, path ...string) map[string]interface{} {
+	cur := obj
+	for _, p := range path {
+		if cur == nil {
+			return nil
+		}
+		cur, _ = cur[p].(map[string]interface{})
 	}
-	tmpl, ok := spec["template"].(map[string]interface{})
-	if !ok {
-		return
+	return cur
+}
+
+func asList(v interface{}) []interface{} {
+	l, _ := v.([]interface{})
+	return l
+}
+
+// applyReloaderFeature implements the `reloader` feature. By default only
+// workloads that reference a ConfigMap or Secret are annotated; the
+// all-workloads parameter annotates every Deployment/StatefulSet/DaemonSet.
+func applyReloaderFeature(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {
+	all := fc.BoolParam("all-workloads")
+	candidates := map[types.ResourceKey]bool{}
+	for _, c := range DetectReloaderCandidates(fc.Graph) {
+		candidates[c.Key] = true
 	}
-	tmplSpec, ok := tmpl["spec"].(map[string]interface{})
-	if !ok {
-		return
-	}
-	volumes, ok := tmplSpec["volumes"].([]interface{})
-	if !ok {
-		return
-	}
-	for _, v := range volumes {
-		vol, ok := v.(map[string]interface{})
+
+	out := cloneChart(chart)
+	changed := false
+	for _, rt := range resourceTemplates(chart, func(k string) bool { return podWorkloadKinds[k] }) {
+		if !all {
+			r := graphResourceFor(fc.Graph, rt)
+			if r == nil || !candidates[r.Original.ResourceKey()] {
+				continue
+			}
+		}
+		ok := rt.injectAnnotations(rt.topLevel("metadata:"), "$.Values.reloader.enabled", func(indent int) []string {
+			return annotationLines("$.Values.reloader.enabled", indent,
+				[][2]string{{"reloader.stakater.com/auto", `"true"`}})
+		})
 		if !ok {
 			continue
 		}
-		if cm, ok := vol["configMap"].(map[string]interface{}); ok {
-			if cmName, ok := cm["name"].(string); ok {
-				configMaps = append(configMaps, cmName)
-			}
-		}
-		if sec, ok := vol["secret"].(map[string]interface{}); ok {
-			if secName, ok := sec["secretName"].(string); ok {
-				secrets = append(secrets, secName)
-			}
-		}
+		out.Templates[rt.path] = rt.render()
+		changed = true
 	}
-	return
-}
-
-// InjectReloaderAnnotations injects Stakater Reloader annotations into workload
-// templates in the chart. Returns the updated chart (copy-on-write) and count of
-// templates modified. Returns (nil, 0) for nil chart.
-func InjectReloaderAnnotations(chart *types.GeneratedChart, opts ReloaderOptions) (*types.GeneratedChart, int) {
-	if chart == nil {
-		return nil, 0
+	if !changed {
+		return chart, nil
 	}
-
-	newChart := copyChartTemplates(chart)
-	count := 0
-
-	for path, content := range newChart.Templates {
-		if !isWorkloadTemplate(content) {
-			continue
-		}
-
-		updated := injectReloaderAnnotationsIntoTemplate(content, opts)
-		if updated != content {
-			newChart.Templates[path] = updated
-			count++
-		}
+	if err := addFeatureValues(out, "reloader", map[string]interface{}{"enabled": true}); err != nil {
+		return nil, err
 	}
-
-	return newChart, count
-}
-
-// injectReloaderAnnotationsIntoTemplate adds reloader annotations to a template.
-func injectReloaderAnnotationsIntoTemplate(content string, opts ReloaderOptions) string {
-	if !opts.AutoReload && !opts.WatchConfigMaps && !opts.WatchSecrets {
-		return content
-	}
-
-	// Check if already injected.
-	if strings.Contains(content, "reloader.stakater.com") {
-		return content
-	}
-
-	var annotations strings.Builder
-	if opts.AutoReload {
-		annotations.WriteString(fmt.Sprintf("        reloader.stakater.com/auto: \"true\"\n"))
-	}
-	if opts.WatchConfigMaps {
-		annotations.WriteString(fmt.Sprintf("        reloader.stakater.com/search: \"true\"\n"))
-	}
-	if opts.WatchSecrets {
-		annotations.WriteString(fmt.Sprintf("        reloader.stakater.com/secret.reload: \"true\"\n"))
-	}
-
-	annotationBlock := annotations.String()
-	if annotationBlock == "" {
-		return content
-	}
-
-	// Inject into "annotations: {}" pattern.
-	if strings.Contains(content, "      annotations: {}") {
-		return strings.Replace(content,
-			"      annotations: {}",
-			"      annotations:\n"+annotationBlock,
-			1)
-	}
-	// Inject after existing "annotations:" line.
-	if strings.Contains(content, "      annotations:") {
-		return strings.Replace(content,
-			"      annotations:",
-			"      annotations:\n"+annotationBlock,
-			1)
-	}
-	// No annotations section — inject after template marker.
-	if strings.Contains(content, "  template:") {
-		return strings.Replace(content,
-			"  template:",
-			"  template:\n    metadata:\n      annotations:\n"+annotationBlock,
-			1)
-	}
-
-	return content
+	return out, nil
 }

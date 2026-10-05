@@ -1,0 +1,96 @@
+# Edge cases a chart must reproduce exactly with its default values.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: settings
+  labels:
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/part-of: billing
+    team: payments
+data:
+  timeout: "30"
+  enabled: "true"
+  empty: ""
+  script.sh: |
+    #!/bin/sh
+    echo "{{ not a helm template }}"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-once
+  labels:
+    app: migrate
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 0
+  template:
+    metadata:
+      labels:
+        app: migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: registry.example.com/tools/migrate@sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+          args: ["--dry-run=false", "--batch", "0"]
+          envFrom:
+            - configMapRef:
+                name: settings
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/part-of: billing
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: worker
+        tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+    spec:
+      containers:
+        - name: worker
+          image: nginx:1.27.0@sha256:0a399eb16751829e1af26fea27b20c3ec28d7ab1fb72182879dcae1cca21206a
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: RETRIES
+              value: "0"
+            - name: NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: settings
+              mountPath: /etc/settings
+              readOnly: true
+      volumes:
+        - name: settings
+          configMap:
+            name: settings
+            defaultMode: 0644
+---
+# Last document of the file, ending in a block scalar: its final newline
+# must survive, and the indented "---" inside it is data, not a separator.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rules
+data:
+  rules.yaml: |
+    groups:
+      - name: a
+    ---
+    groups:
+      - name: b

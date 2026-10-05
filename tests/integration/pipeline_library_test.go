@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -227,21 +228,48 @@ spec:
 	}
 	defer os.RemoveAll(output.OutputDir)
 
+	libChart := findChartByTypeLibrary(output.Charts)
+	if libChart == nil {
+		t.Fatal("library chart not found")
+	}
+
 	wrappers := wrapperCharts(output.Charts)
 	if len(wrappers) == 0 {
 		t.Fatal("no wrapper charts generated")
 	}
 
 	for _, wrapper := range wrappers {
+		if len(wrapper.Templates) == 0 {
+			t.Errorf("wrapper chart %s has no templates", wrapper.Name)
+		}
+		// No own _helpers.tpl: the wrapper relies on the library helpers.
+		if wrapper.Helpers != "" {
+			t.Errorf("wrapper chart %s should not have its own _helpers.tpl", wrapper.Name)
+		}
 		for path, content := range wrapper.Templates {
-			// Every wrapper template must call library include
-			if !strings.Contains(content, `include "library.`) {
-				t.Errorf("wrapper template %s in chart %s does not call library include\ncontent: %s",
+			refs := helperRefs(content)
+			if len(refs) == 0 {
+				t.Errorf("wrapper template %s in chart %s uses no library helper\ncontent: %s",
 					path, wrapper.Name, content)
 			}
-			// Wrapper templates must NOT define inline apiVersion/kind resources
-			if strings.Contains(content, "apiVersion:") || strings.Contains(content, "kind:") {
-				t.Errorf("wrapper template %s in chart %s contains inline resource definition (should use include)",
+			for _, ref := range refs {
+				// Neither the source chart's ("app.") nor the group's own helpers.
+				if !strings.HasPrefix(ref, "library.") {
+					t.Errorf("wrapper template %s in chart %s references non-library helper %q",
+						path, wrapper.Name, ref)
+				}
+				if !strings.Contains(libChart.Helpers, `define "`+ref+`"`) {
+					t.Errorf("wrapper template %s in chart %s references %q, not defined in the library",
+						path, wrapper.Name, ref)
+				}
+			}
+			// Templates carry the real manifests with flat values.
+			if !strings.Contains(content, "apiVersion:") || !strings.Contains(content, "kind:") {
+				t.Errorf("wrapper template %s in chart %s should render a Kubernetes resource",
+					path, wrapper.Name)
+			}
+			if strings.Contains(content, ".Values.services.") {
+				t.Errorf("wrapper template %s in chart %s still reads nested .Values.services values",
 					path, wrapper.Name)
 			}
 		}
@@ -315,31 +343,58 @@ spec:
 		t.Fatal("library chart not found")
 	}
 
-	// Build combined library content
-	var libContent strings.Builder
-	libContent.WriteString(libChart.Helpers)
-	for _, tmpl := range libChart.Templates {
-		libContent.WriteString(tmpl)
+	// Shared helpers must be defined EXACTLY ONCE across all generated charts,
+	// and only in the library.
+	var allContent strings.Builder
+	for _, c := range output.Charts {
+		allContent.WriteString(c.Helpers)
+		for _, tmpl := range c.Templates {
+			allContent.WriteString(tmpl)
+		}
 	}
-	allLibContent := libContent.String()
-
-	// Shared blocks must be defined EXACTLY ONCE in library
-	for _, block := range []string{"library.resources", "library.env", "library.probes", "library.volumeMounts", "library.volumes"} {
-		define := `define "` + block + `"`
-		count := strings.Count(allLibContent, define)
-		if count != 1 {
-			t.Errorf("define %q found %d times in library (expected exactly 1)", block, count)
+	all := allContent.String()
+	for _, helper := range []string{"library.name", "library.fullname", "library.labels", "library.selectorLabels", "library.chart"} {
+		define := `define "` + helper + `"`
+		if n := strings.Count(libChart.Helpers, define); n != 1 {
+			t.Errorf("define %q found %d times in library helpers (expected exactly 1)", helper, n)
+		}
+		if n := strings.Count(all, define); n != 1 {
+			t.Errorf("define %q found %d times across all charts (expected exactly 1)", helper, n)
 		}
 	}
 
-	// Wrapper templates must only reference (include), not define, shared blocks
-	for _, wrapper := range wrapperCharts(output.Charts) {
+	wrappers := wrapperCharts(output.Charts)
+	if len(wrappers) != 2 {
+		t.Fatalf("expected 2 wrapper charts, got %v", chartNames(output.Charts))
+	}
+
+	// Wrappers define nothing themselves: no helpers, no named templates.
+	for _, wrapper := range wrappers {
+		if wrapper.Helpers != "" {
+			t.Errorf("wrapper chart %s duplicates helpers in its own _helpers.tpl", wrapper.Name)
+		}
 		for path, content := range wrapper.Templates {
-			if strings.Contains(content, `define "library.`) {
-				t.Errorf("wrapper template %s in chart %s contains a library define (should be include-only)",
+			if strings.Contains(content, `define "`) {
+				t.Errorf("wrapper template %s in chart %s contains a define (should be include-only)",
 					path, wrapper.Name)
 			}
+			for _, w := range wrappers {
+				if strings.Contains(content, `include "`+w.Name+`.`) {
+					t.Errorf("wrapper template %s in chart %s references %s.* helpers instead of the library",
+						path, wrapper.Name, w.Name)
+				}
+			}
 		}
+	}
+
+	// Nothing in the generated output should require a per-chart _helpers.tpl.
+	for _, wrapper := range wrappers {
+		if _, err := os.Stat(filepath.Join(output.OutputDir, wrapper.Name, "templates", "_helpers.tpl")); err == nil {
+			t.Errorf("wrapper chart %s has a _helpers.tpl on disk", wrapper.Name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(output.OutputDir, libChart.Name, "templates", "_helpers.tpl")); err != nil {
+		t.Errorf("library chart _helpers.tpl not written to disk: %v", err)
 	}
 }
 
@@ -365,36 +420,59 @@ func TestPipelineLibrary_AllResourceTypes(t *testing.T) {
 		t.Fatal("library chart not found")
 	}
 
-	// Library should have named templates for the resource types present
-	// (at minimum deployment, statefulset, service, ingress, configmap)
-	requiredTemplates := []string{
-		"templates/_deployment.tpl",
-		"templates/_statefulset.tpl",
-		"templates/_service.tpl",
-		"templates/_ingress.tpl",
-		"templates/_configmap.tpl",
+	// The library is helpers-only: no per-kind templates.
+	if len(libChart.Templates) != 0 {
+		t.Errorf("library chart should have no templates, got %d", len(libChart.Templates))
 	}
-	for _, tmpl := range requiredTemplates {
-		if _, ok := libChart.Templates[tmpl]; !ok {
-			t.Errorf("library chart missing named template: %s", tmpl)
+	if !strings.Contains(libChart.Helpers, `define "library.fullname"`) {
+		t.Error("library chart helpers missing library.fullname")
+	}
+
+	wrappers := wrapperCharts(output.Charts)
+	for _, name := range []string{"frontend", "backend", "database"} {
+		found := false
+		for _, w := range wrappers {
+			if w.Name == name {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("wrapper chart %s not generated, got %v", name, chartNames(output.Charts))
 		}
 	}
 
-	// Library should have 18+ named templates (for all K8s resource types)
-	namedTemplateTpls := 0
-	for path := range libChart.Templates {
-		if strings.HasSuffix(path, ".tpl") && !strings.HasPrefix(filepath.Base(path), "_helpers") {
-			namedTemplateTpls++
-		}
-	}
-	if namedTemplateTpls < 18 {
-		t.Errorf("expected >=18 named template files in library chart, got %d", namedTemplateTpls)
-	}
-
-	// Each wrapper should reference templates for its resource types
-	for _, wrapper := range wrapperCharts(output.Charts) {
+	// Every resource kind of the fixture is rendered by some wrapper template.
+	kindsRendered := map[string]bool{}
+	for _, wrapper := range wrappers {
 		if len(wrapper.Templates) == 0 {
 			t.Errorf("wrapper chart %s has no templates", wrapper.Name)
+		}
+		if !strings.Contains(wrapper.ChartYAML, "repository: file://../library") {
+			t.Errorf("wrapper chart %s does not depend on file://../library", wrapper.Name)
+		}
+		if !strings.Contains(wrapper.ValuesYAML, "\nenabled: true\n") {
+			t.Errorf("wrapper chart %s values.yaml should enable the chart with a top-level enabled: true", wrapper.Name)
+		}
+		for path, content := range wrapper.Templates {
+			if !strings.HasPrefix(path, "templates/") {
+				t.Errorf("wrapper chart %s template %s is outside templates/", wrapper.Name, path)
+			}
+			for _, kind := range []string{"Deployment", "StatefulSet", "Service", "Ingress", "ConfigMap"} {
+				if strings.Contains(content, "\nkind: "+kind+"\n") {
+					kindsRendered[kind] = true
+				}
+			}
+			for _, ref := range helperRefs(content) {
+				if !strings.HasPrefix(ref, "library.") {
+					t.Errorf("wrapper chart %s template %s references non-library helper %q",
+						wrapper.Name, path, ref)
+				}
+			}
+		}
+	}
+	for _, kind := range []string{"Deployment", "StatefulSet", "Service", "Ingress", "ConfigMap"} {
+		if !kindsRendered[kind] {
+			t.Errorf("no wrapper template renders a %s", kind)
 		}
 	}
 }
@@ -617,6 +695,17 @@ spec:
 // ============================================================
 // Helpers
 // ============================================================
+
+// helperRefs returns the helper names referenced via include/template.
+func helperRefs(content string) []string {
+	var names []string
+	for _, m := range helperRefPattern.FindAllStringSubmatch(content, -1) {
+		names = append(names, m[1])
+	}
+	return names
+}
+
+var helperRefPattern = regexp.MustCompile(`(?:include|template) "([^"]+)"`)
 
 func chartNames(charts []*types.GeneratedChart) []string {
 	names := make([]string, len(charts))

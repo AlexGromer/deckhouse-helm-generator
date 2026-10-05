@@ -1,293 +1,93 @@
 package generator
 
-// ============================================================
-// Test Plan: Policy-as-Code Orchestration Layer (Task 5.5.5)
-// ============================================================
-//
-// | #  | Test Name                                              | Category    | Input                                                         | Expected Output                                                         |
-// |----|--------------------------------------------------------|-------------|---------------------------------------------------------------|-------------------------------------------------------------------------|
-// |  1 | TestGeneratePolicyAsCode_DualOutput                    | happy       | OutputFormats=["kyverno","opa"], all 5 policy types           | KyvernoPolicies and OPAPolicies both non-empty                          |
-// |  2 | TestGeneratePolicyAsCode_KyvernoOnly                   | happy       | OutputFormats=["kyverno"], all 5 policy types                 | KyvernoPolicies non-empty, OPAPolicies empty                            |
-// |  3 | TestGeneratePolicyAsCode_OPAOnly                       | happy       | OutputFormats=["opa"], all 5 policy types                     | OPAPolicies non-empty, KyvernoPolicies empty                            |
-// |  4 | TestGeneratePolicyAsCode_RequireLabels                 | happy       | PolicyTypes=["require-labels"]                                | at least 1 policy referencing label requirements                        |
-// |  5 | TestGeneratePolicyAsCode_RequireResources              | happy       | PolicyTypes=["require-resources"]                             | at least 1 policy referencing resource limits                           |
-// |  6 | TestGeneratePolicyAsCode_DisallowPrivileged            | happy       | PolicyTypes=["disallow-privileged"]                           | at least 1 policy referencing privileged containers                     |
-// |  7 | TestGeneratePolicyAsCode_RestrictRegistries            | happy       | PolicyTypes=["restrict-registries"]                           | at least 1 policy referencing image registries                          |
-// |  8 | TestGeneratePolicyAsCode_RequireProbes                 | happy       | PolicyTypes=["require-probes"]                                | at least 1 policy referencing readiness/liveness probes                 |
-// |  9 | TestGeneratePolicyAsCode_EmptyGraph                    | edge        | empty graph, all formats & types                              | result non-nil, Policies may be empty, no panic                         |
-// | 10 | TestGeneratePolicyAsCode_SummaryContainsCounts         | happy       | dual output, 5 policy types                                   | Summary contains kyverno and opa counts as numbers                      |
-
 import (
-	"fmt"
+	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-var allPolicyTypes = []string{
-	"require-labels",
-	"require-resources",
-	"disallow-privileged",
-	"restrict-registries",
-	"require-probes",
-}
-
-// ── 1: Dual output — both kyverno and opa maps populated ─────────────────────
-
-func TestGeneratePolicyAsCode_DualOutput(t *testing.T) {
-	graph := makeDeploymentGraph()
-	opts := PolicyAsCodeOptions{
-		OutputFormats: []string{"kyverno", "opa"},
-		PolicyTypes:   allPolicyTypes,
-	}
-
-	result := GeneratePolicyAsCode(graph, opts)
-
-	if result == nil {
-		t.Fatal("expected non-nil PolicyAsCodeResult")
-	}
-	if len(result.KyvernoPolicies) == 0 {
-		t.Error("expected non-empty KyvernoPolicies for dual output")
-	}
-	if len(result.OPAPolicies) == 0 {
-		t.Error("expected non-empty OPAPolicies for dual output")
+// secAssertBalanced checks that every block action of a Helm template is
+// closed (helm lint catches this too, but only in the golden suite).
+func secAssertBalanced(t *testing.T, name, tpl string) {
+	t.Helper()
+	open := regexp.MustCompile(`\{\{-?\s*(if|range|with|define)\b`).FindAllString(tpl, -1)
+	end := regexp.MustCompile(`\{\{-?\s*end\s*-?\}\}`).FindAllString(tpl, -1)
+	if len(open) != len(end) {
+		t.Errorf("%s: %d block actions but %d ends", name, len(open), len(end))
 	}
 }
 
-// ── 2: Kyverno-only output ────────────────────────────────────────────────────
-
-func TestGeneratePolicyAsCode_KyvernoOnly(t *testing.T) {
-	graph := makeDeploymentGraph()
-	opts := PolicyAsCodeOptions{
-		OutputFormats: []string{"kyverno"},
-		PolicyTypes:   allPolicyTypes,
+func TestPolicyCatalogue(t *testing.T) {
+	seen := map[string]bool{}
+	for _, r := range policyCatalogue {
+		if seen[r.ID] || seen[r.ValuesKey] {
+			t.Errorf("duplicate rule %s/%s", r.ID, r.ValuesKey)
+		}
+		seen[r.ID], seen[r.ValuesKey] = true, true
+		if r.Rego == "" || r.Title == "" || r.Severity == "" {
+			t.Errorf("rule %s is incomplete", r.ID)
+		}
+		if r.ID != "restrict-registries" && !strings.HasPrefix(r.Kyverno, "    - name: ") {
+			t.Errorf("rule %s: Kyverno rules must be a list indented under spec.rules", r.ID)
+		}
+		// Helm would try to evaluate Kyverno variables: they must not appear.
+		if strings.Contains(r.Kyverno, "{{") {
+			t.Errorf("rule %s: Kyverno rule contains template braces", r.ID)
+		}
 	}
-
-	result := GeneratePolicyAsCode(graph, opts)
-
-	if result == nil {
-		t.Fatal("expected non-nil PolicyAsCodeResult")
-	}
-	if len(result.KyvernoPolicies) == 0 {
-		t.Error("expected non-empty KyvernoPolicies for kyverno-only")
-	}
-	if len(result.OPAPolicies) != 0 {
-		t.Errorf("expected empty OPAPolicies for kyverno-only, got %d entries", len(result.OPAPolicies))
-	}
-	// All kyverno content must reference kyverno.io
-	for name, content := range result.KyvernoPolicies {
-		if !strings.Contains(content, "kyverno.io") {
-			t.Errorf("kyverno policy %q must contain 'kyverno.io', got: %.200s", name, content)
+	for _, id := range defaultPolicyRules {
+		if _, ok := lookupPolicyRule(id); !ok {
+			t.Errorf("default rule %s not in catalogue", id)
 		}
 	}
 }
 
-// ── 3: OPA-only output ────────────────────────────────────────────────────────
-
-func TestGeneratePolicyAsCode_OPAOnly(t *testing.T) {
-	graph := makeDeploymentGraph()
-	opts := PolicyAsCodeOptions{
-		OutputFormats: []string{"opa"},
-		PolicyTypes:   allPolicyTypes,
+func TestParsePolicyOptions(t *testing.T) {
+	fc := FeatureContext{Params: map[string]string{
+		"engine": "kyverno, conftest", "rules": "require-probes", "action": "enforce", "registries": "ghcr.io/acme",
+	}}
+	opts, err := parsePolicyOptions(fc)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	result := GeneratePolicyAsCode(graph, opts)
-
-	if result == nil {
-		t.Fatal("expected non-nil PolicyAsCodeResult")
+	if !opts.Kyverno || !opts.Conftest || opts.Action != "Enforce" {
+		t.Errorf("opts = %+v", opts)
 	}
-	if len(result.OPAPolicies) == 0 {
-		t.Error("expected non-empty OPAPolicies for opa-only")
-	}
-	if len(result.KyvernoPolicies) != 0 {
-		t.Errorf("expected empty KyvernoPolicies for opa-only, got %d entries", len(result.KyvernoPolicies))
-	}
-	// All OPA content must reference gatekeeper
-	for name, content := range result.OPAPolicies {
-		if !strings.Contains(content, "gatekeeper.sh") {
-			t.Errorf("opa policy %q must contain 'gatekeeper.sh', got: %.200s", name, content)
-		}
+	if len(opts.Rules) != 2 || opts.Rules[0].ID != "require-probes" || opts.Rules[1].ID != "restrict-registries" {
+		t.Errorf("rules = %+v (registries must enable restrict-registries)", opts.Rules)
 	}
 }
 
-// ── 4: require-labels policy type ────────────────────────────────────────────
-
-func TestGeneratePolicyAsCode_RequireLabels(t *testing.T) {
-	graph := makeDeploymentGraph()
-	opts := PolicyAsCodeOptions{
-		OutputFormats: []string{"kyverno"},
-		PolicyTypes:   []string{"require-labels"},
+func TestKyvernoPolicyTemplate(t *testing.T) {
+	h := secChartHelpers{fullnameTpl: "app.fullname", labelsTpl: "app.labels"}
+	tpl := kyvernoPolicyTemplate(h, policyCatalogue)
+	secAssertBalanced(t, "admission-policies.yaml", tpl)
+	if !strings.Contains(tpl, "{{- if and $ap.rules.restrictRegistries $ap.allowedRegistries }}") {
+		t.Error("restrict-registries must be guarded by a non-empty allowedRegistries")
 	}
-
-	result := GeneratePolicyAsCode(graph, opts)
-
-	if result == nil {
-		t.Fatal("expected non-nil PolicyAsCodeResult")
-	}
-	found := false
-	for _, content := range result.KyvernoPolicies {
-		if strings.Contains(content, "app.kubernetes.io") || strings.Contains(content, "label") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected at least one require-labels policy referencing label requirements")
+	if !strings.Contains(tpl, `{{- $patterns = append $patterns (printf "%s/*" (trimSuffix "/" .)) }}`) {
+		t.Error("registry patterns must be built from values")
 	}
 }
 
-// ── 5: require-resources policy type ─────────────────────────────────────────
-
-func TestGeneratePolicyAsCode_RequireResources(t *testing.T) {
-	graph := makeDeploymentGraph()
-	opts := PolicyAsCodeOptions{
-		OutputFormats: []string{"kyverno"},
-		PolicyTypes:   []string{"require-resources"},
+func TestConftestPolicyFiles(t *testing.T) {
+	rule, _ := lookupPolicyRule("restrict-registries")
+	files := conftestPolicyFiles([]policyRule{rule}, nil)
+	if _, ok := files["policy/restrict_registries.rego"]; ok {
+		t.Error("restrict-registries without registries would reject every image")
 	}
-
-	result := GeneratePolicyAsCode(graph, opts)
-
-	if result == nil {
-		t.Fatal("expected non-nil PolicyAsCodeResult")
+	files = conftestPolicyFiles([]policyRule{rule}, []string{"ghcr.io/acme", "quay.io"})
+	if !strings.Contains(files["policy/restrict_registries.rego"], `dhg_allowed_registries := ["ghcr.io/acme", "quay.io"]`) {
+		t.Errorf("registries not embedded:\n%s", files["policy/restrict_registries.rego"])
 	}
-	found := false
-	for _, content := range result.KyvernoPolicies {
-		if strings.Contains(content, "resource") || strings.Contains(content, "limits") || strings.Contains(content, "requests") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected at least one require-resources policy referencing resource limits")
+	if !strings.Contains(files["policy/dhg_workloads.rego"], `dhg_pod_spec := input.spec.jobTemplate.spec.template.spec if input.kind == "CronJob"`) {
+		t.Error("shared workload helpers missing")
 	}
 }
 
-// ── 6: disallow-privileged policy type ───────────────────────────────────────
-
-func TestGeneratePolicyAsCode_DisallowPrivileged(t *testing.T) {
-	graph := makeDeploymentGraph()
-	opts := PolicyAsCodeOptions{
-		OutputFormats: []string{"kyverno"},
-		PolicyTypes:   []string{"disallow-privileged"},
-	}
-
-	result := GeneratePolicyAsCode(graph, opts)
-
-	if result == nil {
-		t.Fatal("expected non-nil PolicyAsCodeResult")
-	}
-	found := false
-	for _, content := range result.KyvernoPolicies {
-		if strings.Contains(content, "privileged") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected at least one disallow-privileged policy referencing privileged containers")
-	}
-}
-
-// ── 7: restrict-registries policy type ───────────────────────────────────────
-
-func TestGeneratePolicyAsCode_RestrictRegistries(t *testing.T) {
-	graph := makeDeploymentGraph()
-	opts := PolicyAsCodeOptions{
-		OutputFormats: []string{"kyverno"},
-		PolicyTypes:   []string{"restrict-registries"},
-	}
-
-	result := GeneratePolicyAsCode(graph, opts)
-
-	if result == nil {
-		t.Fatal("expected non-nil PolicyAsCodeResult")
-	}
-	found := false
-	for _, content := range result.KyvernoPolicies {
-		if strings.Contains(content, "registr") || strings.Contains(content, "image") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected at least one restrict-registries policy referencing image registries")
-	}
-}
-
-// ── 8: require-probes policy type ────────────────────────────────────────────
-
-func TestGeneratePolicyAsCode_RequireProbes(t *testing.T) {
-	graph := makeDeploymentGraph()
-	opts := PolicyAsCodeOptions{
-		OutputFormats: []string{"kyverno"},
-		PolicyTypes:   []string{"require-probes"},
-	}
-
-	result := GeneratePolicyAsCode(graph, opts)
-
-	if result == nil {
-		t.Fatal("expected non-nil PolicyAsCodeResult")
-	}
-	found := false
-	for _, content := range result.KyvernoPolicies {
-		if strings.Contains(content, "Probe") || strings.Contains(content, "probe") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected at least one require-probes policy referencing readiness/liveness probes")
-	}
-}
-
-// ── 9: Empty graph → no panic, result non-nil ─────────────────────────────────
-
-func TestGeneratePolicyAsCode_EmptyGraph(t *testing.T) {
-	graph := types.NewResourceGraph()
-	opts := PolicyAsCodeOptions{
-		OutputFormats: []string{"kyverno", "opa"},
-		PolicyTypes:   allPolicyTypes,
-	}
-
-	// Must not panic
-	result := GeneratePolicyAsCode(graph, opts)
-
-	if result == nil {
-		t.Fatal("expected non-nil PolicyAsCodeResult even for empty graph")
-	}
-	if result.KyvernoPolicies == nil {
-		t.Error("KyvernoPolicies map must be initialized (not nil) even for empty graph")
-	}
-	if result.OPAPolicies == nil {
-		t.Error("OPAPolicies map must be initialized (not nil) even for empty graph")
-	}
-}
-
-// ── 10: Summary contains policy counts ───────────────────────────────────────
-
-func TestGeneratePolicyAsCode_SummaryContainsCounts(t *testing.T) {
-	graph := makeDeploymentGraph()
-	opts := PolicyAsCodeOptions{
-		OutputFormats: []string{"kyverno", "opa"},
-		PolicyTypes:   allPolicyTypes,
-	}
-
-	result := GeneratePolicyAsCode(graph, opts)
-
-	if result == nil {
-		t.Fatal("expected non-nil PolicyAsCodeResult")
-	}
-	if result.Summary == "" {
-		t.Fatal("Summary must not be empty")
-	}
-	// Summary must contain the counts as integers in string form
-	kyvernoCount := len(result.KyvernoPolicies)
-	opaCount := len(result.OPAPolicies)
-	if kyvernoCount > 0 && !strings.Contains(result.Summary, fmt.Sprintf("%d", kyvernoCount)) {
-		t.Errorf("Summary must contain kyverno policy count %d, got: %s", kyvernoCount, result.Summary)
-	}
-	if opaCount > 0 && !strings.Contains(result.Summary, fmt.Sprintf("%d", opaCount)) {
-		t.Errorf("Summary must contain opa policy count %d, got: %s", opaCount, result.Summary)
-	}
+func TestSecurityTemplatesBalanced(t *testing.T) {
+	h := secChartHelpers{fullnameTpl: "app.fullname", labelsTpl: "app.labels"}
+	secAssertBalanced(t, "external-secrets.yaml", externalSecretsTemplate(h, "external-secrets.io/v1"))
+	secAssertBalanced(t, "istio-egress.yaml", istioEgressTemplate(h, "networking.istio.io/v1"))
+	secAssertBalanced(t, "_vault-agent.tpl", vaultAgentHelperTemplate("app.vaultAgent.podAnnotations"))
 }

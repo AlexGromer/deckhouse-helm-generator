@@ -40,7 +40,7 @@ func (p *ClusterIssuerProcessor) Process(ctx processor.Context, obj *unstructure
 	name := obj.GetName()
 
 	values := p.extractValues(obj)
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -81,7 +81,7 @@ func (p *ClusterIssuerProcessor) extractValues(obj *unstructured.Unstructured) m
 	return values
 }
 
-func (p *ClusterIssuerProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
+func (p *ClusterIssuerProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 	sanitized := processor.SanitizeServiceName(serviceName)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
@@ -93,20 +93,8 @@ metadata:
   name: %s
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .acme }}
-  acme:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .selfSigned }}
-  selfSigned:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .ca }}
-  ca:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, serviceName, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "acme", "selfSigned", "ca"))
 }

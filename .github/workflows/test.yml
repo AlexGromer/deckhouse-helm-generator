@@ -14,21 +14,17 @@ concurrency:
 jobs:
   # ── Job 1: Unit Tests (with coverage) ──────────────────────────
   unit-tests:
-    name: Unit Tests (Go ${{ matrix.go-version }})
+    name: Unit Tests
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        go-version: ['1.25', '1.26']
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Go ${{ matrix.go-version }}
+    - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ matrix.go-version }}
+        go-version-file: go.mod
         cache: true
 
     - name: Download dependencies
@@ -46,7 +42,6 @@ jobs:
           ./cmd/... ./pkg/...
 
     - name: Upload coverage artifact
-      if: matrix.go-version == '1.26'
       uses: actions/upload-artifact@v7
       with:
         name: coverage-unit
@@ -75,7 +70,7 @@ jobs:
     - name: Install Helm
       uses: azure/setup-helm@v5
       with:
-        version: 'v3.16.0'
+        version: 'v3.19.0'
 
     - name: Run integration tests
       run: |
@@ -111,7 +106,7 @@ jobs:
     - name: Install Helm
       uses: azure/setup-helm@v5
       with:
-        version: 'v3.16.0'
+        version: 'v3.19.0'
 
     - name: Verify Helm installation
       run: helm version --short
@@ -147,10 +142,48 @@ jobs:
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
-        version: latest
+        version: v2.14.0
         args: --timeout=5m
-        only-new-issues: true
-      continue-on-error: true
+
+    - name: gofmt
+      run: |
+        unformatted=$(gofmt -l $(git ls-files '*.go'))
+        if [ -n "$unformatted" ]; then
+          echo "::error::gofmt needed for: $unformatted"
+          exit 1
+        fi
+
+  # ── Job 4b: Golden suite ───────────────────────────────────────
+  # Every generated chart (all examples × modes × flags × features, cluster
+  # and gitops sources) is checked by the real Helm CLI, helm-unittest and a
+  # post-renderer run with kubectl kustomize.
+  golden:
+    name: Golden (helm lint/template/unittest)
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - name: Install Helm
+      uses: azure/setup-helm@v5
+      with:
+        version: 'v3.19.0'
+
+    - name: Install helm-unittest
+      run: helm plugin install https://github.com/helm-unittest/helm-unittest --version v1.0.3
+
+    - name: Run golden suite
+      env:
+        DHG_REQUIRE_HELM: "1"
+      run: go test -count=1 ./tests/golden/
 
   # ── Job 5: Security Scan ───────────────────────────────────────
   security-scan:

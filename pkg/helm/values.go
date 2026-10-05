@@ -1,8 +1,8 @@
 package helm
 
 import (
+	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -27,22 +27,6 @@ func (b *ValuesBuilder) SetGlobal(key string, value interface{}) *ValuesBuilder 
 	}
 	global := b.values["global"].(map[string]interface{})
 	global[key] = value
-	return b
-}
-
-// AddService adds a service with its configuration.
-func (b *ValuesBuilder) AddService(name string, config map[string]interface{}) *ValuesBuilder {
-	if b.values["services"] == nil {
-		b.values["services"] = make(map[string]interface{})
-	}
-	services := b.values["services"].(map[string]interface{})
-
-	// Ensure service has enabled flag
-	if _, ok := config["enabled"]; !ok {
-		config["enabled"] = true
-	}
-
-	services[name] = config
 	return b
 }
 
@@ -93,12 +77,6 @@ func (b *ValuesBuilder) GetValue(path string) (interface{}, bool) {
 	}
 
 	return nil, false
-}
-
-// MergeValues merges another values map into this builder.
-func (b *ValuesBuilder) MergeValues(values map[string]interface{}) *ValuesBuilder {
-	b.values = mergeMaps(b.values, values)
-	return b
 }
 
 // Build generates the values.yaml content with nested structure and comments.
@@ -269,108 +247,44 @@ func addCommentsToValues(yaml string) string {
 	return sb.String()
 }
 
-// mergeMaps deeply merges two maps.
-func mergeMaps(dst, src map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
-
-	// Copy dst
-	for k, v := range dst {
-		result[k] = v
-	}
-
-	// Merge src
-	for k, v := range src {
-		if dstVal, ok := result[k]; ok {
-			// Both are maps - merge recursively
-			if dstMap, dstIsMap := dstVal.(map[string]interface{}); dstIsMap {
-				if srcMap, srcIsMap := v.(map[string]interface{}); srcIsMap {
-					result[k] = mergeMaps(dstMap, srcMap)
-					continue
-				}
-			}
-		}
-		// Otherwise, override
-		result[k] = v
-	}
-
-	return result
+// InferValuesSchema derives a values.schema.json (JSON Schema draft-07, the
+// draft every Helm 3 release understands) from a chart's default values.
+//
+// The structure is strict where mistakes are structural: objects stay objects,
+// lists stay lists and booleans stay booleans, so `helm install --set` or a
+// values file with a misplaced or mistyped section fails early. Scalars are
+// lenient: strings and numbers are interchangeable (Kubernetes accepts
+// `cpu: 1` and `cpu: "1"`), and nulls accept anything. Unknown keys are
+// allowed, so values overlays may add settings.
+func InferValuesSchema(values map[string]interface{}) string {
+	schema := inferSchema(values)
+	schema["$schema"] = "http://json-schema.org/draft-07/schema#"
+	out, _ := json.MarshalIndent(schema, "", "  ")
+	return string(out) + "\n"
 }
 
-// FormatValuesForService formats service-specific values.
-func FormatValuesForService(serviceName string, values map[string]interface{}) map[string]interface{} {
-	formatted := make(map[string]interface{})
-
-	// Ensure enabled flag
-	if _, ok := values["enabled"]; !ok {
-		formatted["enabled"] = true
-	} else {
-		formatted["enabled"] = values["enabled"]
-	}
-
-	// Sort keys for consistent output
-	keys := make([]string, 0, len(values))
-	for k := range values {
-		if k != "enabled" {
-			keys = append(keys, k)
+func inferSchema(v interface{}) map[string]interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		props := make(map[string]interface{}, len(val))
+		for k, child := range val {
+			props[k] = inferSchema(child)
 		}
-	}
-	sort.Strings(keys)
-
-	// Add sorted values
-	for _, k := range keys {
-		formatted[k] = values[k]
-	}
-
-	return formatted
-}
-
-// GenerateValuesSchema generates a values.schema.json for validation.
-func GenerateValuesSchema(services []string) string {
-	schema := map[string]interface{}{
-		"$schema": "http://json-schema.org/draft-07/schema#",
-		"type":    "object",
-		"properties": map[string]interface{}{
-			"global": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"imageRegistry": map[string]interface{}{
-						"type":        "string",
-						"description": "Global Docker image registry",
-					},
-					"imagePullSecrets": map[string]interface{}{
-						"type":        "array",
-						"description": "Global image pull secrets",
-						"items": map[string]interface{}{
-							"type": "object",
-						},
-					},
-				},
-			},
-			"services": map[string]interface{}{
-				"type": "object",
-				"properties": buildServiceSchemaProperties(services),
-			},
-		},
-	}
-
-	schemaBytes, _ := yaml.Marshal(schema)
-	return string(schemaBytes)
-}
-
-func buildServiceSchemaProperties(services []string) map[string]interface{} {
-	props := make(map[string]interface{})
-
-	for _, svc := range services {
-		props[svc] = map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"enabled": map[string]interface{}{
-					"type":        "boolean",
-					"description": fmt.Sprintf("Enable %s service", svc),
-				},
-			},
+		s := map[string]interface{}{"type": "object"}
+		if len(props) > 0 {
+			s["properties"] = props
 		}
+		return s
+	case []interface{}:
+		return map[string]interface{}{"type": "array"}
+	case []string, []map[string]interface{}:
+		return map[string]interface{}{"type": "array"}
+	case bool:
+		return map[string]interface{}{"type": "boolean"}
+	case string, int, int32, int64, uint, uint32, uint64, float32, float64:
+		return map[string]interface{}{"type": []string{"string", "number"}}
+	default:
+		// null or a value we cannot classify: accept anything.
+		return map[string]interface{}{}
 	}
-
-	return props
 }

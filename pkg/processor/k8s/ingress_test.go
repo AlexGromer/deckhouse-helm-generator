@@ -301,9 +301,9 @@ func TestProcessIngress_ExtractsAnnotations(t *testing.T) {
 		obj := makeIngressObj("my-ingress", "default",
 			map[string]interface{}{"app": "myapp"},
 			map[string]interface{}{
-				"nginx.ingress.kubernetes.io/rewrite-target":   "/",
-				"nginx.ingress.kubernetes.io/ssl-redirect":     "true",
-				"nginx.ingress.kubernetes.io/proxy-body-size":  "50m",
+				"nginx.ingress.kubernetes.io/rewrite-target":  "/",
+				"nginx.ingress.kubernetes.io/ssl-redirect":    "true",
+				"nginx.ingress.kubernetes.io/proxy-body-size": "50m",
 			},
 			map[string]interface{}{
 				"rules": []interface{}{

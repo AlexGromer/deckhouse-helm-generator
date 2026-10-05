@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -118,30 +119,24 @@ func InjectCloudAnnotations(chart *types.GeneratedChart, config CloudAnnotationC
 	}
 }
 
-// generateCloudValues builds a cloud configuration values map.
-// Currently unused — cloud settings are injected via annotations only.
-// Retained for potential future use in values.yaml cloud section.
-func generateCloudValues(config CloudAnnotationConfig) map[string]interface{} {
-	return map[string]interface{}{
-		"cloud": map[string]interface{}{
-			"provider": string(config.Provider),
-			"loadBalancer": map[string]interface{}{
-				"internal": config.Internal,
-				"scheme":   config.Scheme,
-			},
-		},
-	}
-}
+// valuesAnnotationsBlock is the metadata.annotations block dhg processors emit:
+// annotations come from the resource's values.
+var valuesAnnotationsBlock = regexp.MustCompile(
+	`(?m)^  \{\{- with \.annotations \}\}\n  annotations:\n    \{\{- toYaml \. \| nindent 4 \}\}\n  \{\{- end \}\}\n`)
 
-// annotationsLineRegex matches an existing "  annotations:" line.
-var annotationsLineRegex = regexp.MustCompile(`(?m)^  annotations:\s*$`)
+// dhgAnnotationsDecl marks a metadata.annotations block already rewritten by
+// injectAnnotationsIntoTemplate; further injections add `set` lines after it.
+const dhgAnnotationsDecl = "  {{- $dhgAnnotations := dict }}\n"
 
-// injectAnnotationsIntoTemplate inserts annotation key-value pairs into a YAML
-// template. It is idempotent: if an "  annotations:" block already exists right
-// after "metadata:\n  name: …", the new keys are merged into that block instead
-// of creating a duplicate.
+// injectAnnotationsIntoTemplate adds metadata annotations to a template.
 //
-// Annotation keys are sorted alphabetically for deterministic output.
+// For dhg-generated templates, whose annotations come from values
+// (`{{- with .annotations }}`), the block is rewritten so that injected
+// annotations are defaults merged under the user's values — values win, and
+// there is exactly one annotations key. Repeated injections extend the same
+// block. For other templates the annotations are added to (or create) a static
+// annotations block after metadata.name. Values are always quoted.
+//
 // This shared helper is used by both cloudannotations and ingressdetect injection paths.
 func injectAnnotationsIntoTemplate(template string, annotations map[string]string) string {
 	if len(annotations) == 0 {
@@ -155,46 +150,46 @@ func injectAnnotationsIntoTemplate(template string, annotations map[string]strin
 	}
 	sort.Strings(keys)
 
-	// Check whether the template already contains an annotations block after
-	// the metadata/name section. We look for the pattern:
-	//   metadata:
-	//     name: <value>
-	//   annotations:
-	//     <existing keys>
-	// Match existing annotations block (handles both expanded and compact `annotations: {}` forms).
+	var sets strings.Builder
+	for _, k := range keys {
+		fmt.Fprintf(&sets, "  {{- $_ := set $dhgAnnotations %s %s }}\n", strconv.Quote(k), strconv.Quote(annotations[k]))
+	}
+
+	if strings.Contains(template, dhgAnnotationsDecl) {
+		return strings.Replace(template, dhgAnnotationsDecl, dhgAnnotationsDecl+sets.String(), 1)
+	}
+	if loc := valuesAnnotationsBlock.FindStringIndex(template); loc != nil {
+		block := dhgAnnotationsDecl + sets.String() +
+			"  {{- with .annotations }}{{- $dhgAnnotations = merge (deepCopy .) $dhgAnnotations }}{{- end }}\n" +
+			"  annotations:\n" +
+			"    {{- toYaml $dhgAnnotations | nindent 4 }}\n"
+		return template[:loc[0]] + block + template[loc[1]:]
+	}
+
+	// Static annotations block right after metadata.name: merge into it.
 	existingAnnotationsRe := regexp.MustCompile(
 		`(metadata:\s*\n\s+name:\s*[^\n]+\n)(  annotations:\s*(?:\{\})?\s*\n(    \S+:.*\n)*)`,
 	)
-
 	if loc := existingAnnotationsRe.FindStringIndex(template); loc != nil {
-		// An annotations block already exists — append new keys to it.
-		match := existingAnnotationsRe.FindStringSubmatch(template)
-		existingBlock := match[0]
-
+		existingBlock := existingAnnotationsRe.FindString(template)
 		var newLines []string
 		for _, k := range keys {
 			// Only add the key if it is not already present in the block.
 			if !strings.Contains(existingBlock, k+":") {
-				newLines = append(newLines, fmt.Sprintf("    %s: %s", k, annotations[k]))
+				newLines = append(newLines, fmt.Sprintf("    %s: %s", k, strconv.Quote(annotations[k])))
 			}
 		}
-
 		if len(newLines) == 0 {
 			return template // all keys already present
 		}
-
 		insertion := strings.Join(newLines, "\n") + "\n"
-		// Insert the new annotation lines at the end of the existing annotations block.
 		return template[:loc[1]] + insertion + template[loc[1]:]
 	}
 
-	// No existing annotations block — insert a new one after metadata/name.
-	var lines []string
-	lines = append(lines, "  annotations:")
+	// No annotations block — insert a new one after metadata/name.
+	lines := []string{"  annotations:"}
 	for _, k := range keys {
-		lines = append(lines, fmt.Sprintf("    %s: %s", k, annotations[k]))
+		lines = append(lines, fmt.Sprintf("    %s: %s", k, strconv.Quote(annotations[k])))
 	}
-	annotationsBlock := strings.Join(lines, "\n")
-
-	return metadataNameRegex.ReplaceAllString(template, "$1\n"+annotationsBlock)
+	return metadataNameRegex.ReplaceAllString(template, "$1\n"+strings.Join(lines, "\n"))
 }

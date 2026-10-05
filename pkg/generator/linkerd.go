@@ -7,179 +7,57 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// LinkerdOptions configures Linkerd service mesh integration.
-type LinkerdOptions struct {
-	InjectAnnotation bool
-	ServiceProfiles  bool
-	TrafficSplit     bool
-	DefaultTimeout   string
-	DefaultRetries   int
-}
+// Linkerd integration (`dhg generate --with linkerd`).
+//
+// The feature adds the pod annotations from `.Values.linkerd.podAnnotations`
+// (by default `linkerd.io/inject: enabled`) to every Deployment, StatefulSet
+// and DaemonSet pod template, guarded by `.Values.linkerd.enabled`. Users can
+// add further `config.linkerd.io/*` annotations in values. Jobs and CronJobs
+// are left alone: a meshed proxy keeps their pods from completing.
+//
+// ServiceProfiles and SMI TrafficSplits are deliberately not generated:
+// ServiceProfiles need per-route definitions that cannot be derived from
+// manifests, and SMI TrafficSplit is deprecated in Linkerd.
 
-// LinkerdResult holds generated Linkerd templates.
-type LinkerdResult struct {
-	// Templates maps filename → YAML content.
-	Templates map[string]string
-	NOTESTxt  string
-}
+// linkerdInjectModes are the accepted values of the linkerd.io/inject annotation.
+var linkerdInjectModes = map[string]bool{"enabled": true, "ingress": true, "disabled": true}
 
-// GenerateLinkerdConfig generates Linkerd ServiceProfile and TrafficSplit templates.
-func GenerateLinkerdConfig(graph *types.ResourceGraph, opts LinkerdOptions) *LinkerdResult {
-	result := &LinkerdResult{
-		Templates: make(map[string]string),
+func applyLinkerdFeature(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {
+	mode := fc.Param("inject")
+	if !linkerdInjectModes[mode] {
+		return nil, fmt.Errorf("inject must be one of enabled, ingress, disabled; got %q", mode)
 	}
 
-	if graph == nil || len(graph.Resources) == 0 {
-		result.NOTESTxt = buildLinkerdNOTESTxt(result)
-		return result
-	}
-
-	if opts.ServiceProfiles {
-		for _, r := range graph.Resources {
-			if r.Original.GVK.Kind != "Service" {
-				continue
-			}
-			name := r.Original.Object.GetName()
-			ns := r.Original.Object.GetNamespace()
-			yaml := generateServiceProfileYAML(name, ns, opts)
-			result.Templates[fmt.Sprintf("templates/linkerd-sp-%s.yaml", name)] = yaml
-		}
-	}
-
-	if opts.TrafficSplit {
-		seen := make(map[string]bool)
-		for _, r := range graph.Resources {
-			kind := r.Original.GVK.Kind
-			if kind != "Deployment" && kind != "Service" {
-				continue
-			}
-			name := r.Original.Object.GetName()
-			ns := r.Original.Object.GetNamespace()
-			if seen[name] {
-				// Generate TrafficSplit for workloads with duplicates.
-				yaml := generateTrafficSplitYAML(name, ns)
-				result.Templates[fmt.Sprintf("templates/linkerd-ts-%s.yaml", name)] = yaml
-			}
-			seen[name] = true
-		}
-		// If TrafficSplit enabled and we have any services, generate for them.
-		if len(result.Templates) == 0 {
-			for _, r := range graph.Resources {
-				if r.Original.GVK.Kind != "Service" && r.Original.GVK.Kind != "Deployment" {
-					continue
-				}
-				name := r.Original.Object.GetName()
-				ns := r.Original.Object.GetNamespace()
-				yaml := generateTrafficSplitYAML(name, ns)
-				result.Templates[fmt.Sprintf("templates/linkerd-ts-%s.yaml", name)] = yaml
-				break // one is enough for TrafficSplit
-			}
-		}
-	}
-
-	result.NOTESTxt = buildLinkerdNOTESTxt(result)
-	return result
-}
-
-func generateServiceProfileYAML(name, namespace string, opts LinkerdOptions) string {
-	var sb strings.Builder
-	sb.WriteString("apiVersion: linkerd.io/v1alpha2\n")
-	sb.WriteString("kind: ServiceProfile\n")
-	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: %s.%s.svc.cluster.local\n", name, namespace))
-	sb.WriteString(fmt.Sprintf("  namespace: %s\n", namespace))
-	sb.WriteString("spec:\n")
-	sb.WriteString("  routes: []\n")
-	if opts.DefaultTimeout != "" {
-		sb.WriteString(fmt.Sprintf("  # timeout: %s\n", opts.DefaultTimeout))
-	}
-	if opts.DefaultRetries > 0 {
-		sb.WriteString("  # retryBudget:\n")
-		sb.WriteString(fmt.Sprintf("  #   retryRatio: %.1f\n", float64(opts.DefaultRetries)/10.0))
-		sb.WriteString(fmt.Sprintf("  #   minRetriesPerSecond: %d\n", opts.DefaultRetries))
-	}
-	return sb.String()
-}
-
-func generateTrafficSplitYAML(name, namespace string) string {
-	var sb strings.Builder
-	sb.WriteString("apiVersion: split.smi-spec.io/v1alpha1\n")
-	sb.WriteString("kind: TrafficSplit\n")
-	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: %s-split\n", name))
-	sb.WriteString(fmt.Sprintf("  namespace: %s\n", namespace))
-	sb.WriteString("spec:\n")
-	sb.WriteString(fmt.Sprintf("  service: %s\n", name))
-	sb.WriteString("  backends:\n")
-	sb.WriteString(fmt.Sprintf("    - service: %s-stable\n", name))
-	sb.WriteString("      weight: 90\n")
-	sb.WriteString(fmt.Sprintf("    - service: %s-canary\n", name))
-	sb.WriteString("      weight: 10\n")
-	return sb.String()
-}
-
-func buildLinkerdNOTESTxt(result *LinkerdResult) string {
-	return fmt.Sprintf(
-		"Linkerd service mesh configuration generated. %d templates created. "+
-			"To use linkerd, install Linkerd CLI and run 'linkerd install | kubectl apply -f -'. "+
-			"Enable injection via 'linkerd.io/inject: enabled' annotation.",
-		len(result.Templates),
-	)
-}
-
-// InjectLinkerdAnnotations injects Linkerd injection annotations into workload templates.
-// Returns (nil, 0) for nil chart.
-func InjectLinkerdAnnotations(chart *types.GeneratedChart, opts LinkerdOptions) (*types.GeneratedChart, int) {
-	if chart == nil {
-		return nil, 0
-	}
-
-	newChart := copyChartTemplates(chart)
-	count := 0
-
-	if !opts.InjectAnnotation {
-		return newChart, 0
-	}
-
-	for path, content := range newChart.Templates {
-		if !isWorkloadTemplate(content) {
+	const cond = "and $.Values.linkerd.enabled $.Values.linkerd.podAnnotations"
+	out := cloneChart(chart)
+	changed := false
+	for _, rt := range resourceTemplates(chart, func(k string) bool { return podWorkloadKinds[k] }) {
+		if strings.Contains(chart.Templates[rt.path], "$.Values.linkerd.") {
 			continue
 		}
-		if strings.Contains(content, "linkerd.io/inject") {
+		ok := rt.injectAnnotations(rt.podTemplateMetadata(), cond, func(indent int) []string {
+			pad := strings.Repeat(" ", indent)
+			return []string{
+				pad + "{{- if " + cond + " }}",
+				fmt.Sprintf("%s{{- toYaml $.Values.linkerd.podAnnotations | nindent %d }}", pad, indent),
+				pad + "{{- end }}",
+			}
+		})
+		if !ok {
 			continue
 		}
-		updated := injectLinkerdAnnotation(content)
-		if updated != content {
-			newChart.Templates[path] = updated
-			count++
-		}
+		out.Templates[rt.path] = rt.render()
+		changed = true
 	}
-
-	return newChart, count
-}
-
-func injectLinkerdAnnotation(content string) string {
-	annotation := "        linkerd.io/inject: enabled\n"
-
-	if strings.Contains(content, "      annotations: {}") {
-		return strings.Replace(content,
-			"      annotations: {}",
-			"      annotations:\n"+annotation,
-			1)
+	if !changed {
+		return chart, nil
 	}
-	if strings.Contains(content, "      annotations:") {
-		return strings.Replace(content,
-			"      annotations:",
-			"      annotations:\n"+annotation,
-			1)
+	err := addFeatureValues(out, "linkerd", map[string]interface{}{
+		"enabled":        true,
+		"podAnnotations": map[string]interface{}{"linkerd.io/inject": mode},
+	})
+	if err != nil {
+		return nil, err
 	}
-	// No annotations section — inject after "    spec:" (pod spec, inside template)
-	// by inserting a metadata.annotations block after template.spec marker.
-	if strings.Contains(content, "  template:") {
-		return strings.Replace(content,
-			"  template:",
-			"  template:\n    metadata:\n      annotations:\n"+annotation,
-			1)
-	}
-	return content
+	return out, nil
 }

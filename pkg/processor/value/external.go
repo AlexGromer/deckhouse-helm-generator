@@ -65,7 +65,7 @@ func (m *ExternalFileManager) AddFromProcessed(
 
 	file := &ExternalFile{
 		Path:           pv.ExternalPath,
-		Content:        pv.FormattedValue,
+		Content:        pv.Original, // data is kept byte for byte; FormattedValue is for display only
 		SourceKey:      sourceKey,
 		SourceResource: sourceResource,
 		DataType:       pv.DetectedType,

@@ -2,9 +2,14 @@ package generator
 
 import (
 	"context"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
+	"sigs.k8s.io/yaml"
+
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
@@ -88,18 +93,69 @@ func TestLibraryGenerator_ChartYAML_Fields(t *testing.T) {
 }
 
 // ============================================================
-// Subtask 3: Named deployment template
+// Subtask 3: Library chart holds the shared helpers
 // ============================================================
 
-func TestLibraryGenerator_NamedTemplate_Deployment(t *testing.T) {
-	deploy := makeProcessedResourceWithValues("Deployment", "app", "default",
-		map[string]string{"app.kubernetes.io/name": "app"},
-		map[string]interface{}{"replicaCount": 1}, "# deploy")
+// libraryHelperNames are the helpers every wrapper template may rely on.
+var libraryHelperNames = []string{
+	"library.name",
+	"library.fullname",
+	"library.chart",
+	"library.labels",
+	"library.selectorLabels",
+	"library.serviceAccountName",
+	"library.imagePullSecrets",
+	"library.image",
+}
+
+func TestLibraryGenerator_Helpers_SharedDefines(t *testing.T) {
+	deploy := makeLibraryModeResource("Deployment", "frontend", "frontend", "deployment",
+		map[string]interface{}{"replicas": int64(1)})
 
 	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
 
 	gen := NewLibraryGenerator()
-	charts, err := gen.Generate(context.Background(), graph, Options{ChartVersion: "0.1.0"})
+	charts, err := gen.Generate(context.Background(), graph, libraryTestOptions())
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	libChart := findLibraryChart(charts)
+	if libChart == nil {
+		t.Fatal("library chart not found")
+	}
+	if libChart.Name != "library" {
+		t.Errorf("library chart name = %q, want %q", libChart.Name, "library")
+	}
+
+	for _, name := range libraryHelperNames {
+		define := `define "` + name + `"`
+		if n := strings.Count(libChart.Helpers, define); n != 1 {
+			t.Errorf("library _helpers.tpl defines %q %d times, want exactly 1", name, n)
+		}
+	}
+
+	// The helpers are the standard generated ones, named after the library.
+	if libChart.Helpers != helm.GenerateHelpers("library") {
+		t.Error("library helpers differ from helm.GenerateHelpers(\"library\")")
+	}
+}
+
+func TestLibraryGenerator_NoKindTemplates(t *testing.T) {
+	// The library carries only helpers: the resource manifests live in the
+	// wrapper charts, so there are no per-kind named templates.
+	resources := []*types.ProcessedResource{
+		makeLibraryModeResource("Deployment", "frontend", "frontend", "deployment",
+			map[string]interface{}{"replicas": int64(1)}),
+		makeLibraryModeResource("Service", "frontend", "frontend", "service",
+			map[string]interface{}{"type": "ClusterIP"}),
+		makeLibraryModeResource("StatefulSet", "db", "db", "statefulset",
+			map[string]interface{}{"replicas": int64(1)}),
+	}
+	graph := buildGraph(resources, nil)
+
+	gen := NewLibraryGenerator()
+	charts, err := gen.Generate(context.Background(), graph, libraryTestOptions())
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
@@ -109,251 +165,76 @@ func TestLibraryGenerator_NamedTemplate_Deployment(t *testing.T) {
 		t.Fatal("library chart not found")
 	}
 
-	// Check for named deployment template
-	found := false
-	for _, content := range libChart.Templates {
-		if strings.Contains(content, `define "library.deployment"`) {
-			found = true
-			break
+	if len(libChart.Templates) != 0 {
+		t.Errorf("library chart should have no templates, got %d: %v",
+			len(libChart.Templates), templatePaths(libChart.Templates))
+	}
+	for _, kind := range []string{"deployment", "service", "statefulset", "configmap", "ingress"} {
+		if strings.Contains(libChart.Helpers, `define "library.`+kind+`"`) {
+			t.Errorf("library helpers should not define a kind template library.%s", kind)
 		}
 	}
-	if !found {
-		t.Error("library chart missing named template 'library.deployment'")
+	if strings.Contains(libChart.Helpers, "apiVersion:") || strings.Contains(libChart.Helpers, "kind:") {
+		t.Error("library helpers should not render Kubernetes manifests")
 	}
 }
 
 // ============================================================
-// Subtask 4: Named service template
+// Subtask 4: Wrapper templates are the processor templates
 // ============================================================
 
-func TestLibraryGenerator_NamedTemplate_Service(t *testing.T) {
-	deploy := makeProcessedResourceWithValues("Deployment", "app", "default",
-		map[string]string{"app.kubernetes.io/name": "app"},
-		map[string]interface{}{"replicaCount": 1}, "# deploy")
+func TestLibraryGenerator_WrapperTemplate_KeepsProcessorContent(t *testing.T) {
+	deploy := makeLibraryModeResource("Deployment", "frontend", "frontend", "deployment",
+		map[string]interface{}{
+			"replicas": int64(3),
+			"image":    map[string]interface{}{"repository": "nginx", "tag": "1.25"},
+		})
 
 	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
 
 	gen := NewLibraryGenerator()
-	charts, err := gen.Generate(context.Background(), graph, Options{ChartVersion: "0.1.0"})
+	charts, err := gen.Generate(context.Background(), graph, libraryTestOptions())
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
 
-	libChart := findLibraryChart(charts)
-	if libChart == nil {
-		t.Fatal("library chart not found")
+	wrapper := findChartByName(charts, "frontend")
+	if wrapper == nil {
+		t.Fatalf("wrapper chart frontend not found, got %v", chartNamesOf(charts))
 	}
 
-	found := false
-	for _, content := range libChart.Templates {
-		if strings.Contains(content, `define "library.service"`) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("library chart missing named template 'library.service'")
-	}
-}
-
-// ============================================================
-// Subtask 5: Named statefulset template
-// ============================================================
-
-func TestLibraryGenerator_NamedTemplate_StatefulSet(t *testing.T) {
-	deploy := makeProcessedResourceWithValues("Deployment", "app", "default",
-		map[string]string{"app.kubernetes.io/name": "app"},
-		map[string]interface{}{"replicaCount": 1}, "# deploy")
-
-	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
-
-	gen := NewLibraryGenerator()
-	charts, err := gen.Generate(context.Background(), graph, Options{ChartVersion: "0.1.0"})
-	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
+	content, ok := wrapper.Templates[deploy.TemplatePath]
+	if !ok {
+		t.Fatalf("wrapper missing template %s, got %v", deploy.TemplatePath, templatePaths(wrapper.Templates))
 	}
 
-	libChart := findLibraryChart(charts)
-	if libChart == nil {
-		t.Fatal("library chart not found")
+	// Values paths are flattened: .Values.services.frontend -> .Values.
+	if strings.Contains(content, ".Values.services.") {
+		t.Errorf("wrapper template still references nested services values:\n%s", content)
 	}
-
-	found := false
-	for _, content := range libChart.Templates {
-		if strings.Contains(content, `define "library.statefulset"`) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("library chart missing named template 'library.statefulset'")
-	}
-}
-
-// ============================================================
-// Subtask 6: Named templates for all remaining resource types
-// ============================================================
-
-func TestLibraryGenerator_NamedTemplate_AllTypes(t *testing.T) {
-	deploy := makeProcessedResourceWithValues("Deployment", "app", "default",
-		map[string]string{"app.kubernetes.io/name": "app"},
-		map[string]interface{}{"replicaCount": 1}, "# deploy")
-
-	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
-
-	gen := NewLibraryGenerator()
-	charts, err := gen.Generate(context.Background(), graph, Options{ChartVersion: "0.1.0"})
-	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
-	}
-
-	libChart := findLibraryChart(charts)
-	if libChart == nil {
-		t.Fatal("library chart not found")
-	}
-
-	// All template content concatenated for searching
-	var allTemplateContent strings.Builder
-	for _, content := range libChart.Templates {
-		allTemplateContent.WriteString(content)
-	}
-	all := allTemplateContent.String()
-
-	expectedTemplates := []string{
-		"library.deployment",
-		"library.statefulset",
-		"library.daemonset",
-		"library.service",
-		"library.ingress",
-		"library.configmap",
-		"library.secret",
-		"library.pvc",
-		"library.hpa",
-		"library.pdb",
-		"library.networkpolicy",
-		"library.cronjob",
-		"library.job",
-		"library.serviceaccount",
-		"library.role",
-		"library.clusterrole",
-		"library.rolebinding",
-		"library.clusterrolebinding",
-	}
-
-	for _, tmpl := range expectedTemplates {
-		if !strings.Contains(all, `define "`+tmpl+`"`) {
-			t.Errorf("library chart missing named template '%s'", tmpl)
-		}
-	}
-}
-
-// ============================================================
-// Subtask 7: Template parameterization via dict pattern
-// ============================================================
-
-func TestLibraryGenerator_Templates_DictPattern(t *testing.T) {
-	deploy := makeProcessedResourceWithValues("Deployment", "app", "default",
-		map[string]string{"app.kubernetes.io/name": "app"},
-		map[string]interface{}{"replicaCount": 1}, "# deploy")
-
-	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
-
-	gen := NewLibraryGenerator()
-	charts, err := gen.Generate(context.Background(), graph, Options{ChartVersion: "0.1.0"})
-	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
-	}
-
-	libChart := findLibraryChart(charts)
-	if libChart == nil {
-		t.Fatal("library chart not found")
-	}
-
-	// Check that templates use context/values pattern
-	var allContent strings.Builder
-	for _, content := range libChart.Templates {
-		allContent.WriteString(content)
-	}
-	all := allContent.String()
-
-	// Templates should reference .context or .values for parameterization
-	if !strings.Contains(all, ".values") && !strings.Contains(all, ".Values") {
-		t.Error("library templates should reference .values or .Values for parameterization")
-	}
-}
-
-// ============================================================
-// Subtask 8: Template content for deployment
-// ============================================================
-
-func TestLibraryGenerator_TemplateContent_Deployment_Replicas(t *testing.T) {
-	deploy := makeProcessedResourceWithValues("Deployment", "app", "default",
-		map[string]string{"app.kubernetes.io/name": "app"},
-		map[string]interface{}{"replicaCount": 1}, "# deploy")
-
-	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
-
-	gen := NewLibraryGenerator()
-	charts, err := gen.Generate(context.Background(), graph, Options{ChartVersion: "0.1.0"})
-	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
-	}
-
-	libChart := findLibraryChart(charts)
-	if libChart == nil {
-		t.Fatal("library chart not found")
-	}
-
-	// Find deployment template content
-	deployContent := ""
-	for _, content := range libChart.Templates {
-		if strings.Contains(content, `define "library.deployment"`) {
-			deployContent = content
-			break
+	for _, want := range []string{
+		"{{- $svc := .Values -}}",
+		"kind: Deployment",
+		"replicas: {{ $svc.deployment.replicas }}",
+		"image: {{ $svc.deployment.image.repository }}:{{ $svc.deployment.image.tag }}",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("wrapper template missing %q:\n%s", want, content)
 		}
 	}
 
-	if deployContent == "" {
-		t.Fatal("deployment template not found in library chart")
+	// The values the template reads are present in the wrapper values.yaml.
+	values := parseValuesYAML(t, wrapper.ValuesYAML)
+	dep, ok := values["deployment"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("wrapper values missing deployment section:\n%s", wrapper.ValuesYAML)
 	}
-
-	if !strings.Contains(deployContent, "replicaCount") && !strings.Contains(deployContent, "replicas") {
-		t.Error("deployment template should reference replicaCount or replicas")
+	if dep["replicas"] != float64(3) {
+		t.Errorf("deployment.replicas = %v, want 3", dep["replicas"])
 	}
-}
-
-func TestLibraryGenerator_TemplateContent_Deployment_Image(t *testing.T) {
-	deploy := makeProcessedResourceWithValues("Deployment", "app", "default",
-		map[string]string{"app.kubernetes.io/name": "app"},
-		map[string]interface{}{"replicaCount": 1}, "# deploy")
-
-	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
-
-	gen := NewLibraryGenerator()
-	charts, err := gen.Generate(context.Background(), graph, Options{ChartVersion: "0.1.0"})
-	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
-	}
-
-	libChart := findLibraryChart(charts)
-	if libChart == nil {
-		t.Fatal("library chart not found")
-	}
-
-	deployContent := ""
-	for _, content := range libChart.Templates {
-		if strings.Contains(content, `define "library.deployment"`) {
-			deployContent = content
-			break
-		}
-	}
-
-	if deployContent == "" {
-		t.Fatal("deployment template not found")
-	}
-
-	if !strings.Contains(deployContent, "image") {
-		t.Error("deployment template should reference image")
+	img, _ := dep["image"].(map[string]interface{})
+	if img["repository"] != "nginx" || img["tag"] != "1.25" {
+		t.Errorf("deployment.image = %v, want nginx:1.25", dep["image"])
 	}
 }
 
@@ -385,27 +266,35 @@ func TestLibraryGenerator_Edge_EmptyGraph(t *testing.T) {
 
 func TestLibraryGenerator_Edge_SingleResourceType(t *testing.T) {
 	// Input: Only Deployments
-	// Expected: Still generates all named templates (library is generic)
-	deploy := makeProcessedResourceWithValues("Deployment", "app", "default",
-		map[string]string{"app.kubernetes.io/name": "app"},
-		map[string]interface{}{"replicaCount": 1}, "# deploy")
-
-	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
+	// Expected: the library chart is generic — identical whatever the input.
+	deploy := makeLibraryModeResource("Deployment", "app", "app", "deployment",
+		map[string]interface{}{"replicas": int64(1)})
 
 	gen := NewLibraryGenerator()
-	charts, err := gen.Generate(context.Background(), graph, Options{ChartVersion: "0.1.0"})
+	charts, err := gen.Generate(context.Background(),
+		buildGraph([]*types.ProcessedResource{deploy}, nil), libraryTestOptions())
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
+	emptyCharts, err := gen.Generate(context.Background(), buildGraph(nil, nil), libraryTestOptions())
+	if err != nil {
+		t.Fatalf("Generate (empty graph) returned error: %v", err)
+	}
 
 	libChart := findLibraryChart(charts)
-	if libChart == nil {
+	emptyLib := findLibraryChart(emptyCharts)
+	if libChart == nil || emptyLib == nil {
 		t.Fatal("library chart not found")
 	}
 
-	// Should have templates for all types, not just Deployment
-	if len(libChart.Templates) < 5 {
-		t.Errorf("expected multiple template files in library chart, got %d", len(libChart.Templates))
+	if libChart.ChartYAML != emptyLib.ChartYAML {
+		t.Error("library Chart.yaml should not depend on the input resources")
+	}
+	if libChart.Helpers != emptyLib.Helpers {
+		t.Error("library helpers should not depend on the input resources")
+	}
+	if len(libChart.Templates) != 0 || len(emptyLib.Templates) != 0 {
+		t.Error("library chart should have no templates")
 	}
 }
 
@@ -433,4 +322,96 @@ func findLibraryChart(charts []*types.GeneratedChart) *types.GeneratedChart {
 		}
 	}
 	return nil
+}
+
+// libraryTestOptions mirrors the pipeline: processors render templates for the
+// source chart "src", whose helper references the generator must rewrite.
+func libraryTestOptions() Options {
+	return Options{ChartName: "src", ChartVersion: "0.1.0"}
+}
+
+// makeLibraryModeResource builds a ProcessedResource shaped like processor
+// output: a template under services.<svc> that uses the source chart helpers.
+func makeLibraryModeResource(kind, name, svc, valuesKey string, values map[string]interface{}) *types.ProcessedResource {
+	r := makeProcessedResource(kind, name, "default", map[string]string{"app.kubernetes.io/name": svc})
+	r.ServiceName = svc
+	r.Values = values
+	r.ValuesPath = "services." + svc + "." + valuesKey
+	r.TemplatePath = "templates/" + svc + "-" + strings.ToLower(kind) + ".yaml"
+
+	var body string
+	switch kind {
+	case "Deployment", "StatefulSet":
+		body = `spec:
+  replicas: {{ $svc.` + valuesKey + `.replicas }}
+  selector:
+    matchLabels:
+      {{- include "src.selectorLabels" $ | nindent 6 }}
+  template:
+    spec:
+      containers:
+        - name: ` + name + `
+          image: {{ $svc.` + valuesKey + `.image.repository }}:{{ $svc.` + valuesKey + `.image.tag }}
+`
+	case "Service":
+		body = `spec:
+  type: {{ $svc.` + valuesKey + `.type }}
+  selector:
+    {{- include "src.selectorLabels" $ | nindent 4 }}
+`
+	default:
+		body = `data:
+  {{- toYaml $svc.` + valuesKey + `.data | nindent 2 }}
+`
+	}
+
+	r.TemplateContent = `{{- $svc := .Values.services.` + svc + ` -}}
+{{- if $svc.enabled }}
+apiVersion: ` + gvkForKind(kind).GroupVersion().String() + `
+kind: ` + kind + `
+metadata:
+  name: {{ include "src.fullname" $ }}-` + name + `
+  labels:
+    {{- include "src.labels" $ | nindent 4 }}
+` + body + `{{- end }}
+`
+	return r
+}
+
+// parseValuesYAML decodes a generated values.yaml.
+func parseValuesYAML(t *testing.T, valuesYAML string) map[string]interface{} {
+	t.Helper()
+	values := map[string]interface{}{}
+	if err := yaml.Unmarshal([]byte(valuesYAML), &values); err != nil {
+		t.Fatalf("invalid values.yaml: %v\n%s", err, valuesYAML)
+	}
+	return values
+}
+
+// includedHelpers returns the helper names referenced via include/template.
+func includedHelpers(content string) []string {
+	var names []string
+	for _, m := range helperRefRe.FindAllStringSubmatch(content, -1) {
+		names = append(names, m[1])
+	}
+	return names
+}
+
+var helperRefRe = regexp.MustCompile(`(?:include|template) "([^"]+)"`)
+
+func templatePaths(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func chartNamesOf(charts []*types.GeneratedChart) []string {
+	names := make([]string, len(charts))
+	for i, c := range charts {
+		names[i] = c.Name
+	}
+	return names
 }

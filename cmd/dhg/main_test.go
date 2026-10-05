@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -44,15 +45,15 @@ func TestNewRootCmd(t *testing.T) {
 		subNames[sub.Use] = true
 	}
 
-	for _, expected := range []string{"generate", "analyze", "validate", "diff <dir1> <dir2>", "version"} {
+	for _, expected := range []string{"generate", "analyze", "validate", "diff <dir1> <dir2>", "version", "features", "graph"} {
 		if !subNames[expected] {
 			t.Errorf("expected subcommand %q to be registered", expected)
 		}
 	}
 
 	got := len(cmd.Commands())
-	if got != 7 {
-		t.Errorf("expected 7 subcommands (generate, analyze, validate, diff, version, fix, migrate), got %d", got)
+	if got != 9 {
+		t.Errorf("expected 9 subcommands (generate, analyze, validate, diff, version, fix, migrate, features, graph), got %d", got)
 	}
 }
 
@@ -107,7 +108,10 @@ func TestNewGenerateCmd_Flags(t *testing.T) {
 		"verbose",
 		"env-values",
 		"deckhouse-module",
-		"template-style",
+		"template-dir",
+		"template-strategy",
+		"plugin",
+		"config",
 		"values-flat",
 	}
 
@@ -508,12 +512,12 @@ func TestGenerateCmd_HasDryRunFlag(t *testing.T) {
 func TestNamespaceResources_SkipsDefaultNPWhenAutoNPExists(t *testing.T) {
 	// Simulate namespace-resources templates (broad default NP)
 	nsTemplates := map[string]string{
-		"templates/frontend-resourcequota.yaml":          "kind: ResourceQuota",
-		"templates/frontend-limitrange.yaml":             "kind: LimitRange",
-		"templates/frontend-networkpolicy-default.yaml":  "kind: NetworkPolicy\npodSelector: {}",
-		"templates/backend-resourcequota.yaml":           "kind: ResourceQuota",
-		"templates/backend-limitrange.yaml":              "kind: LimitRange",
-		"templates/backend-networkpolicy-default.yaml":   "kind: NetworkPolicy\npodSelector: {}",
+		"templates/frontend-resourcequota.yaml":         "kind: ResourceQuota",
+		"templates/frontend-limitrange.yaml":            "kind: LimitRange",
+		"templates/frontend-networkpolicy-default.yaml": "kind: NetworkPolicy\npodSelector: {}",
+		"templates/backend-resourcequota.yaml":          "kind: ResourceQuota",
+		"templates/backend-limitrange.yaml":             "kind: LimitRange",
+		"templates/backend-networkpolicy-default.yaml":  "kind: NetworkPolicy\npodSelector: {}",
 	}
 
 	// Simulate auto-NP templates (fine-grained per-service) — only for "frontend"
@@ -596,69 +600,72 @@ func TestNamespaceResources_SkipsDefaultNPWhenAutoNPExists(t *testing.T) {
 	}
 }
 
-// ── TestGenerateCmd_TemplateStyleFlag ────────────────────────────────────────
+// ── TestGenerateCmd_TemplateDirAndPlugin ─────────────────────────────────────
 
-func TestGenerateCmd_TemplateStyleFlag(t *testing.T) {
+func TestGenerateCmd_TemplateDirAndPlugin(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
 	tmpDir := t.TempDir()
-	manifest := `apiVersion: apps/v1
-kind: Deployment
+	manifests := `apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: test-deploy
+  name: cfg
+data:
+  a: "1"
+---
+apiVersion: example.com/v1
+kind: Widget
+metadata:
+  name: w1
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: test
-  template:
-    metadata:
-      labels:
-        app: test
-    spec:
-      containers:
-      - name: app
-        image: nginx:latest
+  size: 3
 `
-	if err := os.WriteFile(filepath.Join(tmpDir, "deploy.yaml"), []byte(manifest), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "in.yaml"), []byte(manifests), 0644); err != nil {
+		t.Fatal(err)
+	}
+	overrides := filepath.Join(tmpDir, "overrides")
+	if err := os.MkdirAll(overrides, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(overrides, "extra.yaml"), []byte("# EXTRA-OVERRIDE\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	plugin := filepath.Join(tmpDir, "widget.sh")
+	pluginScript := "#!/bin/sh\ncat >/dev/null\nprintf '%s' '{\"serviceName\":\"w1\",\"templatePath\":\"templates/w1-widget.yaml\",\"templateContent\":\"# FROM-PLUGIN\\n\",\"valuesPath\":\"services.w1.widget\",\"values\":{\"size\":3}}'\n"
+	if err := os.WriteFile(plugin, []byte(pluginScript), 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Default value ("standard") should be accepted
-	_, err := executeCmd(t,
+	outDir := filepath.Join(tmpDir, "out")
+	out, err := executeCmd(t,
 		"generate",
-		"--file", tmpDir,
+		"--file", filepath.Join(tmpDir, "in.yaml"),
 		"--chart-name", "test",
-		"--template-style", "standard",
-		"--dry-run",
+		"--output", outDir,
+		"--template-dir", overrides,
+		"--plugin", "example.com/v1/Widget="+plugin,
 	)
 	if err != nil {
-		t.Fatalf("expected no error for --template-style standard, got: %v", err)
+		t.Fatalf("generate failed: %v\n%s", err, out)
+	}
+	for file, want := range map[string]string{
+		"templates/extra.yaml":     "# EXTRA-OVERRIDE",
+		"templates/w1-widget.yaml": "# FROM-PLUGIN",
+	} {
+		data, err := os.ReadFile(filepath.Join(outDir, "test", file))
+		if err != nil || !strings.Contains(string(data), want) {
+			t.Errorf("%s: want %q, got %q (%v)", file, want, data, err)
+		}
 	}
 
-	// "helm" should be accepted
-	_, err = executeCmd(t,
-		"generate",
-		"--file", tmpDir,
-		"--chart-name", "test",
-		"--template-style", "helm",
-		"--dry-run",
-	)
-	if err != nil {
-		t.Fatalf("expected no error for --template-style helm, got: %v", err)
+	if _, err := executeCmd(t, "generate", "--file", tmpDir, "--chart-name", "test",
+		"--template-strategy", "invalid", "--dry-run"); err == nil {
+		t.Error("expected error for an unknown --template-strategy")
 	}
-
-	// Invalid value should return error
-	_, err = executeCmd(t,
-		"generate",
-		"--file", tmpDir,
-		"--chart-name", "test",
-		"--template-style", "invalid",
-		"--dry-run",
-	)
-	if err == nil {
-		t.Fatal("expected error for --template-style invalid, got nil")
-	}
-	if !strings.Contains(err.Error(), "unknown template style") {
-		t.Errorf("expected error to mention 'unknown template style', got: %v", err)
+	if _, err := executeCmd(t, "generate", "--file", tmpDir, "--chart-name", "test",
+		"--plugin", "Widget=./x", "--dry-run"); err == nil {
+		t.Error("expected error for a plugin spec without apiVersion")
 	}
 }
 
@@ -742,5 +749,21 @@ func TestGenerateCmd_PostRendererFlag(t *testing.T) {
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("Expected default value 'false', got '%s'", flag.DefValue)
+	}
+}
+
+func TestGraphCmd(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "g")
+	for format, want := range map[string]string{"dot": "digraph resources", "mermaid": "flowchart LR"} {
+		if _, err := executeCmd(t, "graph", "-f", "../../examples/05-full-stack", "--format", format, "-o", out); err != nil {
+			t.Fatalf("%s: %v", format, err)
+		}
+		data, _ := os.ReadFile(out)
+		if !strings.Contains(string(data), want) || !strings.Contains(string(data), "Deployment") {
+			t.Errorf("%s output missing %q:\n%s", format, want, data)
+		}
+	}
+	if _, err := executeCmd(t, "graph", "-f", "../../examples/05-full-stack", "--format", "png"); err == nil {
+		t.Error("expected error for an unknown format")
 	}
 }

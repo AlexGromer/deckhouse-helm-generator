@@ -84,17 +84,7 @@ metadata:
   name: %s
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  subjects:
-    {{- toYaml .subjects | nindent 4 }}
-  accessLevel: {{ .accessLevel }}
-  {{- with .limitNamespaces }}
-  limitNamespaces:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- if .allowScale }}
-  allowScale: {{ .allowScale }}
-  {{- end }}
-{{- end }}
-`, sanitized, name, ctx.ChartName)
+%s{{- end }}
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "subjects", "accessLevel", "limitNamespaces", "allowScale"))
 }

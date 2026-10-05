@@ -97,5 +97,5 @@ description: {{ . | quote }}
 globalDefault: {{ .globalDefault | default false }}
 preemptionPolicy: {{ .preemptionPolicy | default "PreemptLowerPriority" }}
 {{- end }}
-`, safeName, name, ctx.ChartName)
+`, safeName, processor.ObjectName(name), ctx.ChartName)
 }

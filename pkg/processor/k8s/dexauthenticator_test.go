@@ -59,8 +59,8 @@ func TestDexAuthenticatorProcessor_SendAuthorizationHeader(t *testing.T) {
 	ctx := newTestProcessorContext()
 
 	obj := makeDexAuthenticatorObj("app-dex", "default", map[string]interface{}{
-		"applicationDomain":        "app.example.com",
-		"sendAuthorizationHeader":  true,
+		"applicationDomain":       "app.example.com",
+		"sendAuthorizationHeader": true,
 	})
 
 	result, err := proc.Process(ctx, obj)
@@ -117,7 +117,7 @@ func TestDexAuthenticatorProcessor_Template(t *testing.T) {
 	tpl := result.TemplateContent
 	testutil.AssertContains(t, tpl, "apiVersion: deckhouse.io/v1", "apiVersion")
 	testutil.AssertContains(t, tpl, "kind: DexAuthenticator", "kind")
-	testutil.AssertContains(t, tpl, ".applicationDomain", "applicationDomain ref")
+	testutil.AssertContains(t, tpl, `"applicationDomain"`, "applicationDomain ref")
 }
 
 func TestDexAuthenticatorProcessor_ServiceName(t *testing.T) {

@@ -7,51 +7,6 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-func makeChartWithSecurityContext(withAllFields bool) *types.GeneratedChart {
-	var deploymentYAML string
-	if withAllFields {
-		deploymentYAML = `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: secure-app
-spec:
-  template:
-    spec:
-      containers:
-      - name: app
-        securityContext:
-          runAsNonRoot: true
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
-          seccompProfile:
-            type: RuntimeDefault
-`
-	} else {
-		deploymentYAML = `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: basic-app
-spec:
-  template:
-    spec:
-      containers:
-      - name: app
-        securityContext:
-          runAsNonRoot: true
-`
-	}
-
-	return &types.GeneratedChart{
-		Name: "test-chart",
-		Templates: map[string]string{
-			"templates/deployment.yaml": deploymentYAML,
-		},
-	}
-}
-
 func makeChartWithNoSecurityContext() *types.GeneratedChart {
 	return &types.GeneratedChart{
 		Name: "test-chart",
@@ -76,40 +31,6 @@ spec:
   - port: 80
 `,
 		},
-	}
-}
-
-func TestPSS_AnalyzeRestricted(t *testing.T) {
-	chart := makeChartWithSecurityContext(true)
-	report := AnalyzePSSCompliance(chart)
-
-	if report.Level != PSSRestricted {
-		t.Errorf("expected level %q, got %q", PSSRestricted, report.Level)
-	}
-	if len(report.Violations) != 0 {
-		t.Errorf("expected no violations for fully-restricted chart, got %d: %v",
-			len(report.Violations), report.Violations)
-	}
-}
-
-func TestPSS_AnalyzeBaseline(t *testing.T) {
-	chart := makeChartWithSecurityContext(false)
-	report := AnalyzePSSCompliance(chart)
-
-	if report.Level != PSSBaseline {
-		t.Errorf("expected level %q, got %q", PSSBaseline, report.Level)
-	}
-	if len(report.Violations) == 0 {
-		t.Error("expected violations for chart missing restricted fields")
-	}
-}
-
-func TestPSS_AnalyzePrivileged(t *testing.T) {
-	chart := makeChartWithNoSecurityContext()
-	report := AnalyzePSSCompliance(chart)
-
-	if report.Level != PSSPrivileged {
-		t.Errorf("expected level %q, got %q", PSSPrivileged, report.Level)
 	}
 }
 

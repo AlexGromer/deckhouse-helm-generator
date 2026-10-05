@@ -41,7 +41,7 @@ func (p *TriggerAuthenticationProcessor) Process(ctx processor.Context, obj *uns
 	namespace := obj.GetNamespace()
 
 	values := p.extractValues(obj)
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -83,7 +83,7 @@ func (p *TriggerAuthenticationProcessor) extractValues(obj *unstructured.Unstruc
 	return values
 }
 
-func (p *TriggerAuthenticationProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
+func (p *TriggerAuthenticationProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 	sanitized := processor.SanitizeServiceName(serviceName)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
@@ -96,20 +96,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .secretTargetRef }}
-  secretTargetRef:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .env }}
-  env:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .podIdentity }}
-  podIdentity:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, serviceName, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "secretTargetRef", "env", "podIdentity"))
 }

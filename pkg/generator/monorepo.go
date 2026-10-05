@@ -81,19 +81,19 @@ func generateMonorepoMakefile(chartNames []string) string {
 	}
 
 	for _, tgt := range targets {
-		b.WriteString(fmt.Sprintf(".PHONY: %s\n", tgt.name))
-		b.WriteString(fmt.Sprintf("%s:", tgt.name))
+		fmt.Fprintf(&b, ".PHONY: %s\n", tgt.name)
+		fmt.Fprintf(&b, "%s:", tgt.name)
 		for _, s := range sanitized {
-			b.WriteString(fmt.Sprintf(" %s-%s", strings.TrimSuffix(tgt.name, "-all"), s))
+			fmt.Fprintf(&b, " %s-%s", strings.TrimSuffix(tgt.name, "-all"), s)
 		}
 		b.WriteString("\n\n")
 
 		// Per-chart sub-targets.
 		for _, s := range sanitized {
 			subTarget := fmt.Sprintf("%s-%s", strings.TrimSuffix(tgt.name, "-all"), s)
-			b.WriteString(fmt.Sprintf(".PHONY: %s\n", subTarget))
-			b.WriteString(fmt.Sprintf("%s:\n", subTarget))
-			b.WriteString(fmt.Sprintf("\t%s $(CHARTS_DIR)/%s\n\n", tgt.cmd, s))
+			fmt.Fprintf(&b, ".PHONY: %s\n", subTarget)
+			fmt.Fprintf(&b, "%s:\n", subTarget)
+			fmt.Fprintf(&b, "\t%s $(CHARTS_DIR)/%s\n\n", tgt.cmd, s)
 		}
 	}
 
@@ -128,8 +128,8 @@ func generateMonorepoCIWorkflow(chartNames []string) string {
 	b.WriteString("steps:\n")
 	for _, n := range chartNames {
 		s := sanitizeChartName(n)
-		b.WriteString(fmt.Sprintf("  - name: lint-%s\n", s))
-		b.WriteString(fmt.Sprintf("    run: helm lint charts/%s\n", s))
+		fmt.Fprintf(&b, "  - name: lint-%s\n", s)
+		fmt.Fprintf(&b, "    run: helm lint charts/%s\n", s)
 	}
 	return b.String()
 }
@@ -142,6 +142,6 @@ func generateMonorepoCTConfig() string {
 	b.WriteString("chart-dirs:\n")
 	b.WriteString("  - charts/\n")
 	b.WriteString("chart-repos: []\n")
-	b.WriteString(fmt.Sprintf("helm-extra-args: --timeout %s\n", defaultCTTimeout))
+	fmt.Fprintf(&b, "helm-extra-args: --timeout %s\n", defaultCTTimeout)
 	return b.String()
 }

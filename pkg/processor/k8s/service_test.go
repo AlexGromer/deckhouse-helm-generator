@@ -531,10 +531,10 @@ func TestProcessService_ExtractsAnnotations(t *testing.T) {
 		obj := makeServiceResource("my-svc", "default",
 			map[string]interface{}{"app": "myapp"},
 			map[string]interface{}{
-				"service.beta.kubernetes.io/aws-load-balancer-type":            "nlb",
-				"service.beta.kubernetes.io/aws-load-balancer-internal":        "true",
-				"service.beta.kubernetes.io/aws-load-balancer-ssl-cert":        "arn:aws:acm:us-east-1:123456:certificate/abc-123",
-				"service.beta.kubernetes.io/aws-load-balancer-ssl-ports":       "443",
+				"service.beta.kubernetes.io/aws-load-balancer-type":      "nlb",
+				"service.beta.kubernetes.io/aws-load-balancer-internal":  "true",
+				"service.beta.kubernetes.io/aws-load-balancer-ssl-cert":  "arn:aws:acm:us-east-1:123456:certificate/abc-123",
+				"service.beta.kubernetes.io/aws-load-balancer-ssl-ports": "443",
 			},
 			map[string]interface{}{
 				"type": "LoadBalancer",
@@ -869,7 +869,11 @@ func TestProcessService_GeneratesTemplate(t *testing.T) {
 	testutil.AssertContains(t, tpl, "kind: Service", "template should have kind")
 	testutil.AssertContains(t, tpl, "{{ $.Release.Namespace }}", "template should use release namespace")
 	testutil.AssertContains(t, tpl, `include "myapp.labels"`, "template should include labels helper")
-	testutil.AssertContains(t, tpl, `include "myapp.selectorLabels"`, "template should include selectorLabels helper")
+	testutil.AssertContains(t, tpl, "  name: my-svc\n", "the Service keeps its name from the input")
+	testutil.AssertContains(t, tpl, "  selector:\n    {{- toYaml .selector | nindent 4 }}", "the selector comes from values (the input's selector)")
+	if strings.Contains(tpl, `selectorLabels`) {
+		t.Error("chart selector labels must not replace the input's selector")
+	}
 	testutil.AssertContains(t, tpl, `.type`, "template should reference type")
 	testutil.AssertContains(t, tpl, `.ports`, "template should reference ports")
 }

@@ -1,808 +1,276 @@
 # Deckhouse Helm Generator (DHG)
 
-![Version](https://img.shields.io/badge/version-v1.0.0-brightgreen)
 ![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)
 [![codecov](https://codecov.io/gh/AlexGromer/deckhouse-helm-generator/graph/badge.svg)](https://codecov.io/gh/AlexGromer/deckhouse-helm-generator)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20darwin%20%7C%20windows-lightgrey)
-![K8s](https://img.shields.io/badge/Kubernetes-1.27--1.32-326CE5?logo=kubernetes&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-2372-success)
-![Coverage](https://img.shields.io/badge/coverage-86%25+-brightgreen)
 
-CLI-инструмент для автоматической генерации Helm charts из манифестов Kubernetes и Deckhouse. Анализирует связи между ресурсами, поддерживает 90+ генераторов и 50+ процессоров ресурсов, работает с живым кластером, файлами и GitOps-репозиториями.
+CLI, превращающий манифесты Kubernetes и Deckhouse в Helm charts. Читает YAML-файлы, живой кластер или Git-репозиторий, определяет связи между ресурсами (селекторы, ссылки по имени, тома, env, ServiceAccount), группирует их в сервисы и генерирует chart в одном из четырёх режимов.
+
+Каждый chart, который генерирует dhg, проверяется в CI настоящим Helm: `helm lint --strict`, `helm template`, проверка, что не пропал ни один входной объект, что ссылки между объектами и селекторы продолжают работать, что селекторы workload'ов совпадают с метками pod'ов, плюс `helm unittest` и post-renderer end-to-end (см. [Как проверяется результат](#как-проверяется-результат)).
 
 ---
 
 ## Содержание
 
-- [Ключевые возможности](#ключевые-возможности)
 - [Установка](#установка)
 - [Быстрый старт](#быстрый-старт)
-- [CLI Reference](#cli-reference)
+- [Источники ресурсов](#источники-ресурсов)
 - [Режимы вывода](#режимы-вывода)
-- [Расширенные возможности](#расширенные-возможности)
-- [Примеры](#примеры)
-- [Структура проекта](#структура-проекта)
-- [Статистика](#статистика)
-- [Дорожная карта](#дорожная-карта)
-- [Участие в разработке](#участие-в-разработке)
-- [Лицензия и авторы](#лицензия-и-авторы)
-
----
-
-## Ключевые возможности
-
-### Извлечение и анализ ресурсов
-
-- Извлечение из YAML-файлов, директорий, живого кластера (client-go) и GitOps-репозиториев (ArgoCD, Flux)
-- Интеллектуальный граф связей: LabelSelector, NameReference, VolumeMount, EnvFrom, Annotation, ServiceAccount, ImagePullSecret
-- Дедупликация и разрешение конфликтов при объединении нескольких источников
-- Рекурсивный обход директорий, фильтрация по namespace, label selector, типу ресурса
-
-### Генерация Helm charts
-
-- 4 режима вывода: `universal`, `separate`, `library`, `umbrella`
-- Автоматические `values.yaml`, `_helpers.tpl`, `NOTES.txt`, `.helmignore`, `Chart.yaml`
-- JSON Schema (`values.schema.json`) для валидации values
-- Environment overlays: `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml`
-- Поддержка Deckhouse Module Scaffold (`helm_lib`, OpenAPI schemas, `images/`, `hooks/`)
-
-### Стандартные Kubernetes ресурсы (22+ процессора)
-
-- Рабочие нагрузки: Deployment, StatefulSet, DaemonSet, Job, CronJob
-- Сеть: Service, Ingress, NetworkPolicy
-- Конфигурация: ConfigMap, Secret
-- Хранилище: PersistentVolumeClaim
-- Автомасштабирование: HPA, VPA, KEDA (ScaledObject, TriggerAuthentication)
-- Политики: PDB, PriorityClass, LimitRange, ResourceQuota
-- RBAC: ServiceAccount, Role, ClusterRole, RoleBinding, ClusterRoleBinding
-
-### Deckhouse CRD (8 процессоров)
-
-- ModuleConfig, IngressNginxController, NodeGroup, DexAuthenticator
-- User, Group, ClusterAuthorizationRule, InstanceClass
-
-### Экосистема Kubernetes
-
-- **Мониторинг**: ServiceMonitor, PodMonitor, PrometheusRule, GrafanaDashboard
-- **Gateway API**: HTTPRoute, Gateway, GRPCRoute, TLSRoute
-- **cert-manager**: Certificate, ClusterIssuer
-- **Argo Rollouts / Flagger**: Rollout, Canary (progressive delivery)
-- **Service Mesh**: Istio (VirtualService, DestinationRule, AuthorizationPolicy, multi-cluster, egress), Linkerd
-- **Secret Management**: ESO, Sealed Secrets, Vault CSI, Vault Agent, Reloader, SOPS
-- **Observability**: OpenTelemetry, Prometheus annotations, SLO (Sloth), distributed tracing
-- **Cloud-Native**: Workload Identity (IRSA/GKE WI/Azure WI), GPU/TPU, Windows containers, Velero
-
-### Инструменты разработчика
-
-- `dhg analyze` — анализ ресурсов без генерации
-- `dhg validate` — валидация через kubeconform, conftest, pluto; матрица K8s 1.27–1.32
-- `dhg diff` — сравнение двух chart-версий
-- `dhg fix` — автоматическое исправление нарушений best practices
-- `dhg graph` — граф зависимостей в формате DOT / Mermaid
-- `dhg migrate` — миграция между версиями API
-- Плагинная система: `.dhg.yaml`, `--template-dir`, внешние процессоры
+- [Что генерируется](#что-генерируется)
+- [Флаги generate](#флаги-generate)
+- [Опциональные возможности (`--with`)](#опциональные-возможности---with)
+- [Расширение: конфиг, плагины, переопределение шаблонов](#расширение-конфиг-плагины-переопределение-шаблонов)
+- [Остальные команды](#остальные-команды)
+- [Как проверяется результат](#как-проверяется-результат)
+- [Ограничения](#ограничения)
+- [Разработка](#разработка)
 
 ---
 
 ## Установка
 
-### Homebrew (macOS / Linux)
-
-```bash
-brew install AlexGromer/tap/dhg
-```
-
 ### Бинарный релиз
 
-```bash
-# Linux AMD64
-VERSION=v1.0.0
-curl -LO "https://github.com/AlexGromer/deckhouse-helm-generator/releases/download/${VERSION}/dhg_${VERSION#v}_linux_amd64.tar.gz"
-tar xzf "dhg_${VERSION#v}_linux_amd64.tar.gz"
-sudo mv dhg /usr/local/bin/
+Архивы для linux/darwin/windows (amd64/arm64), пакеты DEB/RPM/APK и образ `ghcr.io/alexgromer/dhg` публикуются на странице [Releases](https://github.com/AlexGromer/deckhouse-helm-generator/releases) (GoReleaser, подпись cosign, SBOM).
 
-# macOS ARM64
-curl -LO "https://github.com/AlexGromer/deckhouse-helm-generator/releases/download/${VERSION}/dhg_${VERSION#v}_darwin_arm64.tar.gz"
-tar xzf "dhg_${VERSION#v}_darwin_arm64.tar.gz"
-sudo mv dhg /usr/local/bin/
-
-# Windows AMD64
-curl -LO "https://github.com/AlexGromer/deckhouse-helm-generator/releases/download/${VERSION}/dhg_${VERSION#v}_windows_amd64.zip"
-Expand-Archive "dhg_${VERSION#v}_windows_amd64.zip" -DestinationPath .
-```
-
-### go install
-
-```bash
-go install github.com/AlexGromer/deckhouse-helm-generator/cmd/dhg@v1.0.0
-```
-
-### Docker
-
-```bash
-docker pull ghcr.io/alexgromer/dhg:v1.0.0
-docker run --rm -v $(pwd):/work ghcr.io/alexgromer/dhg:v1.0.0 \
-  generate -f /work/manifests -o /work/chart --chart-name myapp
-```
-
-### Пакетные менеджеры (DEB / RPM / APK)
-
-```bash
-# Debian / Ubuntu
-curl -LO "https://github.com/AlexGromer/deckhouse-helm-generator/releases/download/v1.0.0/dhg_1.0.0_linux_amd64.deb"
-sudo dpkg -i dhg_1.0.0_linux_amd64.deb
-
-# RHEL / Fedora / CentOS
-curl -LO "https://github.com/AlexGromer/deckhouse-helm-generator/releases/download/v1.0.0/dhg_1.0.0_linux_amd64.rpm"
-sudo rpm -i dhg_1.0.0_linux_amd64.rpm
-
-# Alpine Linux
-curl -LO "https://github.com/AlexGromer/deckhouse-helm-generator/releases/download/v1.0.0/dhg_1.0.0_linux_amd64.apk"
-sudo apk add --allow-untrusted dhg_1.0.0_linux_amd64.apk
-```
-
-### Сборка из исходников
+### Из исходников
 
 ```bash
 git clone https://github.com/AlexGromer/deckhouse-helm-generator.git
 cd deckhouse-helm-generator
-make build
-sudo cp bin/dhg /usr/local/bin/
+make build            # ./bin/dhg
 ```
+
+> `go install github.com/AlexGromer/deckhouse-helm-generator/cmd/dhg@...` сейчас **не работает**: `go.mod` объявляет модуль как `github.com/deckhouse/deckhouse-helm-generator`, и Go отклоняет несовпадение путей. Используйте релизный бинарник или сборку из исходников.
 
 ---
 
 ## Быстрый старт
 
-### Из YAML-файлов
-
 ```bash
-# Universal mode (по умолчанию) — один chart для всех ресурсов
-dhg generate -f ./manifests -o ./my-chart --chart-name myapp
+# Один chart для всех ресурсов
+dhg generate -f ./manifests -o ./charts --chart-name myapp
 
-# С environment overlays (dev/staging/prod)
-dhg generate -f ./manifests -o ./my-chart --chart-name myapp --env-values
+# Проверить результат
+helm lint ./charts/myapp
+helm template my-release ./charts/myapp
+dhg validate -f ./charts/myapp            # синтаксис шаблонов + совместимость API с K8s 1.27–1.32
 
-# С JSON Schema для values
-dhg generate -f ./manifests -o ./my-chart --chart-name myapp --include-schema
-```
-
-### Из живого кластера
-
-```bash
-dhg generate -s cluster -n production --chart-name prod-app -o ./charts/production \
-  --kubeconfig ~/.kube/config --context prod-cluster
-```
-
-### Из GitOps-репозитория
-
-```bash
-dhg generate -s gitops --repo https://github.com/myorg/k8s-config \
-  --path apps/production --chart-name myapp -o ./charts/myapp
+# Схема values, тесты helm-unittest, оверлеи окружений
+dhg generate -f ./manifests -o ./charts --chart-name myapp \
+  --include-schema --include-tests --env-values
 ```
 
 ---
 
-## CLI Reference
+## Источники ресурсов
 
-### generate
+| Источник | Флаги | Что делает |
+|---|---|---|
+| `file` (по умолчанию) | `-f` (файлы/каталоги, можно несколько), `-r` | Читает YAML (многодокументные файлы, рекурсивно) |
+| `cluster` | `--kubeconfig`, `--context`, `-n`, `--cluster-secrets skip\|mask\|include` | Выгружает объекты через API-сервер (kubeconfig: CA, client-cert, bearer token) |
+| `gitops` | `--git-repo`, `--git-branch`, `--git-path`, `--ssh-key` | `git clone --depth 1` во временный каталог, далее как `file` |
 
-Генерация Helm chart из ресурсов.
+Общие фильтры: `-n/--namespace`, `--namespaces`, `-l/--selector` (синтаксис kubectl), `--include-kinds`, `--exclude-kinds`. Одинаковый объект в нескольких файлах берётся один раз (первое определение), с предупреждением.
 
-```
-dhg generate [flags]
+При выгрузке из кластера dhg пропускает то, что создаёт control plane, а не chart:
+- объекты с `ownerReferences` (pod'ы и ReplicaSet'ы Deployment'а, Job'ы CronJob'а);
+- Events, Endpoints, EndpointSlices, Leases, Nodes, Namespaces;
+- `kube-root-ca.crt`, ServiceAccount `default`, токены ServiceAccount;
+- системные namespace `kube-*` и `d8-*` (Deckhouse), если namespace не задан явно.
 
-Flags:
-  -f, --file strings             Пути к YAML-файлам или директориям
-  -o, --output string            Директория вывода (default "./chart")
-      --chart-name string        Имя chart (обязательно)
-      --chart-version string     Версия chart (default "0.1.0")
-      --app-version string       Версия приложения (default "1.0.0")
-      --mode string              Режим вывода: universal|separate|library|umbrella (default "universal")
-      --env-values               Генерировать values-dev/staging/prod.yaml
-      --deckhouse-module         Scaffold Deckhouse-модуля (helm_lib, openapi/, images/, hooks/)
-  -s, --source string            Источник: file|cluster|gitops (default "file")
-  -n, --namespace string         Фильтр по namespace
-      --namespaces strings       Фильтр по нескольким namespace
-  -l, --selector string          Фильтр по label selector
-      --include-kinds strings    Включить только эти типы ресурсов
-      --exclude-kinds strings    Исключить эти типы ресурсов
-  -r, --recursive                Рекурсивный обход директорий (default true)
-      --kubeconfig string        Путь к kubeconfig
-      --context string           Контекст kubeconfig
-      --include-tests            Генерировать тестовые шаблоны
-      --include-readme           Генерировать README.md (default true)
-      --include-schema           Генерировать values.schema.json
-      --template-dir string      Директория с пользовательскими шаблонами
-  -v, --verbose                  Подробный вывод
+Кроме того, удаляются поля, проставленные сервером: `uid`, `resourceVersion`, `managedFields`, `status`, `last-applied-configuration`, `clusterIP`. Secrets по умолчанию не выгружаются.
+
+```bash
+dhg generate -s cluster -n shop --chart-name shop -o ./charts
+dhg generate -s gitops --git-repo https://github.com/org/manifests --git-path apps/web --chart-name web
 ```
 
-### analyze
-
-Анализ ресурсов и вывод графа связей без генерации chart.
-
-```
-dhg analyze [flags]
-
-Flags:
-  -f, --file strings    Пути к YAML-файлам или директориям
-  -s, --source string   Источник: file|cluster|gitops (default "file")
-  -n, --namespace string
-      --output-format   Формат: table|json|yaml (default "table")
-  -v, --verbose
-```
-
-### validate
-
-Валидация Helm chart против схем Kubernetes.
-
-```
-dhg validate [flags]
-
-Flags:
-      --chart string              Путь к chart (default ".")
-      --k8s-version string        Версия Kubernetes (default "1.30")
-      --k8s-versions strings      Матрица версий: 1.27,1.28,1.29,1.30,1.31,1.32
-      --kubeconform               Запустить kubeconform (default true)
-      --conftest                  Запустить conftest OPA policy
-      --pluto                     Проверить устаревшие API (pluto)
-      --strict                    Строгий режим (fail on warnings)
-```
-
-### diff
-
-Сравнение двух версий chart.
-
-```
-dhg diff <chart-v1> <chart-v2> [flags]
-
-Flags:
-      --output-format   Формат: unified|json|summary (default "unified")
-      --values string   Дополнительный values-файл для render
-```
-
-### fix
-
-Автоматическое исправление нарушений best practices.
-
-```
-dhg fix [flags]
-
-Flags:
-  -f, --file strings    Пути к YAML-файлам (in-place fix)
-      --chart string    Путь к chart
-      --dry-run         Показать изменения без применения
-      --rules strings   Список правил: pss,resources,probes,labels,all (default "all")
-```
-
-### graph
-
-Генерация графа зависимостей ресурсов.
-
-```
-dhg graph [flags]
-
-Flags:
-  -f, --file strings       Пути к YAML-файлам
-  -s, --source string      Источник: file|cluster (default "file")
-  -n, --namespace string
-      --format string      Формат: dot|mermaid|json (default "dot")
-  -o, --output string      Файл вывода (default stdout)
-```
-
-### migrate
-
-Миграция манифестов между версиями Kubernetes API.
-
-```
-dhg migrate [flags]
-
-Flags:
-  -f, --file strings         Пути к YAML-файлам
-      --from-version string  Исходная версия K8s (например, "1.25")
-      --to-version string    Целевая версия K8s (например, "1.30")
-      --dry-run              Показать изменения без применения
-  -o, --output string        Директория для результатов
-```
-
-### version
-
-```
-dhg version
-```
+Входные манифесты с устаревшими или удалёнными API (например, `policy/v1beta1` PodDisruptionBudget) дают предупреждение с заменой.
 
 ---
 
 ## Режимы вывода
 
-| Режим | Описание | Когда использовать |
-|-------|----------|--------------------|
-| `universal` | Один chart для всех сервисов | Монолитное приложение, простая структура |
-| `separate` | Отдельный chart на каждый сервис | Независимые деплои, разные версии релизов |
-| `library` | Библиотечный chart + wrapper charts | DRY-шаблоны, максимальное переиспользование |
-| `umbrella` | Родительский chart + subcharts | Helmfile-стиль, условное включение сервисов |
-
-### Universal (по умолчанию)
+| Режим | Результат | Когда использовать |
+|---|---|---|
+| `universal` | Один chart, values сервисов в `services.<имя>` | Приложение деплоится целиком |
+| `separate` | По chart на сервисную группу, values плоские | Сервисы релизятся независимо |
+| `library` | Library chart `library` с общими helpers и chart на каждую группу, использующий `library.*` | Один набор helpers на много chart'ов |
+| `umbrella` | Родительский chart, группы — subcharts в `charts/` с условием `<группа>.enabled` | Условное включение компонентов |
 
 ```bash
-dhg generate -f ./manifests -o ./my-chart --chart-name myapp
+dhg generate -f ./manifests -o ./charts --chart-name shop --mode umbrella
+helm upgrade --install shop ./charts/shop --set database.enabled=false
 ```
 
-Все сервисы в одном `values.yaml`:
+Для `library`-режима зависимость подключается как обычно: `helm dependency build ./charts/<chart>`.
+
+---
+
+## Что генерируется
+
+- `Chart.yaml`, `values.yaml`, `templates/` (по шаблону на объект), `_helpers.tpl`, `NOTES.txt`, `.helmignore`, `README.md` с таблицей параметров (пути в синтаксисе `--set`).
+- **Значения**: поля спецификаций выносятся в values по пути, который читает шаблон; каждый сервис включается и выключается через `enabled`.
+- **Неизвестные kinds и custom resources** сохраняют все поля верхнего уровня (`spec`, `data`, `rules`, …).
+- **CustomResourceDefinitions** пишутся без шаблонизации в `crds/`: Helm устанавливает их до шаблонов и никогда не обновляет и не удаляет.
+- `--include-schema`: `values.schema.json` (JSON Schema draft-07), выведенная из values по принципу «структура строго, скаляры мягко». Объект остаётся объектом, список — списком, boolean — boolean; строка и число взаимозаменяемы. Неизвестные ключи разрешены.
+- `--include-tests`: тесты [helm-unittest](https://github.com/helm-unittest/helm-unittest) (вид ресурса, выключение через `enabled`, snapshot-тесты).
+- `--hooks`: Job-хуки `pre-upgrade`/`post-install`/`pre-delete` (образ — `hooks.image`).
+- `--deckhouse-module`: структура модуля Deckhouse — зависимость `helm_lib`, `openapi/config-values.yaml` (схема из values), `openapi/values.yaml`, `images/`, `hooks/`.
+
+---
+
+## Флаги generate
+
+Полный список — `dhg generate --help`. Пост-обработка:
+
+| Флаг | Что добавляет |
+|---|---|
+| `--env-values` | `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml` с профилями по типу нагрузки |
+| `--namespace-resources` | ResourceQuota, LimitRange, NetworkPolicy по умолчанию и NetworkPolicy по связям сервисов (переключатели `namespace.*`) |
+| `--multi-tenant`, `--tenant-count` | Оверлей с изоляцией арендаторов |
+| `--feature-flags` | Переключатели monitoring/ingress/autoscaling/security/storage/rbac |
+| `--cloud-provider aws\|gcp\|azure`, `--cloud-internal` | Аннотации балансировщика для Service (сливаются с аннотациями из values) |
+| `--detect-ingress` | Аннотации для обнаруженного ingress-контроллера |
+| `--spot`, `--spot-grace-period` | Tolerations для spot-узлов, `terminationGracePeriodSeconds` и PDB на каждый workload (`spot.enabled`) |
+| `--auto-deps` | Bitnami-зависимости (PostgreSQL, Redis, …), найденные по env, выключенные по умолчанию |
+| `--airgap-registry` | `images.txt`, `mirror-images.sh`, `values-airgap.yaml` |
+| `--kustomize` | `<chart>/kustomize/`: base из входных манифестов и overlay'и dev/staging/prod (replicas 1/2/3 для каждого Deployment/StatefulSet) — путь доставки без Helm |
+| `--post-renderer` | `post-renderer/kustomize.sh` — post-renderer для Helm с оверлеями dev/staging/prod: `helm install … --post-renderer ./post-renderer/kustomize.sh --post-renderer-args prod` |
+| `--monorepo` | Makefile, `ct.yaml` для chart-testing |
+| `--values-flat` | Комментарии с путями `--set` в `values.yaml` |
+
+---
+
+## Опциональные возможности (`--with`)
+
+Возможности подключаются по имени и настраиваются параметрами со значениями по умолчанию. Неизвестный параметр — ошибка, а не молчаливое игнорирование. Всё, что добавляется в chart, выключается через values.
+
+```bash
+dhg features                                   # список и параметры
+dhg generate -f ./manifests --chart-name app \
+  --with istio,prometheus-rules,reloader \
+  --feature-opt istio.timeout=10s --feature-opt prometheus-rules.severity=critical
+```
+
+| Возможность | Что добавляет |
+|---|---|
+| `anti-affinity` | podAntiAffinity (и опционально распределение по зонам) для Deployment/StatefulSet |
+| `argo-rollouts` | Canary `Rollout` (`workloadRef`) для каждого Deployment |
+| `config-checksums` | Аннотации `checksum/*`: перезапуск pod'ов при изменении их ConfigMap/Secret |
+| `external-secrets` | `ExternalSecret` (External Secrets Operator) для используемых Secrets из существующего (Cluster)SecretStore |
+| `flux` | `flux/helmrelease.yaml` — Flux `HelmRelease` для этого chart |
+| `ingress-tls` | TLS для Ingress без `tls`: аннотация issuer cert-manager и секрет сертификата |
+| `istio` | VirtualService, DestinationRule, PeerAuthentication, AuthorizationPolicy из values |
+| `istio-egress` | ServiceEntry для внешних хостов, найденных в env |
+| `linkerd` | Аннотация инъекции прокси |
+| `otel` | `Instrumentation` (OpenTelemetry Operator) и аннотации автоинструментирования |
+| `policies` | Политики безопасности workload'ов: Kyverno `Policy` и/или Rego для conftest в `policy/` |
+| `prometheus-rules` | `PrometheusRule`: crash loop, OOM, рестарты, not ready; опционально SLO burn-rate |
+| `reloader` | Аннотации Stakater Reloader |
+| `resource-report` | `docs/resource-report.md`: оценка стоимости, right-sizing, находки по томам |
+| `vault-agent` | Аннотации HashiCorp Vault Agent для workload'ов с Secrets |
+| `velero-backup` | `Schedule` Velero (≥ 1.10) для chart'ов с томами: объекты релиза, pod'ы его workload'ов и их PVC (`orLabelSelectors`, `veleroBackup.labelSelectors`) |
+
+Все 16 возможностей проверяются в CI и по отдельности, и все вместе, во всех режимах.
+
+---
+
+## Расширение: конфиг, плагины, переопределение шаблонов
+
+**Конфиг.** `.dhg.yaml` в рабочем каталоге (или `--config path`) — ключи совпадают с именами флагов `generate`, флаги командной строки важнее:
 
 ```yaml
-services:
-  frontend:
-    enabled: true
-    replicaCount: 1
-    image:
-      repository: nginx
-      tag: "1.27"
-  backend:
-    enabled: true
-    replicaCount: 2
+chart-name: shop
+mode: umbrella
+include-schema: true
+with: [istio, prometheus-rules]
+feature-opt: ["istio.timeout=10s"]
+plugin: ["example.com/v1/Widget=./bin/widget-plugin"]
+template-dir: ./chart-overrides
 ```
 
-### Separate
+**Плагины.** `--plugin <apiVersion>/<Kind>[,…]=<исполняемый файл>` — внешний процессор для указанных GVK с приоритетом над встроенными. Протокол JSON:
+- в stdin плагин получает `{"name","namespace","kind","apiVersion","chartName","object"}`;
+- в stdout отдаёт `{"serviceName","templatePath","templateContent","valuesPath","values"}`;
+- пустой `templateContent` означает «не обработал», и ресурс уходит следующему процессору;
+- таймаут — 30 секунд.
 
-```bash
-dhg generate -f ./manifests -o ./charts --chart-name myapp --mode separate
-```
+**Переопределение шаблонов.** `--template-dir dir` добавляет файлы каталога в каждый chart: `dir/x.yaml` → `templates/x.yaml`; `_helpers.tpl` и `NOTES.txt` тоже разрешены. `--template-strategy override|append|prepend` задаёт способ слияния.
 
-```
-charts/
-├── frontend/
-│   ├── Chart.yaml
-│   ├── values.yaml
-│   └── templates/
-└── backend/
-    ├── Chart.yaml
-    ├── values.yaml
-    └── templates/
-```
+---
 
-### Library
+## Остальные команды
 
-```bash
-dhg generate -f ./manifests -o ./charts --chart-name myapp --mode library
-```
+| Команда | Назначение |
+|---|---|
+| `dhg validate -f <chart> [--kube-versions 1.27-1.32]` | Chart.yaml и values.yaml; синтаксис всех шаблонов (парсер Go-шаблонов, функции Helm разрешены); API, удалённые или ещё недоступные в целевых версиях K8s, — ошибки, устаревшие — предупреждения. Кластер не нужен |
+| `dhg analyze -f <path> [--output-format text\|json\|markdown]` | Связи, найденные паттерны и рекомендации без генерации |
+| `dhg graph -f <path> [--format dot\|mermaid]` | Граф зависимостей в stdout; в stderr — связность групп и циклы. `dhg graph -f m \| dot -Tsvg > g.svg` |
+| `dhg diff <dir1> <dir2>` | Построчное сравнение двух chart'ов |
+| `dhg fix -f <path>` | Генерирует chart и применяет исправления best practices: securityContext (PSS restricted), resources по профилю `--workload-type`, probes, PDB |
+| `dhg migrate --from <chart> -f <manifests> --chart-name n` | Drift между существующим chart'ом и сгенерированным заново, план миграции |
+| `dhg features` | Список возможностей для `--with` |
 
-```
-charts/
-├── myapp/               # type: library
-│   ├── Chart.yaml
-│   └── templates/
-│       ├── _deployment.tpl
-│       ├── _service.tpl
-│       └── _helpers.tpl
-├── frontend/            # вызывает шаблоны library
-│   ├── Chart.yaml       # зависимость на myapp
-│   └── values.yaml
-└── backend/
-    ├── Chart.yaml
-    └── values.yaml
-```
+---
 
-### Umbrella
+## Как проверяется результат
+
+`tests/golden` собирает настоящий `dhg` и прогоняет его на всех примерах и фикстурах репозитория во всех режимах, со всеми флагами пост-обработки и со всеми возможностями `--with`. Каждый результат проверяется так:
+
+1. `helm lint --strict` и `helm template` (с `--include-crds`), включая каждый `values-*.yaml`.
+2. Число отрендеренных объектов не меньше числа входных: ничего не потерялось молча.
+3. Селекторы Deployment/StatefulSet/DaemonSet совпадают с метками pod-шаблона (иначе API-сервер отклонит объект).
+4. **Целостность.** Ссылка, которая разрешалась во входных манифестах, разрешается и после рендеринга:
+   - ConfigMap, Secret, PVC и ServiceAccount в pod'ах;
+   - backend'ы Ingress, `serviceName` у StatefulSet, `roleRef`, цель HPA.
+
+   Service, PDB и NetworkPolicy, выбиравшие pod'ы, продолжают их выбирать.
+5. **Точность (fidelity).** В режимах universal/separate/library/umbrella рендер со значениями по умолчанию содержит каждое поле входных манифестов с тем же значением: метки, данные ConfigMap байт в байт, нулевые значения (`replicas: 0`, `enabled: false`), image digest, весь `spec` custom resources.
+6. `helm unittest` для сгенерированных тестов (если установлен плагин), запуск post-renderer'а через `helm template --post-renderer` и `kustomize build` каждого overlay `--kustomize` (если есть kustomize или kubectl).
+7. **Источники.** Генерация из fake API-сервера с «шумом» живого кластера и из локального git-репозитория.
 
 ```bash
-dhg generate -f ./manifests -o ./charts --chart-name myapp --mode umbrella
-```
-
-```
-charts/
-└── myapp/
-    ├── Chart.yaml       # dependencies: [frontend, backend, database]
-    ├── values.yaml
-    └── charts/
-        ├── frontend/
-        ├── backend/
-        └── database/
-```
-
-```bash
-# Деплой без database
-helm upgrade --install myapp ./charts/myapp --set database.enabled=false
+DHG_REQUIRE_HELM=1 go test ./tests/golden/   # без helm набор пропускается; с DHG_REQUIRE_HELM=1 — падает
 ```
 
 ---
 
-## Расширенные возможности
+## Ограничения
 
-### Environment Overlays
-
-```bash
-dhg generate -f ./manifests -o ./my-chart --chart-name myapp --env-values
-```
-
-Создаёт три файла с профилями для каждого окружения:
-
-- `values-dev.yaml` — `replicaCount: 1`, `logLevel: debug`, PDB отключён
-- `values-staging.yaml` — `replicaCount: 2`, `logLevel: info`, PDB `minAvailable: 1`
-- `values-prod.yaml` — `replicaCount: 3`, `logLevel: warn`, PDB `minAvailable: 2`, resource limits, anti-affinity
-
-```bash
-helm upgrade --install myapp ./my-chart -f ./my-chart/values-prod.yaml
-```
-
-### Security (PSS, RBAC, Resource Limits)
-
-DHG анализирует безопасность ресурсов и генерирует рекомендации:
-
-- **Pod Security Standards (PSS)**: проверка `securityContext`, `privileged`, `hostNetwork`, `hostPID`
-- **RBAC least privilege**: анализ Role/ClusterRole на избыточные права, генерация минимального набора
-- **Resource limits**: обнаружение отсутствующих `resources.limits`, автогенерация значений на основе requests
-- **Image security**: проверка `imagePullPolicy`, отсутствие `latest`-тегов, digest-pinning
-- **TLS**: проверка наличия Certificate/ClusterIssuer для Ingress с HTTPS
-
-```bash
-dhg fix -f ./manifests --rules pss,resources --dry-run
-```
-
-### Secret Management
-
-Поддержка всех основных подходов к хранению секретов:
-
-| Инструмент | Описание |
-|------------|----------|
-| **External Secrets Operator** | ExternalSecret + SecretStore/ClusterSecretStore (AWS, GCP, Vault, Azure) |
-| **Sealed Secrets** | SealedSecret (`bitnami.com/sealed-secrets`) с шифрованием публичным ключом |
-| **Vault CSI Provider** | SecretProviderClass с монтированием через CSI volume |
-| **Vault Agent Injector** | Аннотации `vault.hashicorp.com/agent-inject-secret-*` в pod template |
-| **Reloader** | Rolling restart при изменении ConfigMap/Secret |
-| **SOPS** | `.sops.yaml` + шифрование age/GPG/KMS |
-
-### Service Mesh (Istio / Linkerd)
-
-```bash
-dhg generate -f ./manifests --chart-name webapp -o ./webapp-chart
-```
-
-**Istio:**
-
-- VirtualService / DestinationRule: traffic splitting, retries, timeouts, circuit breaker
-- Canary: прогрессивный сдвиг трафика 10% → 50% → 100% с автоматическим rollback
-- AuthorizationPolicy: `ALLOW`/`DENY` правила по JWT, namespace, source principal
-- Multi-cluster: ServiceEntry + WorkloadEntry для cross-cluster service discovery
-- Egress: EgressGateway + ServiceEntry для управления исходящим трафиком
-
-**Linkerd:**
-
-- Аннотации `linkerd.io/inject: enabled`
-- ServiceProfile для traffic metrics и retries
-- TrafficSplit для canary deployments
-
-### Observability
-
-- **OpenTelemetry**: OTelCollector, Instrumentation CR, auto-instrumentation аннотации
-- **Prometheus**: автоинъекция аннотаций `prometheus.io/scrape`, `port`, `path`
-- **SLO (Sloth)**: `PrometheusServiceLevel` с burn-rate alerts (page / ticket)
-- **Distributed Tracing**: Jaeger / Zipkin / Tempo через OTEL Collector pipeline
-- **Recording Rules**: вычисленные метрики и ratio-функции
-
-### Cloud-Native Patterns
-
-- **Workload Identity**: IRSA (AWS), GKE Workload Identity, Azure Workload Identity
-- **GPU/TPU**: автообнаружение `nvidia.com/gpu`, `cloud-tpu`, генерация resource requests
-- **Windows containers**: nodeSelector `kubernetes.io/os: windows`, tolerations
-- **Velero**: аннотации backup для PVC, pre/post хуки
-
-### Валидация
-
-```bash
-# Валидация против K8s 1.30
-dhg validate --chart ./my-chart --k8s-version 1.30
-
-# Матрица версий (CI/CD)
-dhg validate --chart ./my-chart --k8s-versions 1.27,1.28,1.29,1.30,1.31,1.32
-
-# Полная проверка с OPA policies
-dhg validate --chart ./my-chart --kubeconform --conftest --pluto
-```
-
-### Плагинная система
-
-Конфигурационный файл `.dhg.yaml` в корне проекта:
-
-```yaml
-# .dhg.yaml
-version: "1.0"
-processors:
-  external:
-    - name: my-processor
-      cmd: ./scripts/my-processor
-      kinds: ["MyCustomResource.mygroup.io/v1"]
-template_dir: ./templates/custom
-hooks:
-  pre_generate: ./scripts/pre-generate.sh
-  post_generate: ./scripts/post-generate.sh
-```
-
-```bash
-# Использование пользовательских шаблонов
-dhg generate -f ./manifests -o ./chart --chart-name myapp \
-  --template-dir ./templates/custom
-```
+- **Аутентификация в кластере**: client-cert, `token`/`tokenFile` и exec-плагины kubeconfig (`client.authentication.k8s.io/v1`, `v1beta1`: kubelogin для OIDC/Dex, облачные CLI). Устаревший `auth-provider` не поддержан (как и в kubectl). Токен plugin'а запрашивается один раз на запуск.
+- **Один namespace на релиз.** Объекты рендерятся в namespace релиза; исключение — одноимённые объекты из разных namespace, они сохраняют исходный (dhg печатает `Note:`).
+- **Secrets** попадают в `values.yaml` в base64; для хранения в Git используйте `--with external-secrets` или `vault-agent`.
 
 ---
 
-## Примеры
+## Разработка
 
-### Пример 1: Простой веб-сервис
-
-```bash
-dhg generate -f ./k8s -o ./nginx-chart --chart-name nginx --verbose
-```
-
-Входные ресурсы: `Deployment` + `Service` + `ConfigMap`. Результат:
-
-```
-nginx-chart/
-├── Chart.yaml
-├── values.yaml
-├── .helmignore
-└── templates/
-    ├── _helpers.tpl
-    ├── NOTES.txt
-    ├── nginx-deployment.yaml
-    ├── nginx-service.yaml
-    └── nginx-configmap-nginx-config.yaml
-```
-
-Сгенерированный `values.yaml`:
-
-```yaml
-global:
-  imageRegistry: ""
-  imagePullSecrets: []
-
-services:
-  nginx:
-    enabled: true
-    deployment:
-      replicas: 2
-      containers:
-        - name: nginx
-          image:
-            repository: nginx
-            tag: "1.25"
-          ports:
-            - containerPort: 80
-    service:
-      type: ClusterIP
-      ports:
-        - port: 80
-          targetPort: 80
-    configMaps:
-      nginx-config:
-        enabled: true
-```
-
-### Пример 2: Production-окружение с security
+Требования: Go 1.26+, Helm 3.x (для `tests/golden`), опционально kustomize и плагин helm-unittest.
 
 ```bash
-dhg generate -f ./manifests --chart-name webapp \
-  --include-kinds Deployment,Service,Ingress,Certificate,ServiceMonitor,PrometheusRule \
-  --env-values --include-schema \
-  -o ./webapp-chart
+make build          # ./bin/dhg
+make test           # все тесты; tests/golden пропускается без helm
+make golden         # golden-набор, helm обязателен
+make lint           # golangci-lint v2
 ```
 
-Дополнительно сгенерирует:
-
-- `values.schema.json` — JSON Schema для `helm lint` и IDE-подсказок
-- `values-prod.yaml` — resource limits, anti-affinity, PDB `minAvailable: 2`
-- Зависимости: `Certificate` → `ClusterIssuer`, `ServiceMonitor` → `Service`
-
-### Пример 3: Deckhouse-модуль
-
-```bash
-dhg generate -f ./manifests -o ./my-module \
-  --chart-name ingress-nginx --deckhouse-module --verbose
-```
-
-Структура результата:
+Архитектура конвейера (`cmd/dhg/pipeline.go`):
 
 ```
-my-module/
-├── Chart.yaml              # dependency: helm_lib "*"
-├── values.yaml
-├── openapi/
-│   ├── config-values.yaml  # публичные настройки (OpenAPI schema)
-│   └── values.yaml         # internal values schema
-├── images/                 # Dockerfile для образов модуля
-├── hooks/                  # Go/Shell хуки
-└── templates/
-    ├── _helpers.tpl         # helm_lib_module_labels, helm_lib_module_image
-    └── ...
+extractor (file | cluster | gitops) → дедупликация
+  → processor.Registry (процессоры по GVK + плагины; общий fallback для неизвестных kinds)
+  → analyzer (детекторы связей → граф → сервисные группы)
+  → generator (universal | separate | library | umbrella)
+  → пост-обработка (флаги generate, features --with, --template-dir) → запись на диск
 ```
+
+Новый вид ресурса — процессор в `pkg/processor/k8s`, регистрация в `RegisterAll`. Новая опциональная возможность — `RegisterFeature` в `pkg/generator/features_*.go`: golden-набор автоматически прогонит её на всех входах.
 
 ---
 
-## Структура проекта
+## Лицензия
 
-```
-.
-├── cmd/
-│   └── dhg/                  # Точка входа CLI (cobra)
-├── pkg/
-│   ├── extractor/            # Извлечение ресурсов (file, cluster, gitops)
-│   ├── analyzer/             # Анализ графа связей
-│   ├── processor/            # 50+ процессоров ресурсов
-│   │   └── k8s/              # Все процессоры по группам (core, deckhouse,
-│   │                         # monitoring, gateway, keda, certmanager,
-│   │                         # argo, istio, linkerd, secrets, otel, cloud)
-│   ├── generator/            # Генерация charts (90+ генераторов)
-│   │   ├── arch/             # Архитектурные генераторы (12)
-│   │   ├── security/         # Генераторы безопасности (10)
-│   │   └── cloud/            # Cloud-native генераторы
-│   ├── helm/                 # Утилиты Helm (render, lint, diff)
-│   ├── fix/                  # Auto-Fix Engine
-│   ├── graph/                # DOT/Mermaid граф зависимостей
-│   ├── migrate/              # Миграция API версий
-│   ├── validate/             # Валидация (kubeconform, conftest, pluto)
-│   └── types/                # Общие типы и интерфейсы
-├── tests/
-│   ├── integration/          # Интеграционные тесты
-│   └── e2e/                  # End-to-end тесты
-├── testdata/                 # Тестовые YAML-манифесты
-├── Makefile
-└── README.md
-```
-
----
-
-## Статистика
-
-| Показатель | Значение |
-|------------|----------|
-| Генераторы | 90+ |
-| Процессоры ресурсов | 50+ |
-| Тесты | 2372 |
-| Покрытие кода | 86%+ |
-| Платформы | 6 (linux/darwin/windows × amd64/arm64) |
-| Поддержка K8s | 1.27 – 1.32 |
-| ADR (Architecture Decision Records) | 50 |
-| Строк кода | ~35 000 |
-| Фазы разработки | Phase 1–6 (100% выполнено) |
-
----
-
-## Дорожная карта
-
-### Выполнено (Phase 1–6)
-
-| Фаза | Описание | Статус |
-|------|----------|--------|
-| Phase 1 | Core pipeline, 50+ процессоров, CLI (`validate`, `diff`) | ✅ 100% |
-| Phase 2 | 12 архитектурных генераторов (infrastructure, detection, advanced) | ✅ 100% |
-| Phase 2.5 | 10 генераторов безопасности (PSS, RBAC, resource limits, image, TLS, audit, admission, supply chain) | ✅ 100% |
-| Phase 3 | Deckhouse CRD (InstanceClass, GRPCRoute, TLSRoute, Canary), module scaffold, compatibility | ✅ 100% |
-| Phase 4 | Cluster Extractor (client-go), GitOps Extractor (ArgoCD/Flux), Multi-Source Merge | ✅ 100% |
-| Phase 5.1–5.4 | Auto-Fix Engine (`dhg fix`), Generic CRD, DOT Graph (`dhg graph`), Migration (`dhg migrate`) | ✅ 100% |
-| Phase 5.5 | Smart Analysis: cost estimation, right-sizing, PV best practices, compliance-as-code, policy-as-code | ✅ 100% |
-| Phase 5.6 | Advanced Templating: Kustomize post-renderer, Operator scaffold | ✅ 100% |
-| Phase 5.7 | Secret Management: ESO, Sealed Secrets, Vault CSI, Vault Agent, Reloader, SOPS | ✅ 100% |
-| Phase 5.8 | Service Mesh: Istio (traffic, canary, AuthzPolicy, multi-cluster, egress), Linkerd | ✅ 100% |
-| Phase 5.9 | Observability: OpenTelemetry, Prometheus annotations, SLO (Sloth), distributed tracing, recording rules | ✅ 100% |
-| Phase 5.10 | Cloud-Native: Workload Identity, GPU/TPU, Windows, Velero, Flux postBuild | ✅ 100% |
-| Phase 6.0 | Validation: Kubeconform, Pluto, Conftest (Rego), K8s version matrix, CI pipeline templates, chart-testing | ✅ 100% |
-| Phase 6.1 | Supply Chain Security: SLSA provenance, OCI annotations, cosign signing, Syft SBOM | ✅ 100% |
-| Phase 6.2 | Performance: параллельная обработка (worker pool), оптимизация памяти (sync.Pool), streaming YAML | ✅ 100% |
-| Phase 6.3 | Distribution: DEB/RPM/APK (nfpm), multi-arch Docker, OCI registry, Homebrew | ✅ 100% |
-| Phase 6.4 | Documentation: ADR (50 записей), Developer Guide, User Guide | ✅ 100% |
-| Phase 6.5 | Plugin System: внешние процессоры (JSON protocol), .dhg.yaml конфиг, template overrides | ✅ 100% |
-
-### Планируется (Phase 7–14)
-
-| Фаза | Направление | Описание |
-|------|-------------|----------|
-| Phase 7 | Production Operations | Backup/Restore (Velero), Multi-Tenancy, Capacity Planning, Cost Optimization, GitOps, DR, Compliance, Monitoring |
-| Phase 8 | Developer Experience | IDE/LSP, Pre-Commit, Testing Framework, Docs Automation, Inner Loop, K8s Operator, Platform Engineering |
-| Phase 9 | AI/ML Workloads | Kubeflow, KServe, GPU scheduling (MIG), Ray, MLOps, distributed training, model serving |
-| Phase 10 | Database Operators | CloudNativePG, Percona MySQL, Redis Enterprise, MongoDB, Cassandra, ClickHouse, OpenSearch |
-| Phase 11 | Advanced Scheduling | Topology Spread, Priority/Preemption, Affinity/Anti-Affinity, Taints, Volcano/Kueue |
-| Phase 12 | Data Management & CSI | Volume Snapshots, StorageClass auto-selection, Encryption at Rest, Velero protection |
-| Phase 13 | Edge Computing | K3s/MicroK8s/KubeEdge detection, ARM/multi-arch, Air-Gapped, IoT device integration |
-| Phase 14 | Plugin Registry | Реестр процессоров и шаблонов: `dhg plugin install/publish/search`, template packs |
-
----
-
-## Участие в разработке
-
-### Требования
-
-- Go 1.26+
-- make
-- (опционально) Helm 3.x для тестирования результатов
-
-### Сборка и тестирование
-
-```bash
-# Сборка
-make build
-
-# Тесты
-make test
-
-# Lint
-make lint
-
-# Сборка для всех платформ
-make build-all
-```
-
-### Добавление нового процессора
-
-```go
-package k8s
-
-import (
-    "github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
-    "k8s.io/apimachinery/pkg/runtime/schema"
-)
-
-type MyResourceProcessor struct {
-    processor.BaseProcessor
-}
-
-func NewMyResourceProcessor() *MyResourceProcessor {
-    return &MyResourceProcessor{
-        BaseProcessor: processor.NewBaseProcessor(
-            "myresource",
-            100, // priority
-            schema.GroupVersionKind{Group: "my.group", Version: "v1", Kind: "MyResource"},
-        ),
-    }
-}
-
-func (p *MyResourceProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
-    return &processor.Result{
-        Processed:       true,
-        ServiceName:     "myservice",
-        TemplatePath:    "templates/myresource.yaml",
-        TemplateContent: generateTemplate(obj),
-        Values:          extractValues(obj),
-    }, nil
-}
-```
-
-Зарегистрируйте процессор в `pkg/processor/k8s/registry.go`:
-
-```go
-func RegisterAll(r *processor.Registry) {
-    // ...
-    r.Register(NewMyResourceProcessor())
-}
-```
-
-### Процесс
-
-1. Сделайте fork репозитория
-2. Создайте feature-ветку: `git checkout -b feature/amazing-feature`
-3. Напишите тесты для новой функциональности
-4. Зафиксируйте изменения: `git commit -m 'feat: add amazing feature'`
-5. Отправьте ветку: `git push origin feature/amazing-feature`
-6. Откройте Pull Request
-
----
-
-## Лицензия и авторы
-
-Apache License 2.0 — см. [LICENSE](LICENSE).
-
-**Alex Gromer** — System Architect, End-to-End Engineer
-
-- DevOps/Infrastructure: Deckhouse (K8s), Astra Linux, Java Spring microservices
-- Systems programming: Go, Rust, C
-- [GitHub](https://github.com/AlexGromer)
-
----
-
-## Ссылки
-
-- [Документация Deckhouse](https://deckhouse.io/documentation/)
-- [Документация Helm](https://helm.sh/docs/)
-- [Справочник Kubernetes API](https://kubernetes.io/docs/reference/kubernetes-api/)
-- [Gateway API](https://gateway-api.sigs.k8s.io/)
-- [OpenTelemetry](https://opentelemetry.io/docs/)
+Apache License 2.0 — см. [LICENSE](LICENSE). Автор — [Alex Gromer](https://github.com/AlexGromer).

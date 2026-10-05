@@ -997,8 +997,8 @@ func TestCalculateComplexityScore_Low(t *testing.T) {
 func TestCalculateComplexityScore_High(t *testing.T) {
 	a := NewAnalyzer()
 	metrics := AnalysisMetrics{
-		TotalResources:  60,
-		TotalServices:   15,
+		TotalResources:   60,
+		TotalServices:    15,
 		StatefulServices: 3,
 		ResourcesByKind: map[string]int{
 			"Deployment": 10, "Service": 10, "ConfigMap": 10,
@@ -1016,8 +1016,8 @@ func TestCalculateComplexityScore_High(t *testing.T) {
 func TestCalculateComplexityScore_MidResources(t *testing.T) {
 	a := NewAnalyzer()
 	metrics := AnalysisMetrics{
-		TotalResources: 30,
-		TotalServices:  7,
+		TotalResources:  30,
+		TotalServices:   7,
 		ResourcesByKind: map[string]int{"Deployment": 1},
 	}
 	score := a.calculateComplexityScore(metrics)
@@ -1031,8 +1031,8 @@ func TestCalculateComplexityScore_MidResources(t *testing.T) {
 func TestCalculateComplexityScore_LowMidServices(t *testing.T) {
 	a := NewAnalyzer()
 	metrics := AnalysisMetrics{
-		TotalResources: 5,
-		TotalServices:  3,
+		TotalResources:  5,
+		TotalServices:   3,
 		ResourcesByKind: map[string]int{"Deployment": 1},
 	}
 	score := a.calculateComplexityScore(metrics)
@@ -1046,8 +1046,8 @@ func TestCalculateComplexityScore_LowMidServices(t *testing.T) {
 func TestCalculateComplexityScore_ResourcesBetween11And20(t *testing.T) {
 	a := NewAnalyzer()
 	metrics := AnalysisMetrics{
-		TotalResources: 15,
-		TotalServices:  1,
+		TotalResources:  15,
+		TotalServices:   1,
 		ResourcesByKind: map[string]int{"Deployment": 1},
 	}
 	score := a.calculateComplexityScore(metrics)
@@ -1061,8 +1061,8 @@ func TestCalculateComplexityScore_ResourcesBetween11And20(t *testing.T) {
 func TestCalculateComplexityScore_Cap(t *testing.T) {
 	a := NewAnalyzer()
 	metrics := AnalysisMetrics{
-		TotalResources:  100,
-		TotalServices:   20,
+		TotalResources:   100,
+		TotalServices:    20,
 		StatefulServices: 10,
 		ResourcesByKind: map[string]int{
 			"A": 1, "B": 1, "C": 1, "D": 1, "E": 1,
@@ -3686,8 +3686,8 @@ func TestPodSecurityStandardsChecker_NilCapabilities(t *testing.T) {
 		{
 			"name": "main",
 			"securityContext": map[string]interface{}{
-				"runAsNonRoot": true,
-				"capabilities": nil,
+				"runAsNonRoot":   true,
+				"capabilities":   nil,
 				"seccompProfile": map[string]interface{}{"type": "RuntimeDefault"},
 			},
 		},

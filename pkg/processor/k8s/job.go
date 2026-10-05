@@ -32,7 +32,7 @@ func NewJobProcessor() *JobProcessor {
 // Process processes a Job resource.
 func (p *JobProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
 	if obj == nil {
-		return nil, errors.New("Job object is nil")
+		return nil, errors.New("nil Job object")
 	}
 
 	serviceName := processor.SanitizeServiceName(processor.ServiceNameFromResource(obj))
@@ -48,7 +48,7 @@ func (p *JobProcessor) Process(ctx processor.Context, obj *unstructured.Unstruct
 	// Get annotations for inline embedding in template
 	annotations := obj.GetAnnotations()
 
-	template := p.generateTemplate(ctx, serviceName, annotations)
+	template := p.generateTemplate(ctx, serviceName, name, annotations)
 
 	return &processor.Result{
 		Processed:       true,
@@ -117,44 +117,8 @@ func (p *JobProcessor) extractValues(obj *unstructured.Unstructured) (map[string
 		}
 	}
 
-	// Extract containers from pod template
-	if containers, ok, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers"); ok {
-		extractedContainers := make([]map[string]interface{}, 0, len(containers))
-		for _, c := range containers {
-			cm, ok := c.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			container := make(map[string]interface{})
-			if name, ok := cm["name"].(string); ok {
-				container["name"] = name
-			}
-			if image, ok := cm["image"].(string); ok {
-				parts := strings.SplitN(image, ":", 2)
-				imageMap := map[string]interface{}{"repository": parts[0]}
-				if len(parts) > 1 {
-					imageMap["tag"] = parts[1]
-				}
-				container["image"] = imageMap
-			}
-			if resources, ok := cm["resources"].(map[string]interface{}); ok {
-				container["resources"] = resources
-			}
-			if env, ok := cm["env"].([]interface{}); ok {
-				container["env"] = env
-			}
-			if cmd, ok := cm["command"].([]interface{}); ok {
-				container["command"] = cmd
-			}
-			if args, ok := cm["args"].([]interface{}); ok {
-				container["args"] = args
-			}
-			extractedContainers = append(extractedContainers, container)
-		}
-		if len(extractedContainers) > 0 {
-			values["containers"] = extractedContainers
-		}
-	}
+	// Pod template (labels, annotations, containers, volumes, scheduling, ...)
+	deps = append(deps, extractPodTemplateValues(obj, values, "spec", "template")...)
 
 	// Extract restartPolicy
 	if policy, ok, _ := unstructured.NestedString(obj.Object, "spec", "template", "spec", "restartPolicy"); ok {
@@ -207,8 +171,7 @@ func buildAnnotationsBlock(annotations map[string]string) string {
 	return sb.String()
 }
 
-func (p *JobProcessor) generateTemplate(ctx processor.Context, serviceName string, annotations map[string]string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
+func (p *JobProcessor) generateTemplate(ctx processor.Context, serviceName, name string, annotations map[string]string) string {
 	annotationsBlock := buildAnnotationsBlock(annotations)
 
 	// Add newline before annotations block if it exists
@@ -223,56 +186,35 @@ func (p *JobProcessor) generateTemplate(ctx processor.Context, serviceName strin
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
     app.kubernetes.io/component: %s%s
 spec:
-  {{- with .completions }}
-  completions: {{ . }}
+  {{- if hasKey . "completions" }}
+  completions: {{ .completions }}
   {{- end }}
-  {{- with .parallelism }}
-  parallelism: {{ . }}
+  {{- if hasKey . "parallelism" }}
+  parallelism: {{ .parallelism }}
   {{- end }}
-  {{- with .backoffLimit }}
-  backoffLimit: {{ . }}
+  {{- if hasKey . "backoffLimit" }}
+  backoffLimit: {{ .backoffLimit }}
   {{- end }}
-  {{- with .activeDeadlineSeconds }}
-  activeDeadlineSeconds: {{ . }}
+  {{- if hasKey . "activeDeadlineSeconds" }}
+  activeDeadlineSeconds: {{ .activeDeadlineSeconds }}
   {{- end }}
-  {{- with .ttl }}
-  ttlSecondsAfterFinished: {{ . }}
+  {{- if hasKey . "ttl" }}
+  ttlSecondsAfterFinished: {{ .ttl }}
   {{- end }}
   {{- with .completionMode }}
   completionMode: {{ . }}
   {{- end }}
-  {{- if .suspend }}
+  {{- if hasKey . "suspend" }}
   suspend: {{ .suspend }}
   {{- end }}
-  template:
-    spec:
-      restartPolicy: {{ .restartPolicy | default "Never" }}
-      {{- with .containers }}
-      containers:
-        {{- range . }}
-        - name: {{ .name }}
-          image: "{{ .image.repository }}:{{ .image.tag | default "latest" }}"
-          {{- with .command }}
-          command:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .args }}
-          args:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-        {{- end }}
-      {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName, annotationsPart)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName, annotationsPart,
+		podTemplate(ctx.ChartName, 2, "Never"))
 }

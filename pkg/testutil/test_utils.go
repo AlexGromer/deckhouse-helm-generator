@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 )
@@ -196,15 +195,6 @@ func ExtractField(t *testing.T, obj *unstructured.Unstructured, fields ...string
 	}
 
 	return value
-}
-
-// MustConvert converts unstructured to typed object, fails test on error
-func MustConvert(t *testing.T, obj *unstructured.Unstructured, target runtime.Object) {
-	t.Helper()
-
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, target); err != nil {
-		t.Fatalf("Failed to convert unstructured to %T: %v", target, err)
-	}
 }
 
 // CreateTempDir creates a temporary directory for test artifacts

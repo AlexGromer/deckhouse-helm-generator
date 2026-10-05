@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/yaml"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -34,6 +34,9 @@ func (e *FileExtractor) Source() types.Source {
 func (e *FileExtractor) Validate(ctx context.Context, opts Options) error {
 	if len(opts.Paths) == 0 {
 		return fmt.Errorf("at least one path is required")
+	}
+	if _, err := labels.Parse(opts.LabelSelector); err != nil {
+		return fmt.Errorf("invalid label selector %q: %w", opts.LabelSelector, err)
 	}
 
 	for _, path := range opts.Paths {
@@ -152,13 +155,22 @@ func (e *FileExtractor) parseYAMLStream(ctx context.Context, reader io.Reader, s
 	// Split by YAML document separator
 	documents := splitYAMLDocuments(content)
 
+	var selector labels.Selector
+	if opts.LabelSelector != "" {
+		if selector, err = labels.Parse(opts.LabelSelector); err != nil {
+			return fmt.Errorf("invalid label selector %q: %w", opts.LabelSelector, err)
+		}
+	}
+
 	for _, doc := range documents {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		doc = bytes.TrimSpace(doc)
-		if len(doc) == 0 {
+		// Trim only to detect empty documents: trimming the document itself
+		// would drop the line break that ends a trailing "|" block scalar,
+		// and with it the final newline of the value.
+		if len(bytes.TrimSpace(doc)) == 0 {
 			continue
 		}
 
@@ -192,6 +204,11 @@ func (e *FileExtractor) parseYAMLStream(ctx context.Context, reader io.Reader, s
 
 		// Filter by namespace if specified
 		if !e.matchesNamespaceFilters(obj.GetNamespace(), opts) {
+			continue
+		}
+
+		// Filter by label selector (kubectl syntax) if specified
+		if selector != nil && !selector.Matches(labels.Set(obj.GetLabels())) {
 			continue
 		}
 
@@ -280,7 +297,9 @@ func splitYAMLDocuments(content []byte) [][]byte {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.TrimSpace(line) == "---" {
+		// A separator starts at column 0; an indented "---" belongs to a
+		// block scalar (e.g. a YAML file embedded in a ConfigMap).
+		if isDocumentSeparator(line) {
 			if currentDoc.Len() > 0 {
 				documents = append(documents, bytes.Clone(currentDoc.Bytes()))
 				currentDoc.Reset()
@@ -297,6 +316,17 @@ func splitYAMLDocuments(content []byte) [][]byte {
 	}
 
 	return documents
+}
+
+// isDocumentSeparator reports whether line is a YAML document marker:
+// "---" at column 0, optionally followed by whitespace or a comment.
+func isDocumentSeparator(line string) bool {
+	rest, ok := strings.CutPrefix(line, "---")
+	if !ok {
+		return false
+	}
+	rest = strings.TrimSpace(rest)
+	return rest == "" || strings.HasPrefix(rest, "#")
 }
 
 // isYAMLFile checks if a file has a YAML extension.
@@ -316,23 +346,4 @@ func isCommentOnly(doc []byte) bool {
 		}
 	}
 	return true
-}
-
-// Helper function for reading GVK from raw YAML without full unmarshal.
-func ParseGVK(data []byte) (schema.GroupVersionKind, error) {
-	var meta struct {
-		APIVersion string `json:"apiVersion"`
-		Kind       string `json:"kind"`
-	}
-
-	if err := yaml.Unmarshal(data, &meta); err != nil {
-		return schema.GroupVersionKind{}, err
-	}
-
-	gv, err := schema.ParseGroupVersion(meta.APIVersion)
-	if err != nil {
-		return schema.GroupVersionKind{}, err
-	}
-
-	return gv.WithKind(meta.Kind), nil
 }

@@ -1,0 +1,294 @@
+# One custom resource per dedicated processor. Each spec carries fields the
+# processor does not expose as separate values (and zero values such as
+# false or 0): the rendered chart must still reproduce the whole spec.
+apiVersion: deckhouse.io/v1
+kind: IngressNginxController
+metadata:
+  name: main
+spec:
+  ingressClass: nginx
+  inlet: LoadBalancer
+  resourcesRequests:
+    mode: Static
+  loadBalancer:
+    annotations:
+      lb.example.com/type: internal
+  nodeSelector:
+    node-role.deckhouse.io/frontend: ""
+  config:
+    use-forwarded-headers: "true"
+---
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: cert-manager
+spec:
+  enabled: false
+  version: 1
+  settings:
+    disableLetsencrypt: true
+---
+apiVersion: deckhouse.io/v1
+kind: NodeGroup
+metadata:
+  name: worker
+spec:
+  nodeType: CloudEphemeral
+  cloudInstances:
+    minPerZone: 0
+    maxPerZone: 3
+    classReference:
+      kind: YandexInstanceClass
+      name: worker
+  nodeTemplate:
+    labels:
+      node-role/worker: ""
+    taints:
+      - key: dedicated
+        value: worker
+        effect: NoSchedule
+---
+apiVersion: deckhouse.io/v1
+kind: ClusterAuthorizationRule
+metadata:
+  name: developers
+spec:
+  subjects:
+    - kind: Group
+      name: developers
+  accessLevel: Editor
+  allowScale: false
+  portForwarding: true
+  allowAccessToSystemNamespaces: false
+---
+apiVersion: deckhouse.io/v1
+kind: DexAuthenticator
+metadata:
+  name: dashboard
+  namespace: tools
+spec:
+  applicationDomain: dashboard.example.com
+  sendAuthorizationHeader: false
+  applicationIngressCertificateSecretName: dashboard-tls
+  keepUsersLoggedInFor: 168h
+---
+apiVersion: deckhouse.io/v1
+kind: Group
+metadata:
+  name: admins
+spec:
+  name: admins
+  members:
+    - kind: User
+      name: alice
+---
+apiVersion: deckhouse.io/v1
+kind: User
+metadata:
+  name: alice
+spec:
+  email: alice@example.com
+  groups:
+    - admins
+  userID: alice-1
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: site
+spec:
+  secretName: site-tls
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt
+  dnsNames:
+    - site.example.com
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api
+spec:
+  selector:
+    matchLabels:
+      app: api
+  endpoints:
+    - port: metrics
+      interval: 30s
+  jobLabel: app
+  sampleLimit: 0
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: worker
+spec:
+  selector:
+    matchLabels:
+      app: worker
+  podMetricsEndpoints:
+    - port: metrics
+  podTargetLabels:
+    - team
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: api-alerts
+spec:
+  groups:
+    - name: api
+      interval: 1m
+      rules:
+        - alert: ApiDown
+          expr: up{job="api"} == 0
+          for: 5m
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: public
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+  addresses:
+    - type: IPAddress
+      value: 10.0.0.10
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: site
+spec:
+  parentRefs:
+    - name: public
+  hostnames:
+    - site.example.com
+  rules:
+    - backendRefs:
+        - name: site
+          port: 80
+          weight: 0
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: rpc
+spec:
+  parentRefs:
+    - name: public
+      sectionName: http
+  rules:
+    - backendRefs:
+        - name: rpc
+          port: 9090
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TLSRoute
+metadata:
+  name: passthrough
+spec:
+  parentRefs:
+    - name: public
+  hostnames:
+    - tls.example.com
+  rules:
+    - backendRefs:
+        - name: tls
+          port: 443
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  cooldownPeriod: 120
+  pollingInterval: 15
+  triggers:
+    - type: cron
+      metadata:
+        timezone: Europe/Moscow
+        start: 0 8 * * *
+        end: 0 20 * * *
+        desiredReplicas: "2"
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: kafka
+spec:
+  secretTargetRef:
+    - parameter: sasl
+      name: kafka-auth
+      key: sasl
+  podIdentity:
+    provider: none
+  hashiCorpVault:
+    address: https://vault.example.com
+    authentication: token
+---
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: site
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: site
+  progressDeadlineSeconds: 0
+  service:
+    port: 80
+  analysis:
+    interval: 1m
+    threshold: 5
+  skipAnalysis: false
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: api
+spec:
+  replicas: 0
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: api
+  strategy:
+    canary:
+      steps:
+        - setWeight: 20
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/api:1.0.0

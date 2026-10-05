@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	sigYAML "sigs.k8s.io/yaml"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
@@ -48,51 +47,6 @@ func IsValidSecretStrategy(s string) bool {
 		}
 	}
 	return false
-}
-
-// FilterConfig holds filtering options for cluster resource extraction.
-type FilterConfig struct {
-	// Namespace limits extraction to a specific namespace (empty = all).
-	Namespace string
-
-	// Selector is a label selector to filter resources (e.g. "app=web").
-	Selector string
-
-	// FieldSelector is a field selector for server-side filtering.
-	FieldSelector string
-
-	// ExcludeNamespaces lists namespaces to skip during extraction.
-	ExcludeNamespaces []string
-}
-
-// Validate checks if the filter configuration is valid.
-func (f *FilterConfig) Validate() error {
-	if f == nil {
-		return nil
-	}
-	// Namespace and ExcludeNamespaces are mutually exclusive
-	if f.Namespace != "" && len(f.ExcludeNamespaces) > 0 {
-		return fmt.Errorf("namespace and exclude_namespaces are mutually exclusive")
-	}
-	return nil
-}
-
-// MatchesNamespace returns true if the given namespace passes the filter.
-func (f *FilterConfig) MatchesNamespace(ns string) bool {
-	if f == nil {
-		return true
-	}
-	// If specific namespace is set, only that one matches (plus cluster-scoped)
-	if f.Namespace != "" {
-		return ns == "" || ns == f.Namespace
-	}
-	// Check exclusions
-	for _, excluded := range f.ExcludeNamespaces {
-		if ns == excluded {
-			return false
-		}
-	}
-	return true
 }
 
 // PaginationConfig holds pagination options for list requests.
@@ -136,14 +90,8 @@ type ClusterExtractorConfig struct {
 	// SecretStrategy defines how secrets are handled: "mask", "include", or "external-secret".
 	SecretStrategy string
 
-	// Filter provides advanced filtering options.
-	Filter *FilterConfig
-
 	// Pagination configures list request pagination.
 	Pagination PaginationConfig
-
-	// GVRs lists the GroupVersionResources to extract.
-	GVRs []schema.GroupVersionResource
 }
 
 // Validate checks if the ClusterExtractorConfig is valid.
@@ -154,13 +102,6 @@ func (c *ClusterExtractorConfig) Validate() error {
 			c.SecretStrategy, ValidSecretStrategies())
 	}
 
-	// Validate filter config
-	if c.Filter != nil {
-		if err := c.Filter.Validate(); err != nil {
-			return fmt.Errorf("filter config: %w", err)
-		}
-	}
-
 	// Validate pagination limit
 	if c.Pagination.Limit < 0 {
 		return fmt.Errorf("pagination limit must be non-negative, got %d", c.Pagination.Limit)
@@ -169,125 +110,6 @@ func (c *ClusterExtractorConfig) Validate() error {
 	return nil
 }
 
-// KubeconfigLoadResult holds the result of loading a kubeconfig.
-type KubeconfigLoadResult struct {
-	// Path is the resolved path to the kubeconfig file.
-	Path string
-
-	// Context is the resolved context name.
-	Context string
-
-	// InCluster indicates if in-cluster config was detected.
-	InCluster bool
-}
-
-// LoadKubeconfig resolves the kubeconfig path and context.
-// Priority: explicit path > KUBECONFIG env > ~/.kube/config > in-cluster.
-func LoadKubeconfig(path, kubeContext string) (*KubeconfigLoadResult, error) {
-	result := &KubeconfigLoadResult{Context: kubeContext}
-
-	// 1. Explicit path
-	if path != "" {
-		if _, err := os.Stat(path); err != nil {
-			return nil, fmt.Errorf("kubeconfig not found at %s: %w", path, err)
-		}
-		result.Path = path
-		return result, nil
-	}
-
-	// 2. KUBECONFIG environment variable
-	if envPath := os.Getenv("KUBECONFIG"); envPath != "" {
-		// KUBECONFIG can contain multiple paths separated by ":"
-		paths := strings.Split(envPath, string(os.PathListSeparator))
-		for _, p := range paths {
-			if _, err := os.Stat(p); err == nil {
-				result.Path = p
-				return result, nil
-			}
-		}
-		return nil, fmt.Errorf("no valid kubeconfig found in KUBECONFIG=%s", envPath)
-	}
-
-	// 3. Default ~/.kube/config
-	home, err := os.UserHomeDir()
-	if err == nil {
-		defaultPath := filepath.Join(home, ".kube", "config")
-		if _, err := os.Stat(defaultPath); err == nil {
-			result.Path = defaultPath
-			return result, nil
-		}
-	}
-
-	// 4. In-cluster detection: check for service account token
-	if _, err := os.Stat("/var/run/secrets/kubernetes.io/serviceaccount/token"); err == nil {
-		result.InCluster = true
-		return result, nil
-	}
-
-	return nil, fmt.Errorf("no kubeconfig found: set --kubeconfig, KUBECONFIG env, " +
-		"place config at ~/.kube/config, or run inside a cluster")
-}
-
-// ExtractResources is a placeholder for extracting resources from a cluster using
-// a dynamic client. When k8s.io/client-go is added as a dependency, this will use
-// dynamic.NewForConfig() to create a client and list resources.
-func ExtractResources(kubeconfigResult *KubeconfigLoadResult, gvrs []schema.GroupVersionResource) error {
-	if kubeconfigResult == nil {
-		return fmt.Errorf("kubeconfig result is nil")
-	}
-	if len(gvrs) == 0 {
-		return fmt.Errorf("no GroupVersionResources specified")
-	}
-
-	var gvrNames []string
-	for _, gvr := range gvrs {
-		gvrNames = append(gvrNames, gvr.String())
-	}
-
-	source := kubeconfigResult.Path
-	if kubeconfigResult.InCluster {
-		source = "in-cluster"
-	}
-
-	return fmt.Errorf("cluster extraction not yet implemented (requires k8s.io/client-go dependency); "+
-		"would extract %d resource types from %s: %s",
-		len(gvrs), source, strings.Join(gvrNames, ", "))
-}
-
-// MaskSecretData replaces all values in a Secret's data and stringData fields
-// with "REDACTED". Returns true if the resource was a Secret and was masked.
-func MaskSecretData(resource *types.ExtractedResource) bool {
-	if resource == nil || resource.Object == nil {
-		return false
-	}
-	if resource.Object.GetKind() != "Secret" {
-		return false
-	}
-
-	// Mask .data
-	data, found, _ := unstructuredNestedMap(resource.Object.Object, "data")
-	if found && data != nil {
-		masked := make(map[string]interface{})
-		for k := range data {
-			masked[k] = "REDACTED"
-		}
-		setNestedField(resource.Object.Object, masked, "data")
-	}
-
-	// Mask .stringData
-	stringData, found, _ := unstructuredNestedMap(resource.Object.Object, "stringData")
-	if found && stringData != nil {
-		masked := make(map[string]interface{})
-		for k := range stringData {
-			masked[k] = "REDACTED"
-		}
-		setNestedField(resource.Object.Object, masked, "stringData")
-	}
-
-	return true
-}
-
-// unstructuredNestedMap retrieves a nested map from an unstructured object.
 func unstructuredNestedMap(obj map[string]interface{}, fields ...string) (map[string]interface{}, bool, error) {
 	val, found := obj[fields[0]]
 	if !found {
@@ -352,6 +174,11 @@ func (e *ClusterExtractor) SetClient(c *clusterClient) {
 
 // Validate checks if the cluster connection is valid.
 func (e *ClusterExtractor) Validate(ctx context.Context, opts Options) error {
+	switch opts.ClusterSecrets {
+	case "", "skip", "mask", "include":
+	default:
+		return fmt.Errorf("invalid cluster secrets mode %q (skip, mask, include)", opts.ClusterSecrets)
+	}
 	if err := e.config.Validate(); err != nil {
 		return fmt.Errorf("invalid cluster config: %w", err)
 	}
@@ -400,7 +227,11 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 			}
 
 			// Skip secrets unless explicitly included.
-			if ar.Kind == "Secret" && !e.config.IncludeSecrets {
+			if ar.Kind == "Secret" && !e.includeSecrets(opts) {
+				continue
+			}
+
+			if skipClusterKinds[ar.Kind] || !matchesKinds(ar.Kind, opts) {
 				continue
 			}
 
@@ -409,10 +240,13 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 				if e.isExcludedNamespace(obj.GetNamespace()) {
 					return
 				}
+				if !prepareClusterObject(obj) {
+					return
+				}
 
 				// Apply secret strategy.
 				if obj.GetKind() == "Secret" {
-					e.applySecretStrategy(obj)
+					e.applySecretStrategy(obj, opts)
 				}
 
 				resource := &types.ExtractedResource{
@@ -477,8 +311,18 @@ func (e *ClusterExtractor) effectiveSelector(opts Options) string {
 	return opts.LabelSelector
 }
 
+// isExcludedNamespace reports namespaces skipped when extracting a whole
+// cluster: configured exclusions plus system namespaces (kube-*, and d8-*
+// managed by Deckhouse), unless that namespace was requested explicitly.
+// Entries ending in "*" are prefixes.
 func (e *ClusterExtractor) isExcludedNamespace(ns string) bool {
-	for _, excluded := range e.config.ExcludeNamespaces {
+	if ns == "" || ns == e.config.Namespace {
+		return false
+	}
+	for _, excluded := range append(append([]string{}, defaultExcludedNamespaces...), e.config.ExcludeNamespaces...) {
+		if strings.HasSuffix(excluded, "*") && strings.HasPrefix(ns, strings.TrimSuffix(excluded, "*")) {
+			return true
+		}
 		if ns == excluded {
 			return true
 		}
@@ -486,8 +330,101 @@ func (e *ClusterExtractor) isExcludedNamespace(ns string) bool {
 	return false
 }
 
-func (e *ClusterExtractor) applySecretStrategy(obj *unstructured.Unstructured) {
+var defaultExcludedNamespaces = []string{"kube-*", "d8-*"}
+
+// skipClusterKinds are objects that exist in every cluster but are created
+// and owned by the control plane, never by a chart.
+var skipClusterKinds = map[string]bool{
+	"Event": true, "Endpoints": true, "EndpointSlice": true, "Lease": true,
+	"ControllerRevision": true, "Node": true, "Namespace": true,
+	"ComponentStatus": true, "CertificateSigningRequest": true,
+	"PodMetrics": true, "NodeMetrics": true, "APIService": true,
+	"Pod": true, "ReplicaSet": true,
+}
+
+// matchesKinds applies --include-kinds / --exclude-kinds.
+func matchesKinds(kind string, opts Options) bool {
+	if len(opts.IncludeKinds) > 0 {
+		found := false
+		for _, k := range opts.IncludeKinds {
+			if strings.EqualFold(k, kind) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	for _, k := range opts.ExcludeKinds {
+		if strings.EqualFold(k, kind) {
+			return false
+		}
+	}
+	return true
+}
+
+// prepareClusterObject turns a live object into a manifest a chart can
+// install: objects owned by a controller (pods of a Deployment, Jobs of a
+// CronJob, ...) and objects every namespace gets automatically are skipped;
+// fields the API server sets are removed. It reports false to skip obj.
+func prepareClusterObject(obj *unstructured.Unstructured) bool {
+	if len(obj.GetOwnerReferences()) > 0 {
+		return false
+	}
+	switch {
+	case obj.GetKind() == "ConfigMap" && obj.GetName() == "kube-root-ca.crt":
+		return false
+	case obj.GetKind() == "ServiceAccount" && obj.GetName() == "default":
+		return false
+	case obj.GetKind() == "Secret":
+		if t, _, _ := unstructured.NestedString(obj.Object, "type"); t == "kubernetes.io/service-account-token" {
+			return false
+		}
+	}
+
+	for _, field := range []string{"uid", "resourceVersion", "generation", "creationTimestamp", "managedFields", "selfLink", "deletionTimestamp", "deletionGracePeriodSeconds"} {
+		unstructured.RemoveNestedField(obj.Object, "metadata", field)
+	}
+	unstructured.RemoveNestedField(obj.Object, "status")
+	if annotations := obj.GetAnnotations(); annotations != nil {
+		for _, key := range []string{"kubectl.kubernetes.io/last-applied-configuration", "deployment.kubernetes.io/revision", "meta.helm.sh/release-name", "meta.helm.sh/release-namespace"} {
+			delete(annotations, key)
+		}
+		if len(annotations) == 0 {
+			obj.SetAnnotations(nil)
+		} else {
+			obj.SetAnnotations(annotations)
+		}
+	}
+	if obj.GetKind() == "Service" {
+		// Cluster IPs are allocated by the cluster; pinning them makes the
+		// chart fail to install ("provided IP is already allocated").
+		if ip, _, _ := unstructured.NestedString(obj.Object, "spec", "clusterIP"); ip != "None" {
+			unstructured.RemoveNestedField(obj.Object, "spec", "clusterIP")
+			unstructured.RemoveNestedField(obj.Object, "spec", "clusterIPs")
+		}
+	}
+	return true
+}
+
+// includeSecrets reports whether Secrets are extracted at all.
+func (e *ClusterExtractor) includeSecrets(opts Options) bool {
+	switch opts.ClusterSecrets {
+	case "mask", "include":
+		return true
+	}
+	return e.config.IncludeSecrets
+}
+
+func (e *ClusterExtractor) applySecretStrategy(obj *unstructured.Unstructured, opts Options) {
 	strategy := e.config.SecretStrategy
+	switch opts.ClusterSecrets {
+	case "mask":
+		strategy = string(SecretStrategyMask)
+	case "include":
+		strategy = string(SecretStrategyInclude)
+	}
 	if strategy == "" {
 		strategy = string(SecretStrategyMask)
 	}
@@ -549,6 +486,17 @@ func newClusterClient(kubeconfigPath, contextName string) (*clusterClient, error
 	}
 
 	user := kc.findUser(kctx.Context.User)
+	if user != nil && user.User.AuthProvider != nil {
+		return nil, fmt.Errorf("user %q uses auth-provider, which kubectl no longer supports; configure an exec plugin (e.g. kubelogin for OIDC)", user.Name)
+	}
+
+	var execCred *execCredentialStatus
+	if user != nil && user.User.Exec != nil {
+		execCred, err = runExecPlugin(user.User.Exec, filepath.Dir(kubeconfigPath), cluster.Cluster)
+		if err != nil {
+			return nil, fmt.Errorf("credential plugin of user %q: %w", user.Name, err)
+		}
+	}
 
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -601,6 +549,13 @@ func newClusterClient(kubeconfigPath, contextName string) (*clusterClient, error
 			tlsConfig.Certificates = []tls.Certificate{cert}
 		}
 	}
+	if execCred != nil && execCred.ClientCertificateData != "" {
+		cert, err := tls.X509KeyPair([]byte(execCred.ClientCertificateData), []byte(execCred.ClientKeyData))
+		if err != nil {
+			return nil, fmt.Errorf("cannot use client certificate from credential plugin: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
 
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
@@ -615,9 +570,23 @@ func newClusterClient(kubeconfigPath, contextName string) (*clusterClient, error
 		headers:    make(http.Header),
 	}
 
-	// Set bearer token.
-	if user != nil && user.User.Token != "" {
-		cc.headers.Set("Authorization", "Bearer "+user.User.Token)
+	// Set bearer token: a credential plugin wins over a static token.
+	token := ""
+	if user != nil {
+		token = user.User.Token
+		if token == "" && user.User.TokenFile != "" {
+			data, err := os.ReadFile(user.User.TokenFile)
+			if err != nil {
+				return nil, fmt.Errorf("cannot read token file: %w", err)
+			}
+			token = strings.TrimSpace(string(data))
+		}
+	}
+	if execCred != nil && execCred.Token != "" {
+		token = execCred.Token
+	}
+	if token != "" {
+		cc.headers.Set("Authorization", "Bearer "+token)
 	}
 
 	return cc, nil
@@ -925,16 +894,22 @@ type kubeconfigContextDetail struct {
 }
 
 type kubeconfigUser struct {
-	Name string                 `json:"name"`
-	User kubeconfigUserDetail   `json:"user"`
+	Name string               `json:"name"`
+	User kubeconfigUserDetail `json:"user"`
 }
 
 type kubeconfigUserDetail struct {
 	Token                 string `json:"token,omitempty"`
+	TokenFile             string `json:"tokenFile,omitempty"`
 	ClientCertificate     string `json:"client-certificate,omitempty"`
 	ClientCertificateData string `json:"client-certificate-data,omitempty"`
 	ClientKey             string `json:"client-key,omitempty"`
 	ClientKeyData         string `json:"client-key-data,omitempty"`
+	// Exec runs a credential plugin (kubelogin for OIDC, cloud CLIs).
+	Exec *execConfig `json:"exec,omitempty"`
+	// AuthProvider is the legacy in-tree plugin mechanism, removed from
+	// kubectl; it is detected only to fail with a clear message.
+	AuthProvider map[string]interface{} `json:"auth-provider,omitempty"`
 }
 
 func parseKubeconfig(path string) (*kubeconfigFile, error) {

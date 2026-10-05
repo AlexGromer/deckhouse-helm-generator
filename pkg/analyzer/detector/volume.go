@@ -54,20 +54,17 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 		return relationships
 	}
 
-	// Get volumes from the pod spec
+	// Get volumes from the pod spec. A workload without volumes can still
+	// reference ConfigMaps and Secrets through env/envFrom (checked below).
 	var volumes []interface{}
-	var found bool
 
-	if kind == "CronJob" {
-		volumes, found, _ = unstructured.NestedSlice(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "volumes")
-	} else if kind == "Pod" {
-		volumes, found, _ = unstructured.NestedSlice(obj.Object, "spec", "volumes")
-	} else {
-		volumes, found, _ = unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "volumes")
-	}
-
-	if !found {
-		return relationships
+	switch kind {
+	case "CronJob":
+		volumes, _, _ = unstructured.NestedSlice(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "volumes")
+	case "Pod":
+		volumes, _, _ = unstructured.NestedSlice(obj.Object, "spec", "volumes")
+	default:
+		volumes, _, _ = unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "volumes")
 	}
 
 	// Analyze each volume
@@ -89,9 +86,9 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 
 				if _, exists := allResources[targetKey]; exists {
 					relationships = append(relationships, types.Relationship{
-						From: resource.Original.ResourceKey(),
-						To:   targetKey,
-						Type: types.RelationVolumeMount,
+						From:  resource.Original.ResourceKey(),
+						To:    targetKey,
+						Type:  types.RelationVolumeMount,
 						Field: "spec.template.spec.volumes[].configMap",
 						Details: map[string]string{
 							"volumeName":    volumeName,
@@ -113,9 +110,9 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 
 				if _, exists := allResources[targetKey]; exists {
 					relationships = append(relationships, types.Relationship{
-						From: resource.Original.ResourceKey(),
-						To:   targetKey,
-						Type: types.RelationVolumeMount,
+						From:  resource.Original.ResourceKey(),
+						To:    targetKey,
+						Type:  types.RelationVolumeMount,
 						Field: "spec.template.spec.volumes[].secret",
 						Details: map[string]string{
 							"volumeName": volumeName,
@@ -137,9 +134,9 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 
 				if _, exists := allResources[targetKey]; exists {
 					relationships = append(relationships, types.Relationship{
-						From: resource.Original.ResourceKey(),
-						To:   targetKey,
-						Type: types.RelationPVC,
+						From:  resource.Original.ResourceKey(),
+						To:    targetKey,
+						Type:  types.RelationPVC,
 						Field: "spec.template.spec.volumes[].persistentVolumeClaim",
 						Details: map[string]string{
 							"volumeName": volumeName,
@@ -170,9 +167,9 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 
 							if _, exists := allResources[targetKey]; exists {
 								relationships = append(relationships, types.Relationship{
-									From: resource.Original.ResourceKey(),
-									To:   targetKey,
-									Type: types.RelationVolumeMount,
+									From:  resource.Original.ResourceKey(),
+									To:    targetKey,
+									Type:  types.RelationVolumeMount,
 									Field: "spec.template.spec.volumes[].projected.sources[].configMap",
 									Details: map[string]string{
 										"volumeName":    volumeName,
@@ -194,9 +191,9 @@ func (d *VolumeMountDetector) Detect(ctx context.Context, resource *types.Proces
 
 							if _, exists := allResources[targetKey]; exists {
 								relationships = append(relationships, types.Relationship{
-									From: resource.Original.ResourceKey(),
-									To:   targetKey,
-									Type: types.RelationVolumeMount,
+									From:  resource.Original.ResourceKey(),
+									To:    targetKey,
+									Type:  types.RelationVolumeMount,
 									Field: "spec.template.spec.volumes[].projected.sources[].secret",
 									Details: map[string]string{
 										"volumeName": volumeName,
@@ -232,11 +229,12 @@ func (d *VolumeMountDetector) detectEnvFromReferences(resource *types.ProcessedR
 	var containers []interface{}
 	var found bool
 
-	if kind == "CronJob" {
+	switch kind {
+	case "CronJob":
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "containers")
-	} else if kind == "Pod" {
+	case "Pod":
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "containers")
-	} else {
+	default:
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
 	}
 
@@ -272,9 +270,9 @@ func (d *VolumeMountDetector) detectEnvFromReferences(resource *types.ProcessedR
 
 					if _, exists := allResources[targetKey]; exists {
 						relationships = append(relationships, types.Relationship{
-							From: resource.Original.ResourceKey(),
-							To:   targetKey,
-							Type: types.RelationEnvFrom,
+							From:  resource.Original.ResourceKey(),
+							To:    targetKey,
+							Type:  types.RelationEnvFrom,
 							Field: "spec.template.spec.containers[].envFrom[].configMapRef",
 							Details: map[string]string{
 								"configMapName": cmName,
@@ -295,9 +293,9 @@ func (d *VolumeMountDetector) detectEnvFromReferences(resource *types.ProcessedR
 
 					if _, exists := allResources[targetKey]; exists {
 						relationships = append(relationships, types.Relationship{
-							From: resource.Original.ResourceKey(),
-							To:   targetKey,
-							Type: types.RelationEnvFrom,
+							From:  resource.Original.ResourceKey(),
+							To:    targetKey,
+							Type:  types.RelationEnvFrom,
 							Field: "spec.template.spec.containers[].envFrom[].secretRef",
 							Details: map[string]string{
 								"secretName": secretName,
@@ -324,11 +322,12 @@ func (d *VolumeMountDetector) detectEnvValueFromReferences(resource *types.Proce
 	var containers []interface{}
 	var found bool
 
-	if kind == "CronJob" {
+	switch kind {
+	case "CronJob":
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "containers")
-	} else if kind == "Pod" {
+	case "Pod":
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "containers")
-	} else {
+	default:
 		containers, found, _ = unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
 	}
 
@@ -370,9 +369,9 @@ func (d *VolumeMountDetector) detectEnvValueFromReferences(resource *types.Proce
 
 					if _, exists := allResources[targetKey]; exists {
 						relationships = append(relationships, types.Relationship{
-							From: resource.Original.ResourceKey(),
-							To:   targetKey,
-							Type: types.RelationEnvValueFrom,
+							From:  resource.Original.ResourceKey(),
+							To:    targetKey,
+							Type:  types.RelationEnvValueFrom,
 							Field: "spec.template.spec.containers[].env[].valueFrom.configMapKeyRef",
 							Details: map[string]string{
 								"configMapName": cmName,
@@ -394,9 +393,9 @@ func (d *VolumeMountDetector) detectEnvValueFromReferences(resource *types.Proce
 
 					if _, exists := allResources[targetKey]; exists {
 						relationships = append(relationships, types.Relationship{
-							From: resource.Original.ResourceKey(),
-							To:   targetKey,
-							Type: types.RelationEnvValueFrom,
+							From:  resource.Original.ResourceKey(),
+							To:    targetKey,
+							Type:  types.RelationEnvValueFrom,
 							Field: "spec.template.spec.containers[].env[].valueFrom.secretKeyRef",
 							Details: map[string]string{
 								"secretName": secretName,

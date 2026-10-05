@@ -7,257 +7,85 @@ import (
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// ============================================================
-// 2.6.8: Ingress TLS — InjectTLSConfig
-// ============================================================
-
-func TestIngressTLS_AddsTLSSection(t *testing.T) {
-	chart := &types.GeneratedChart{
-		Templates: map[string]string{
-			"templates/ingress.yaml": `apiVersion: networking.k8s.io/v1
+// tlsIngressTemplate has the shape of the Ingress processor's template.
+const tlsIngressTemplate = `{{- with .Values.ingress }}
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: myapp-ingress
-  namespace: {{ .Release.Namespace }}
-spec:
-  rules:
-    - host: app.example.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: myapp
-                port:
-                  number: 80
-`,
-		},
-	}
-
-	result := InjectTLSConfig(chart, "letsencrypt-prod")
-
-	content := result.Templates["templates/ingress.yaml"]
-
-	if !strings.Contains(content, "tls:") {
-		t.Error("expected tls: section in Ingress")
-	}
-	if !strings.Contains(content, "app-example-com-tls") {
-		t.Error("expected secretName derived from host: app-example-com-tls")
-	}
-	if !strings.Contains(content, "app.example.com") {
-		t.Error("expected host in tls section")
-	}
-}
-
-func TestIngressTLS_CertManagerAnnotation(t *testing.T) {
-	chart := &types.GeneratedChart{
-		Templates: map[string]string{
-			"templates/ingress.yaml": `apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: myapp-ingress
+  name: {{ include "web.fullname" $ }}-web
+  labels:
+    {{- include "web.labels" $ | nindent 4 }}
+  {{- with .annotations }}
   annotations:
-    existing: "true"
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  rules:
-    - host: app.example.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-`,
-		},
-	}
-
-	result := InjectTLSConfig(chart, "letsencrypt-staging")
-
-	content := result.Templates["templates/ingress.yaml"]
-
-	if !strings.Contains(content, "cert-manager.io/cluster-issuer: letsencrypt-staging") {
-		t.Error("expected cert-manager.io/cluster-issuer annotation")
-	}
-	if !strings.Contains(content, "force-ssl-redirect: \"true\"") && !strings.Contains(content, "force-ssl-redirect: 'true'") {
-		// The annotation injection may quote the value
-		if !strings.Contains(content, "force-ssl-redirect") {
-			t.Error("expected force-ssl-redirect annotation")
-		}
-	}
-}
-
-func TestIngressTLS_DefaultIssuer(t *testing.T) {
-	chart := &types.GeneratedChart{
-		Templates: map[string]string{
-			"templates/ingress.yaml": `apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: myapp-ingress
-spec:
-  rules:
-    - host: api.example.com
-`,
-		},
-	}
-
-	result := InjectTLSConfig(chart, "")
-
-	content := result.Templates["templates/ingress.yaml"]
-	if !strings.Contains(content, "letsencrypt-prod") {
-		t.Error("expected default issuer letsencrypt-prod when empty issuer provided")
-	}
-}
-
-func TestIngressTLS_MultipleHosts(t *testing.T) {
-	chart := &types.GeneratedChart{
-		Templates: map[string]string{
-			"templates/ingress.yaml": `apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: myapp-ingress
-spec:
-  rules:
-    - host: app.example.com
-      http:
-        paths:
-          - path: /
-    - host: api.example.com
-      http:
-        paths:
-          - path: /api
-`,
-		},
-	}
-
-	result := InjectTLSConfig(chart, "letsencrypt-prod")
-
-	content := result.Templates["templates/ingress.yaml"]
-	if !strings.Contains(content, "app-example-com-tls") {
-		t.Error("expected tls secret for app.example.com")
-	}
-	if !strings.Contains(content, "api-example-com-tls") {
-		t.Error("expected tls secret for api.example.com")
-	}
-}
-
-func TestIngressTLS_SkipsNonIngress(t *testing.T) {
-	chart := &types.GeneratedChart{
-		Templates: map[string]string{
-			"templates/deployment.yaml": `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: myapp
-`,
-		},
-	}
-
-	result := InjectTLSConfig(chart, "letsencrypt-prod")
-
-	content := result.Templates["templates/deployment.yaml"]
-	if strings.Contains(content, "tls:") {
-		t.Error("should not add TLS to non-Ingress resources")
-	}
-	if strings.Contains(content, "cert-manager") {
-		t.Error("should not add cert-manager annotation to non-Ingress resources")
-	}
-}
-
-func TestIngressTLS_NilChart(t *testing.T) {
-	result := InjectTLSConfig(nil, "letsencrypt-prod")
-	if result != nil {
-		t.Error("expected nil for nil chart")
-	}
-}
-
-func TestIngressTLS_CopyOnWrite(t *testing.T) {
-	original := &types.GeneratedChart{
-		Name: "test",
-		Templates: map[string]string{
-			"templates/ingress.yaml": `apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: myapp-ingress
-spec:
-  rules:
-    - host: app.example.com
-`,
-		},
-	}
-
-	result := InjectTLSConfig(original, "letsencrypt-prod")
-
-	if strings.Contains(original.Templates["templates/ingress.yaml"], "tls:") {
-		t.Error("original chart must not be modified (copy-on-write violation)")
-	}
-	if !strings.Contains(result.Templates["templates/ingress.yaml"], "cert-manager") {
-		t.Error("result must contain cert-manager annotation")
-	}
-}
-
-func TestIngressTLS_ExistingTLSSection(t *testing.T) {
-	chart := &types.GeneratedChart{
-		Templates: map[string]string{
-			"templates/ingress.yaml": `apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: myapp-ingress
-spec:
+  {{- if .tls }}
   tls:
-    - secretName: existing-tls
-      hosts:
-        - app.example.com
-  rules:
-    - host: app.example.com
-`,
+    {{- range .tls }}
+    - secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules: []
+{{- end }}
+`
+
+func TestInjectIngressTLS(t *testing.T) {
+	in := &types.GeneratedChart{
+		Name:       "web",
+		ValuesYAML: "ingress:\n  enabled: true\n",
+		Templates: map[string]string{
+			"templates/web-ingress.yaml": tlsIngressTemplate,
+			"templates/web-service.yaml": "apiVersion: v1\nkind: Service\n",
 		},
 	}
-
-	result := InjectTLSConfig(chart, "letsencrypt-prod")
-
-	content := result.Templates["templates/ingress.yaml"]
-	// Should still add annotations but not duplicate tls section
-	if !strings.Contains(content, "cert-manager") {
-		t.Error("should add cert-manager annotation even with existing TLS")
+	out, changed, err := InjectIngressTLS(in, IngressTLSOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Count occurrences of "tls:" — should be exactly 1
-	count := strings.Count(content, "tls:")
-	if count != 1 {
-		t.Errorf("expected exactly 1 tls: section, got %d", count)
+	if strings.Join(changed, ",") != "templates/web-ingress.yaml" {
+		t.Fatalf("changed = %v", changed)
 	}
-}
-
-// ============================================================
-// Host extraction and secret name
-// ============================================================
-
-func TestHostToSecretName(t *testing.T) {
-	tests := []struct {
-		host     string
-		expected string
-	}{
-		{"app.example.com", "app-example-com-tls"},
-		{"api.example.com", "api-example-com-tls"},
-		{"*.example.com", "wildcard-example-com-tls"},
-		{"simple", "simple-tls"},
-	}
-
-	for _, tt := range tests {
-		got := hostToSecretName(tt.host)
-		if got != tt.expected {
-			t.Errorf("hostToSecretName(%q) = %q, want %q", tt.host, got, tt.expected)
+	tpl := out.Templates["templates/web-ingress.yaml"]
+	for _, want := range []string{
+		// tls is only generated when the values have none and hosts exist.
+		`{{- $dhgAutoTLS := and $dhgIngressTLS.enabled (not .tls) (gt (len $dhgTLSHosts) 0) }}`,
+		// user annotations win over the issuer annotation.
+		`{{- $dhgAnnotations = merge (dict) $dhgAnnotations (dict $dhgIssuerKey $dhgIngressTLS.issuer) }}`,
+		`"cert-manager.io/cluster-issuer"`,
+		"spec:\n  {{- if $dhgAutoTLS }}\n  tls:\n    - hosts:\n",
+		`      secretName: {{ include "web.fullname" $ }}-web-tls`,
+		// The template's own tls block is untouched.
+		"  {{- if .tls }}\n  tls:\n    {{- range .tls }}",
+	} {
+		if !strings.Contains(tpl, want) {
+			t.Errorf("template misses %q:\n%s", want, tpl)
 		}
 	}
+	if strings.Count(tpl, "  annotations:\n") != 1 {
+		t.Errorf("expected exactly one annotations key:\n%s", tpl)
+	}
+	if !strings.Contains(out.ValuesYAML, "ingressTLS:\n  enabled: true\n  issuer: letsencrypt-prod\n  issuerKind: ClusterIssuer\n") {
+		t.Errorf("values:\n%s", out.ValuesYAML)
+	}
+	if in.Templates["templates/web-ingress.yaml"] != tlsIngressTemplate {
+		t.Error("input chart was modified")
+	}
+
+	again, changed, err := InjectIngressTLS(out, IngressTLSOptions{})
+	if err != nil || again != out || len(changed) != 0 {
+		t.Errorf("second application changed the chart (err=%v, changed=%v)", err, changed)
+	}
 }
 
-func TestExtractHosts(t *testing.T) {
-	content := `spec:
-  rules:
-    - host: app.example.com
-    - host: api.example.com
-    - host: app.example.com
-`
-	hosts := extractHosts(content)
-
-	if len(hosts) != 2 {
-		t.Errorf("expected 2 unique hosts, got %d: %v", len(hosts), hosts)
+func TestInjectIngressTLS_UnknownShapeAndOptions(t *testing.T) {
+	static := "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: web\n  annotations:\n    a: b\nspec:\n  rules: []\n"
+	in := &types.GeneratedChart{Name: "web", Templates: map[string]string{"templates/ingress.yaml": static}}
+	out, changed, err := InjectIngressTLS(in, IngressTLSOptions{})
+	if err != nil || out != in || len(changed) != 0 {
+		t.Errorf("unrecognised template must be skipped (err=%v, changed=%v)", err, changed)
+	}
+	if _, _, err := InjectIngressTLS(in, IngressTLSOptions{IssuerKind: "Vault"}); err == nil {
+		t.Error("expected an error for an invalid issuer kind")
 	}
 }

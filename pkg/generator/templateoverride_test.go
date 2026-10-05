@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -26,7 +28,7 @@ func populateOverrideDir(t *testing.T, files map[string]string) string {
 
 func TestMergeTemplateOverrides_OverrideReplacesGenerated(t *testing.T) {
 	generated := map[string]string{
-		"templates/deploy.yaml": "# generated deployment",
+		"templates/deploy.yaml":  "# generated deployment",
 		"templates/service.yaml": "# generated service",
 	}
 	overrides := map[string]string{
@@ -204,10 +206,10 @@ func TestMergeTemplateOverrides_EmptyStrategyDefaultsToOverride(t *testing.T) {
 
 func TestMergeTemplateOverrides_PreservesNonOverriddenTemplates(t *testing.T) {
 	generated := map[string]string{
-		"templates/alpha.yaml":   "# alpha",
-		"templates/beta.yaml":    "# beta",
-		"templates/gamma.yaml":   "# gamma",
-		"templates/delta.yaml":   "# delta",
+		"templates/alpha.yaml": "# alpha",
+		"templates/beta.yaml":  "# beta",
+		"templates/gamma.yaml": "# gamma",
+		"templates/delta.yaml": "# delta",
 	}
 	overrides := map[string]string{
 		"templates/beta.yaml": "# beta-override",
@@ -241,32 +243,59 @@ func TestLoadTemplateOverrides_LoadsFilesFromDir(t *testing.T) {
 	files := map[string]string{
 		"deploy.yaml":  "# deploy override",
 		"service.yaml": "# service override",
+		"README.md":    "ignored",
 	}
 	dir := populateOverrideDir(t, files)
+	if err := os.MkdirAll(filepath.Join(dir, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hooks", "job.yaml"), []byte("# job"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	overrides, err := LoadTemplateOverrides(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(overrides) != 2 {
-		t.Errorf("expected 2 overrides, got %d", len(overrides))
+	want := map[string]string{
+		"templates/deploy.yaml":    "# deploy override",
+		"templates/service.yaml":   "# service override",
+		"templates/hooks/job.yaml": "# job",
 	}
+	if len(overrides) != len(want) {
+		t.Errorf("got %v, want %v", overrides, want)
+	}
+	for k, v := range want {
+		if overrides[k] != v {
+			t.Errorf("overrides[%q] = %q, want %q", k, overrides[k], v)
+		}
+	}
+}
 
-	for name, want := range files {
-		// Keys may be bare names or full paths — check both.
-		found := false
-		for k, v := range overrides {
-			base := filepath.Base(k)
-			if base == name || k == name {
-				found = true
-				if v != want {
-					t.Errorf("override[%s] = %q, want %q", name, v, want)
-				}
-				break
-			}
-		}
-		if !found {
-			t.Errorf("override for %q not found in result: %v", name, overrides)
-		}
+func TestApplyTemplateOverrides(t *testing.T) {
+	chart := &types.GeneratedChart{
+		Name:      "app",
+		Templates: map[string]string{"templates/a.yaml": "A", "templates/b.yaml": "B"},
+		Helpers:   "HELPERS",
+		Notes:     "NOTES",
+	}
+	out := ApplyTemplateOverrides(chart, map[string]string{
+		"templates/a.yaml":       "a2",
+		"templates/new.yaml":     "N",
+		"templates/_helpers.tpl": "+extra",
+		"templates/NOTES.txt":    "+more",
+	}, "append")
+
+	if out.Templates["templates/a.yaml"] != "Aa2" || out.Templates["templates/b.yaml"] != "B" || out.Templates["templates/new.yaml"] != "N" {
+		t.Errorf("templates: %v", out.Templates)
+	}
+	if out.Helpers != "HELPERS+extra" || out.Notes != "NOTES+more" {
+		t.Errorf("helpers/notes: %q %q", out.Helpers, out.Notes)
+	}
+	if _, ok := out.Templates["templates/_helpers.tpl"]; ok {
+		t.Error("_helpers.tpl override must go to Helpers, not Templates")
+	}
+	if chart.Templates["templates/a.yaml"] != "A" || chart.Helpers != "HELPERS" {
+		t.Error("input chart mutated")
 	}
 }

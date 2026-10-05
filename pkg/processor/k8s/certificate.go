@@ -29,7 +29,7 @@ func NewCertificateProcessor() *CertificateProcessor {
 // Process processes a Certificate resource.
 func (p *CertificateProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
 	if obj == nil {
-		return nil, errors.New("Certificate object is nil")
+		return nil, errors.New("nil Certificate object")
 	}
 
 	serviceName := processor.ServiceNameFromResource(obj)
@@ -41,7 +41,7 @@ func (p *CertificateProcessor) Process(ctx processor.Context, obj *unstructured.
 	namespace := obj.GetNamespace()
 
 	values := p.extractValues(obj)
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -93,7 +93,7 @@ func (p *CertificateProcessor) extractValues(obj *unstructured.Unstructured) map
 	return values
 }
 
-func (p *CertificateProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
+func (p *CertificateProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 	sanitized := processor.SanitizeServiceName(serviceName)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
@@ -106,21 +106,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  secretName: {{ .secretName }}
-  issuerRef:
-    {{- toYaml .issuerRef | nindent 4 }}
-  {{- with .dnsNames }}
-  dnsNames:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .duration }}
-  duration: {{ . }}
-  {{- end }}
-  {{- with .renewBefore }}
-  renewBefore: {{ . }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, serviceName, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "dnsNames", "issuerRef", "secretName", "duration", "renewBefore"))
 }

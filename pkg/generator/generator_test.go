@@ -344,7 +344,7 @@ func TestValidateChart_EmptyChartYAML(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty Chart.yaml")
 	}
-	if !strings.Contains(err.Error(), "Chart.yaml is empty") {
+	if !strings.Contains(err.Error(), "empty Chart.yaml") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -380,36 +380,6 @@ func TestValidateChart_NoTemplates(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no templates generated") {
 		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-// ============================================================
-// GetServiceNames Tests
-// ============================================================
-
-func TestGetServiceNames_Empty(t *testing.T) {
-	graph := types.NewResourceGraph()
-	names := GetServiceNames(graph)
-	if len(names) != 0 {
-		t.Errorf("expected 0 names, got %d", len(names))
-	}
-}
-
-func TestGetServiceNames_Multiple(t *testing.T) {
-	graph := types.NewResourceGraph()
-	graph.Groups = append(graph.Groups,
-		&types.ResourceGroup{Name: "zulu"},
-		&types.ResourceGroup{Name: "alpha"},
-		&types.ResourceGroup{Name: "mike"},
-	)
-
-	names := GetServiceNames(graph)
-	if len(names) != 3 {
-		t.Fatalf("expected 3 names, got %d", len(names))
-	}
-	// Should be sorted
-	if names[0] != "alpha" || names[1] != "mike" || names[2] != "zulu" {
-		t.Errorf("names not sorted: %v", names)
 	}
 }
 
@@ -742,7 +712,7 @@ func TestRewriteTemplateForSeparateMode_BasicRewrite(t *testing.T) {
 	content := `{{- $svc := .Values.services.frontend }}
 replicas: {{ $svc.replicaCount }}`
 
-	result := rewriteTemplateForSeparateMode(content, "frontend")
+	result := rewriteTemplateForSeparateMode(content, "frontend", "")
 
 	expected := `{{- $svc := .Values }}
 replicas: {{ $svc.replicaCount }}`
@@ -754,7 +724,7 @@ replicas: {{ $svc.replicaCount }}`
 
 func TestRewriteTemplateForSeparateMode_EmptyServiceName(t *testing.T) {
 	content := "some content"
-	result := rewriteTemplateForSeparateMode(content, "")
+	result := rewriteTemplateForSeparateMode(content, "", "")
 	if result != content {
 		t.Error("content should be unchanged for empty service name")
 	}
@@ -762,7 +732,7 @@ func TestRewriteTemplateForSeparateMode_EmptyServiceName(t *testing.T) {
 
 func TestRewriteTemplateForSeparateMode_NoMatch(t *testing.T) {
 	content := "replicas: {{ .Values.replicaCount }}"
-	result := rewriteTemplateForSeparateMode(content, "frontend")
+	result := rewriteTemplateForSeparateMode(content, "frontend", "")
 	if result != content {
 		t.Error("content should be unchanged when no pattern matches")
 	}
@@ -785,9 +755,9 @@ func TestInferType(t *testing.T) {
 		{"int64", int64(42), "integer"},
 		{"float32", float32(3.14), "number"},
 		{"float64", 3.14, "number"},
-		{"nil", nil, "string"},                   // default
-		{"slice", []string{"a"}, "string"},       // default
-		{"map", map[string]string{}, "string"},   // default
+		{"nil", nil, "string"},                 // default
+		{"slice", []string{"a"}, "string"},     // default
+		{"map", map[string]string{}, "string"}, // default
 	}
 
 	for _, tt := range tests {
@@ -864,5 +834,41 @@ func TestBaseGenerator_Mode(t *testing.T) {
 	bg := NewBaseGenerator(types.OutputModeSeparate)
 	if bg.Mode() != types.OutputModeSeparate {
 		t.Errorf("expected mode %s, got %s", types.OutputModeSeparate, bg.Mode())
+	}
+}
+
+func TestCRDsGoToCrdsDirectory(t *testing.T) {
+	crd := makeProcessedResourceWithValues("CustomResourceDefinition", "widgets.example.com", "",
+		nil, map[string]interface{}{"spec": "x"}, "# crd template")
+	crd.Original.Object.SetAPIVersion("apiextensions.k8s.io/v1")
+	crd.Original.Object.Object["status"] = map[string]interface{}{"acceptedNames": map[string]interface{}{}}
+	crd.TemplatePath = "templates/widgets-crd.yaml"
+	crd.ValuesPath = "services.widgets.customResourceDefinition"
+	deploy := makeProcessedResourceWithValues("Deployment", "web", "default", nil,
+		map[string]interface{}{"replicas": 1}, "# deploy")
+	deploy.TemplatePath = "templates/web-deployment.yaml"
+
+	graph := buildGraph([]*types.ProcessedResource{crd, deploy}, nil)
+	graph.Groups = []*types.ResourceGroup{{Name: "web", Resources: []*types.ProcessedResource{crd, deploy}}}
+
+	charts, err := NewUniversalGenerator().Generate(context.Background(), graph, Options{ChartName: "app", ChartVersion: "0.1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chart := charts[0]
+	if _, ok := chart.Templates["templates/widgets-crd.yaml"]; ok {
+		t.Error("CRD must not be a template")
+	}
+	if strings.Contains(chart.ValuesYAML, "customResourceDefinition") {
+		t.Error("CRD must not have values")
+	}
+	var crdFile string
+	for _, f := range chart.ExternalFiles {
+		if f.Path == "crds/widgets.example.com.yaml" {
+			crdFile = f.Content
+		}
+	}
+	if !strings.Contains(crdFile, "kind: CustomResourceDefinition") || strings.Contains(crdFile, "status:") {
+		t.Errorf("unexpected crds/ file:\n%s", crdFile)
 	}
 }

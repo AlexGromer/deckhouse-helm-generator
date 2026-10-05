@@ -38,8 +38,8 @@ func TestDeckhouseCompat_DeprecatedField(t *testing.T) {
 	// Add an IngressNginxController with deprecated spec.inlet field
 	r := addResource(g, "deckhouse.io", "v1", "IngressNginxController", "main", "d8-ingress-nginx", "main")
 	r.Values["spec"] = map[string]interface{}{
-		"inlet":          "LoadBalancer",
-		"ingressClass":   "nginx",
+		"inlet":        "LoadBalancer",
+		"ingressClass": "nginx",
 	}
 
 	checker := NewDeckhouseCompatChecker()

@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
@@ -149,63 +150,65 @@ func FilterExistingDependencies(detected []helm.Dependency, existing []helm.Depe
 	return filtered
 }
 
-// InjectDependencies appends a dependencies section to the chart's ChartYAML and
-// adds condition values ("<name>.enabled: false") to ValuesYAML for each
-// dependency. Returns nil if chart is nil.
+// InjectDependencies adds dependencies to the chart's Chart.yaml (merging
+// into an existing dependencies list, skipping names already declared) and a
+// "<name>.enabled: false" value for each added dependency. Returns nil if
+// chart is nil. The input chart is not mutated.
 func InjectDependencies(chart *types.GeneratedChart, deps []helm.Dependency) *types.GeneratedChart {
 	if chart == nil {
 		return nil
 	}
-
-	// Build the dependencies YAML block.
-	var depYAML strings.Builder
-	if len(deps) > 0 {
-		depYAML.WriteString("\ndependencies:\n")
-		for _, d := range deps {
-			depYAML.WriteString(fmt.Sprintf("  - name: %s\n", d.Name))
-			depYAML.WriteString(fmt.Sprintf("    version: %s\n", d.Version))
-			depYAML.WriteString(fmt.Sprintf("    repository: %s\n", d.Repository))
-			if d.Condition != "" {
-				depYAML.WriteString(fmt.Sprintf("    condition: %s\n", d.Condition))
-			}
-		}
+	out := cloneChart(chart)
+	deps = FilterExistingDependencies(deps, declaredDependencies(chart.ChartYAML))
+	if len(deps) == 0 {
+		return out
 	}
 
-	// Build the condition values block.
-	var valuesBlock strings.Builder
+	out.ChartYAML = addChartDependencies(out.ChartYAML, deps)
+
 	for _, d := range deps {
-		valuesBlock.WriteString(fmt.Sprintf("\n%s:\n  enabled: false\n", d.Name))
-	}
-
-	// Deep-copy Templates and ExternalFiles to preserve immutability contract.
-	newTemplates := make(map[string]string, len(chart.Templates))
-	for k, v := range chart.Templates {
-		newTemplates[k] = v
-	}
-	newExternalFiles := make([]types.ExternalFileInfo, len(chart.ExternalFiles))
-	copy(newExternalFiles, chart.ExternalFiles)
-
-	// Merge dependencies into ChartYAML, avoiding duplication.
-	mergedChartYAML := chart.ChartYAML
-	if len(deps) > 0 && !strings.Contains(mergedChartYAML, "dependencies:") {
-		// Ensure trailing newline before appending.
-		if mergedChartYAML != "" && !strings.HasSuffix(mergedChartYAML, "\n") {
-			mergedChartYAML += "\n"
+		if values, err := appendTopLevelValues(out.ValuesYAML, d.Name, map[string]interface{}{"enabled": false}); err == nil {
+			out.ValuesYAML = values
 		}
-		mergedChartYAML += depYAML.String()
 	}
+	return out
+}
 
-	return &types.GeneratedChart{
-		Name:          chart.Name,
-		Path:          chart.Path,
-		ChartYAML:     mergedChartYAML,
-		ValuesYAML:    chart.ValuesYAML + valuesBlock.String(),
-		Templates:     newTemplates,
-		Helpers:       chart.Helpers,
-		Notes:         chart.Notes,
-		ValuesSchema:  chart.ValuesSchema,
-		ExternalFiles: newExternalFiles,
+var dependencyNameRegex = regexp.MustCompile(`(?m)^\s+- name: "?([^"\s]+)"?\s*$`)
+
+// addChartDependencies adds deps to the dependencies list of chartYAML,
+// creating the list when the chart declares none.
+func addChartDependencies(chartYAML string, deps []helm.Dependency) string {
+	var entries strings.Builder
+	for _, d := range deps {
+		fmt.Fprintf(&entries, "  - name: %s\n", d.Name)
+		fmt.Fprintf(&entries, "    version: %q\n", d.Version)
+		fmt.Fprintf(&entries, "    repository: %s\n", d.Repository)
+		if d.Condition != "" {
+			fmt.Fprintf(&entries, "    condition: %s\n", d.Condition)
+		}
 	}
+	if i := strings.Index(chartYAML, "\ndependencies:\n"); i >= 0 {
+		at := i + len("\ndependencies:\n")
+		return chartYAML[:at] + entries.String() + chartYAML[at:]
+	}
+	if chartYAML != "" && !strings.HasSuffix(chartYAML, "\n") {
+		chartYAML += "\n"
+	}
+	return chartYAML + "dependencies:\n" + entries.String()
+}
+
+// declaredDependencies returns the dependencies already listed in Chart.yaml.
+func declaredDependencies(chartYAML string) []helm.Dependency {
+	i := strings.Index(chartYAML, "\ndependencies:\n")
+	if i < 0 {
+		return nil
+	}
+	var deps []helm.Dependency
+	for _, m := range dependencyNameRegex.FindAllStringSubmatch(chartYAML[i:], -1) {
+		deps = append(deps, helm.Dependency{Name: m[1]})
+	}
+	return deps
 }
 
 // ---------------------------------------------------------------------------

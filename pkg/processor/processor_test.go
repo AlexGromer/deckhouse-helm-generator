@@ -250,7 +250,7 @@ func TestEscapeTemplateString(t *testing.T) {
 		{`a"b`, `a\"b`},
 		{"a\nb", "a\\nb"},
 		{"a\tb", "a\\tb"},
-		{"{{value}}", `{{"{{"}}`+"value"+`{{"}}"}}` },
+		{"{{value}}", `{{"{{"}}` + "value" + `{{"}}"}}`},
 		{"no braces", "no braces"},
 	}
 	for _, tc := range tests {
@@ -260,76 +260,7 @@ func TestEscapeTemplateString(t *testing.T) {
 	}
 }
 
-// ── toTemplateRef ────────────────────────────────────────────────────────────
-
-func TestToTemplateRef_NoDefault(t *testing.T) {
-	got := toTemplateRef("services.web.enabled", nil)
-	if got != ".Values.services.web.enabled" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestToTemplateRef_BoolTrue(t *testing.T) {
-	got := toTemplateRef("services.web.enabled", true)
-	if !strings.Contains(got, "default true") {
-		t.Errorf("got %q; want containing 'default true'", got)
-	}
-}
-
-func TestToTemplateRef_BoolFalse(t *testing.T) {
-	got := toTemplateRef("services.web.enabled", false)
-	if got != ".Values.services.web.enabled" {
-		t.Errorf("got %q; want plain ref for false default", got)
-	}
-}
-
 // ── Registry ─────────────────────────────────────────────────────────────────
-
-func TestNewRegistry(t *testing.T) {
-	r := NewRegistry()
-	if r == nil {
-		t.Fatal("NewRegistry returned nil")
-	}
-	if len(r.All()) != 0 {
-		t.Error("new registry should have no processors")
-	}
-}
-
-func TestRegistry_Register_And_GetProcessor(t *testing.T) {
-	r := NewRegistry()
-	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
-	s := newStub("deploy-proc", 10, gvk)
-	r.Register(s)
-
-	p, ok := r.GetProcessor(gvk)
-	if !ok || p.Name() != "deploy-proc" {
-		t.Errorf("GetProcessor failed: ok=%v, name=%v", ok, p)
-	}
-}
-
-func TestRegistry_GetProcessor_NotFound(t *testing.T) {
-	r := NewRegistry()
-	_, ok := r.GetProcessor(schema.GroupVersionKind{Kind: "Missing"})
-	if ok {
-		t.Error("expected false for missing GVK")
-	}
-}
-
-func TestRegistry_PriorityOrdering(t *testing.T) {
-	r := NewRegistry()
-	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
-
-	low := newStub("low", 1, gvk)
-	high := newStub("high", 100, gvk)
-
-	r.Register(low)
-	r.Register(high)
-
-	p, _ := r.GetProcessor(gvk)
-	if p.Name() != "high" {
-		t.Errorf("expected highest-priority processor, got %q", p.Name())
-	}
-}
 
 func TestRegistry_GetProcessors(t *testing.T) {
 	r := NewRegistry()
@@ -353,31 +284,6 @@ func TestRegistry_GetProcessors_NotFound(t *testing.T) {
 	procs := r.GetProcessors(schema.GroupVersionKind{Kind: "Missing"})
 	if procs != nil {
 		t.Error("expected nil for missing GVK")
-	}
-}
-
-func TestRegistry_All(t *testing.T) {
-	r := NewRegistry()
-	gvk1 := schema.GroupVersionKind{Kind: "A"}
-	gvk2 := schema.GroupVersionKind{Kind: "B"}
-	r.Register(newStub("a", 1, gvk1))
-	r.Register(newStub("b", 2, gvk2))
-
-	if len(r.All()) != 2 {
-		t.Errorf("All() = %d; want 2", len(r.All()))
-	}
-}
-
-func TestRegistry_SupportedGVKs(t *testing.T) {
-	r := NewRegistry()
-	gvk1 := schema.GroupVersionKind{Kind: "Deployment"}
-	gvk2 := schema.GroupVersionKind{Kind: "Service"}
-	r.Register(newStub("a", 1, gvk1))
-	r.Register(newStub("b", 1, gvk2))
-
-	gvks := r.SupportedGVKs()
-	if len(gvks) != 2 {
-		t.Errorf("SupportedGVKs() = %d; want 2", len(gvks))
 	}
 }
 
@@ -457,12 +363,50 @@ func TestGenerateGenericTemplate_HasEnabledCheck(t *testing.T) {
 	}
 }
 
+func TestGenerateGenericTemplate_KeepsInputName(t *testing.T) {
+	for name, want := range map[string]string{
+		"my-widget":       "  name: my-widget\n",
+		"system:auth":     "  name: \"system:auth\"\n",
+		"1st-widget":      "  name: \"1st-widget\"\n",
+		"widgets.example": "  name: widgets.example\n",
+	} {
+		obj := makeObj("Widget", name, "default")
+		tpl, _ := generateGenericTemplate(Context{ChartName: "app"}, obj, "w")
+		if !strings.Contains(tpl, want) {
+			t.Errorf("%s: template misses %q:\n%s", name, want, tpl)
+		}
+		if strings.Contains(tpl, "fullname") {
+			t.Errorf("%s: the name must not get the release prefix:\n%s", name, tpl)
+		}
+	}
+}
+
+func TestObjectName(t *testing.T) {
+	for name, want := range map[string]string{
+		"web":               "web",
+		"web-api.v2":        "web-api.v2",
+		"Upper_case":        "Upper_case",
+		"system:controller": `"system:controller"`,
+		"123":               `"123"`,
+		"1e3":               `"1e3"`,
+		"yes":               `"yes"`,
+		"Off":               `"Off"`,
+		"null":              `"null"`,
+		"with space":        `"with space"`,
+		"":                  `""`,
+	} {
+		if got := ObjectName(name); got != want {
+			t.Errorf("ObjectName(%q) = %s, want %s", name, got, want)
+		}
+	}
+}
+
 func TestGenerateGenericTemplate_IncludesLabels(t *testing.T) {
 	obj := makeObj("ConfigMap", "cfg", "default")
 	obj.SetLabels(map[string]string{"app": "test"})
 	tpl, _ := generateGenericTemplate(Context{ChartName: "chart"}, obj, "cfg")
 
-	if !strings.Contains(tpl, "app: test") {
+	if !strings.Contains(tpl, `app: "test"`) {
 		t.Error("template should include original labels")
 	}
 }
@@ -487,5 +431,121 @@ func TestGenerateGenericTemplate_WithSpec(t *testing.T) {
 	}
 	if vals["spec"] == nil {
 		t.Error("values should include spec")
+	}
+}
+
+func TestGenerateGenericTemplate_KeepsTopLevelFieldsAndDropsStatus(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion":  "example.com/v1",
+		"kind":        "Widget",
+		"metadata":    map[string]interface{}{"name": "w", "namespace": "default"},
+		"spec":        map[string]interface{}{"size": int64(3)},
+		"data":        map[string]interface{}{"greeting": "hello"},
+		"rules":       []interface{}{map[string]interface{}{"match": "*"}},
+		"provisioner": "ebs.csi.aws.com",
+		"enabled":     false,
+		"x-extra":     "v",
+		"status":      map[string]interface{}{"ready": true},
+	}}
+	tpl, vals := generateGenericTemplate(Context{ChartName: "app"}, obj, "widget")
+
+	for _, want := range []string{
+		"data:\n  {{- toYaml .Values.services.widget.widget.data | nindent 2 }}",
+		"rules:\n  {{- toYaml .Values.services.widget.widget.rules | nindent 2 }}",
+		"provisioner:\n  {{- toYaml .Values.services.widget.widget.provisioner | nindent 2 }}",
+		"spec:\n  {{- toYaml .Values.services.widget.widget.spec | nindent 2 }}",
+		"enabled:\n  {{- toYaml .Values.services.widget.widget.enabledField | nindent 2 }}",
+		"x-extra:\n  {{- toYaml (index .Values.services.widget.widget \"x-extra\") | nindent 2 }}",
+		`{{- if ne (toString .Values.services.widget.widget.enabled) "false" }}`,
+	} {
+		if !strings.Contains(tpl, want) {
+			t.Errorf("template missing %q:\n%s", want, tpl)
+		}
+	}
+	if strings.Contains(tpl, "status") {
+		t.Errorf("status must not be templated:\n%s", tpl)
+	}
+	if _, ok := vals["status"]; ok {
+		t.Error("status must not be copied into values")
+	}
+	if vals["enabled"] != true || vals["enabledField"] != false || vals["provisioner"] != "ebs.csi.aws.com" {
+		t.Errorf("unexpected values: %v", vals)
+	}
+	if vals["data"] == nil || vals["rules"] == nil || vals["x-extra"] != "v" {
+		t.Errorf("unexpected values: %v", vals)
+	}
+	// Values are copies, not aliases of the input object.
+	vals["data"].(map[string]interface{})["greeting"] = "changed"
+	if obj.Object["data"].(map[string]interface{})["greeting"] != "hello" {
+		t.Error("values must not alias the input object")
+	}
+}
+
+func TestGenerateGenericTemplate_CRDKeepsNameAndStaticBody(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "apiextensions.k8s.io/v1",
+		"kind":       "CustomResourceDefinition",
+		"metadata":   map[string]interface{}{"name": "widgets.example.com"},
+		"spec": map[string]interface{}{
+			"group": "example.com",
+			"versions": []interface{}{map[string]interface{}{
+				"name":        "v1",
+				"description": "uses {{ braces }}",
+			}},
+		},
+	}}
+	tpl, vals := generateGenericTemplate(Context{ChartName: "app"}, obj, "widgets")
+
+	if !strings.Contains(tpl, "  name: widgets.example.com\n") {
+		t.Errorf("CRD name must be kept verbatim:\n%s", tpl)
+	}
+	if strings.Contains(tpl, "fullname") {
+		t.Errorf("CRD name must not get the release prefix:\n%s", tpl)
+	}
+	if !strings.Contains(tpl, "spec:\n  group: example.com\n") {
+		t.Errorf("CRD body should be rendered verbatim:\n%s", tpl)
+	}
+	if !strings.Contains(tpl, `uses {{"{{"}} braces {{"}}"}}`) {
+		t.Errorf("template delimiters in the CRD body must be escaped:\n%s", tpl)
+	}
+	if len(vals) != 1 || vals["enabled"] != true {
+		t.Errorf("CRD values should only hold the enabled switch, got %v", vals)
+	}
+}
+
+func TestGenerateGenericTemplate_SortsAndQuotesLabels(t *testing.T) {
+	obj := makeObj("Widget", "w", "")
+	obj.SetLabels(map[string]string{"b": "true", "a": "1.0", "app.kubernetes.io/name": "w"})
+	tpl, _ := generateGenericTemplate(Context{ChartName: "app"}, obj, "w")
+	if !strings.Contains(tpl, "    a: \"1.0\"\n    b: \"true\"\n") {
+		t.Errorf("labels should be sorted and quoted:\n%s", tpl)
+	}
+	if strings.Contains(tpl, "app.kubernetes.io/name") {
+		t.Errorf("labels set by the chart helper must not be duplicated:\n%s", tpl)
+	}
+}
+
+func TestEscapeTemplateDelimiters(t *testing.T) {
+	got := escapeTemplateDelimiters(`a {{ b }} "c"`)
+	want := `a {{"{{"}} b {{"}}"}} "c"`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRegistry_PriorityOrdering(t *testing.T) {
+	r := NewRegistry()
+	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
+
+	r.Register(newStub("low", 1, gvk))
+	r.Register(newStub("high", 100, gvk))
+	r.Register(newStub("mid", 50, gvk))
+
+	ps := r.GetProcessors(gvk)
+	if len(ps) != 3 || ps[0].Name() != "high" || ps[1].Name() != "mid" || ps[2].Name() != "low" {
+		t.Errorf("expected processors by descending priority, got %v", ps)
+	}
+	if got := r.GetProcessors(schema.GroupVersionKind{Kind: "Missing"}); got != nil {
+		t.Errorf("expected nil for a missing GVK, got %v", got)
 	}
 }

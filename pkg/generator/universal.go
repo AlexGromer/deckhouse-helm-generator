@@ -46,28 +46,52 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	valuesBuilder.SetGlobal("imageRegistry", "")
 	valuesBuilder.SetGlobal("imagePullSecrets", []interface{}{})
 
-	// Process each service group
-	serviceNames := make([]string, 0, len(graph.Groups))
+	// Place every resource's values exactly where its template reads them
+	// (processor.Result.ValuesPath); resources without a ValuesPath fall back
+	// to the per-group layout.
 	for _, group := range graph.Groups {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
-		serviceNames = append(serviceNames, group.Name)
-		serviceConfig := g.buildServiceConfig(group)
-		valuesBuilder.AddService(group.Name, serviceConfig)
+		var unplaced []*types.ProcessedResource
+		for _, resource := range group.Resources {
+			if isCRD(resource) {
+				continue
+			}
+			if !placeValuesByPath(valuesBuilder, resource) {
+				unplaced = append(unplaced, resource)
+			}
+		}
+		if len(unplaced) > 0 {
+			config := g.buildServiceConfig(&types.ResourceGroup{Name: group.Name, Resources: unplaced})
+			for key, value := range config {
+				valuesBuilder.SetValue("services."+group.Name+"."+key, value)
+			}
+		}
+	}
+
+	serviceNames := make([]string, 0)
+	if services, ok := valuesBuilder.GetValue("services"); ok {
+		if m, ok := services.(map[string]interface{}); ok {
+			for name := range m {
+				serviceNames = append(serviceNames, name)
+			}
+		}
 	}
 
 	// Sort service names for consistent output
 	sort.Strings(serviceNames)
 
-	// TODO: apply template style variants (standard vs helm-specific functions)
-	// based on opts.TemplateStyle
-
 	// Build templates map
 	templates := make(map[string]string)
+	var allResources []*types.ProcessedResource
 	for _, group := range graph.Groups {
 		for _, resource := range group.Resources {
+			allResources = append(allResources, resource)
+			if isCRD(resource) {
+				continue
+			}
 			if resource.TemplatePath != "" && resource.TemplateContent != "" {
 				templates[resource.TemplatePath] = resource.TemplateContent
 			}
@@ -92,8 +116,8 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	// Generate _helpers.tpl
 	helpers := helm.GenerateHelpers(opts.ChartName)
 
-	// Collect external files from ExternalFileManager
-	externalFiles := make([]types.ExternalFileInfo, 0)
+	// CRDs go to crds/; collect external files from ExternalFileManager
+	externalFiles := crdFiles(allResources)
 	if opts.ExternalFileManager != nil {
 		files := opts.ExternalFileManager.GetFiles()
 		for _, file := range files {
@@ -116,7 +140,7 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	// Generate values.schema.json if requested
 	var valuesSchema string
 	if opts.IncludeSchema {
-		valuesSchema = helm.GenerateValuesSchema(serviceNames)
+		valuesSchema = helm.InferValuesSchema(valuesBuilder.BuildMap())
 	}
 
 	chart := &types.GeneratedChart{
@@ -131,26 +155,35 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 		ExternalFiles: externalFiles,
 	}
 
-	// Generate helm-unittest test files if requested
-	if opts.IncludeTests {
-		testFiles := GenerateHelmTests(chart)
-		for path, content := range testFiles {
-			chart.Templates[path] = content
-		}
+	if opts.IncludeREADME {
+		chart.ExternalFiles = append(chart.ExternalFiles, types.ExternalFileInfo{
+			Path: "README.md", Content: helm.GenerateREADME(chartMeta, valuesBuilder.BuildMap()),
+		})
 	}
-
-	// Generate Helm lifecycle hook Job templates if requested
-	if opts.IncludeHooks {
-		hookTemplates := GenerateHelmHooks(chart)
-		for path, content := range hookTemplates {
-			chart.Templates[path] = content
-		}
-	}
+	addTestsAndHooks(chart, opts)
 
 	return []*types.GeneratedChart{chart}, nil
 }
 
-// buildServiceConfig builds the configuration for a service from its resource group.
+// placeValuesByPath stores resource.Values at resource.ValuesPath and enables
+// the owning service. It returns false when the resource has no ValuesPath.
+func placeValuesByPath(b *helm.ValuesBuilder, resource *types.ProcessedResource) bool {
+	if resource.ValuesPath == "" {
+		return false
+	}
+	values := resource.Values
+	if values == nil {
+		values = map[string]interface{}{}
+	}
+	b.SetValue(resource.ValuesPath, values)
+	if parts := strings.SplitN(resource.ValuesPath, ".", 3); len(parts) == 3 && parts[0] == "services" {
+		if _, ok := b.GetValue("services." + parts[1] + ".enabled"); !ok {
+			b.SetValue("services."+parts[1]+".enabled", true)
+		}
+	}
+	return true
+}
+
 // buildServiceConfig builds the configuration for a service from its resource group.
 func (g *UniversalGenerator) buildServiceConfig(group *types.ResourceGroup) map[string]interface{} {
 	config := make(map[string]interface{})
@@ -198,7 +231,6 @@ func (g *UniversalGenerator) buildServiceConfig(group *types.ResourceGroup) map[
 	return config
 }
 
-
 // kindToValuesKey converts a GVK Kind name to the values.yaml key used by templates.
 // Templates reference values as $svc.deployment, $svc.service, $svc.statefulSet, etc.
 func kindToValuesKey(kind string) string {
@@ -236,11 +268,11 @@ func sanitizeName(name string) string {
 			continue
 		}
 		if capitalize && c >= 'a' && c <= 'z' {
-			final = append(final, c - 32)
+			final = append(final, c-32)
 			capitalize = false
 		} else if i == 0 && c >= 'A' && c <= 'Z' {
 			// Lowercase first character
-			final = append(final, c + 32)
+			final = append(final, c+32)
 		} else {
 			final = append(final, c)
 		}
@@ -287,29 +319,52 @@ func pluralizeKind(kind string) string {
 	}
 }
 
-// GetServiceNames extracts service names from a resource graph.
-func GetServiceNames(graph *types.ResourceGraph) []string {
-	names := make([]string, 0, len(graph.Groups))
-	for _, group := range graph.Groups {
-		names = append(names, group.Name)
-	}
-	sort.Strings(names)
-	return names
-}
-
 // ValidateChart performs basic validation on a generated chart.
 func ValidateChart(chart *types.GeneratedChart) error {
 	if chart.Name == "" {
 		return fmt.Errorf("chart name is empty")
 	}
 	if chart.ChartYAML == "" {
-		return fmt.Errorf("Chart.yaml is empty")
+		return fmt.Errorf("empty Chart.yaml")
 	}
 	if chart.ValuesYAML == "" {
 		return fmt.Errorf("values.yaml is empty")
 	}
-	if len(chart.Templates) == 0 {
+	// An umbrella parent chart legitimately has no templates of its own (its
+	// content is the set of subcharts declared as dependencies), nor does a
+	// library chart (its content is _helpers.tpl) or a chart of CRDs only.
+	isLibrary := strings.Contains(chart.ChartYAML, "\ntype: library") && chart.Helpers != ""
+	hasDeps := strings.Contains(chart.ChartYAML, "\ndependencies:")
+	hasCRDs := false
+	for _, f := range chart.ExternalFiles {
+		if strings.HasPrefix(f.Path, "crds/") {
+			hasCRDs = true
+		}
+	}
+	if len(chart.Templates) == 0 && !isLibrary && !hasDeps && !hasCRDs {
 		return fmt.Errorf("no templates generated")
 	}
 	return nil
+}
+
+// addTestsAndHooks adds helm-unittest suites (--include-tests) and lifecycle
+// hook Jobs (--hooks) to a chart in place.
+func addTestsAndHooks(chart *types.GeneratedChart, opts Options) {
+	if opts.IncludeTests {
+		tests := GenerateHelmTests(chart)
+		if tests == nil {
+			tests = map[string]string{}
+		}
+		for path, content := range GenerateSnapshotTests(chart) {
+			tests[path] = content
+		}
+		for path, content := range tests {
+			chart.Templates[path] = content
+		}
+	}
+	if opts.IncludeHooks {
+		for path, content := range GenerateHelmHooks(chart) {
+			chart.Templates[path] = content
+		}
+	}
 }

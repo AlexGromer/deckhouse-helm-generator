@@ -3,8 +3,6 @@ package generator
 import (
 	"fmt"
 	"strings"
-
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
 // ResourceProfile defines CPU and memory requests/limits for a workload type.
@@ -22,44 +20,6 @@ var resourceProfiles = map[WorkloadType]ResourceProfile{
 	WorkloadDatabase: {CPURequest: "500m", CPULimit: "2", MemoryRequest: "512Mi", MemoryLimit: "4Gi"},
 	WorkloadBatch:    {CPURequest: "100m", CPULimit: "500m", MemoryRequest: "128Mi", MemoryLimit: "512Mi"},
 	WorkloadCache:    {CPURequest: "100m", CPULimit: "250m", MemoryRequest: "64Mi", MemoryLimit: "256Mi"},
-}
-
-// InjectResourceLimits adds resource requests and limits to containers that lack them.
-// Uses copy-on-write: returns a new chart, original is not modified.
-func InjectResourceLimits(chart *types.GeneratedChart, workloadType WorkloadType) *types.GeneratedChart {
-	profile, ok := resourceProfiles[workloadType]
-	if !ok {
-		profile = resourceProfiles[WorkloadWeb]
-	}
-
-	// Copy templates map — do not mutate the original.
-	templates := make(map[string]string, len(chart.Templates))
-	for k, v := range chart.Templates {
-		templates[k] = v
-	}
-
-	for path, content := range templates {
-		if !isWorkloadTemplate(content) {
-			continue
-		}
-		// Skip templates that already have resources defined.
-		if strings.Contains(content, "resources:") {
-			continue
-		}
-		templates[path] = injectResources(content, profile)
-	}
-
-	return &types.GeneratedChart{
-		Name:          chart.Name,
-		Path:          chart.Path,
-		ChartYAML:     chart.ChartYAML,
-		ValuesYAML:    chart.ValuesYAML,
-		Templates:     templates,
-		Helpers:       chart.Helpers,
-		Notes:         chart.Notes,
-		ValuesSchema:  chart.ValuesSchema,
-		ExternalFiles: chart.ExternalFiles,
-	}
 }
 
 // injectResources adds a resources block after the image: line in a template.
