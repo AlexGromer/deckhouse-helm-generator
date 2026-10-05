@@ -1,6 +1,7 @@
 package helm
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -408,12 +409,32 @@ func TestFormatValuesForService_ExistingEnabled(t *testing.T) {
 	}
 }
 
-func TestGenerateValuesSchema(t *testing.T) {
-	out := GenerateValuesSchema([]string{"web", "api"})
-	if !strings.Contains(out, "web") || !strings.Contains(out, "api") {
-		t.Error("schema should contain service names")
+func TestInferValuesSchema(t *testing.T) {
+	out := InferValuesSchema(map[string]interface{}{
+		"global":   map[string]interface{}{"imageRegistry": "", "imagePullSecrets": []interface{}{}},
+		"services": map[string]interface{}{"web": map[string]interface{}{"enabled": true, "replicas": 2, "cpu": "100m", "extra": nil}},
+	})
+	var schema map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &schema); err != nil {
+		t.Fatalf("schema is not JSON: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "imageRegistry") {
-		t.Error("schema should contain global properties")
+	if schema["$schema"] != "http://json-schema.org/draft-07/schema#" || schema["type"] != "object" {
+		t.Errorf("unexpected root: %v", schema)
+	}
+	web := schema["properties"].(map[string]interface{})["services"].(map[string]interface{})["properties"].(map[string]interface{})["web"].(map[string]interface{})["properties"].(map[string]interface{})
+	if web["enabled"].(map[string]interface{})["type"] != "boolean" {
+		t.Error("booleans must stay booleans")
+	}
+	for _, scalar := range []string{"replicas", "cpu"} {
+		if types := web[scalar].(map[string]interface{})["type"]; len(types.([]interface{})) != 2 {
+			t.Errorf("%s must accept string or number, got %v", scalar, types)
+		}
+	}
+	if len(web["extra"].(map[string]interface{})) != 0 {
+		t.Error("null defaults must accept anything")
+	}
+	pull := schema["properties"].(map[string]interface{})["global"].(map[string]interface{})["properties"].(map[string]interface{})["imagePullSecrets"].(map[string]interface{})
+	if pull["type"] != "array" {
+		t.Error("lists must stay lists")
 	}
 }

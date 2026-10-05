@@ -132,7 +132,7 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	// Generate values.schema.json if requested
 	var valuesSchema string
 	if opts.IncludeSchema {
-		valuesSchema = helm.GenerateValuesSchema(serviceNames)
+		valuesSchema = helm.InferValuesSchema(valuesBuilder.BuildMap())
 	}
 
 	chart := &types.GeneratedChart{
@@ -147,21 +147,7 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 		ExternalFiles: externalFiles,
 	}
 
-	// Generate helm-unittest test files if requested
-	if opts.IncludeTests {
-		testFiles := GenerateHelmTests(chart)
-		for path, content := range testFiles {
-			chart.Templates[path] = content
-		}
-	}
-
-	// Generate Helm lifecycle hook Job templates if requested
-	if opts.IncludeHooks {
-		hookTemplates := GenerateHelmHooks(chart)
-		for path, content := range hookTemplates {
-			chart.Templates[path] = content
-		}
-	}
+	addTestsAndHooks(chart, opts)
 
 	return []*types.GeneratedChart{chart}, nil
 }
@@ -340,4 +326,26 @@ func ValidateChart(chart *types.GeneratedChart) error {
 		return fmt.Errorf("no templates generated")
 	}
 	return nil
+}
+
+// addTestsAndHooks adds helm-unittest suites (--include-tests) and lifecycle
+// hook Jobs (--hooks) to a chart in place.
+func addTestsAndHooks(chart *types.GeneratedChart, opts Options) {
+	if opts.IncludeTests {
+		tests := GenerateHelmTests(chart)
+		if tests == nil {
+			tests = map[string]string{}
+		}
+		for path, content := range GenerateSnapshotTests(chart) {
+			tests[path] = content
+		}
+		for path, content := range tests {
+			chart.Templates[path] = content
+		}
+	}
+	if opts.IncludeHooks {
+		for path, content := range GenerateHelmHooks(chart) {
+			chart.Templates[path] = content
+		}
+	}
 }

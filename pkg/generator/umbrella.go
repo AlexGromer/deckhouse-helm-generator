@@ -139,6 +139,12 @@ func (g *UmbrellaGenerator) generateParentChart(
 		Templates:  map[string]string{},
 		Helpers:    helm.GenerateHelpers(chartName),
 		Notes:      umbrellaNotes(chartName, deps),
+		ValuesSchema: func() string {
+			if !opts.IncludeSchema {
+				return ""
+			}
+			return helm.InferValuesSchema(allValues)
+		}(),
 	}, nil
 }
 

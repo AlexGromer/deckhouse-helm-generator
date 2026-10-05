@@ -325,54 +325,44 @@ func FormatValuesForService(serviceName string, values map[string]interface{}) m
 	return formatted
 }
 
-// GenerateValuesSchema generates a values.schema.json for validation.
-func GenerateValuesSchema(services []string) string {
-	schema := map[string]interface{}{
-		"$schema": "http://json-schema.org/draft-07/schema#",
-		"type":    "object",
-		"properties": map[string]interface{}{
-			"global": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"imageRegistry": map[string]interface{}{
-						"type":        "string",
-						"description": "Global Docker image registry",
-					},
-					"imagePullSecrets": map[string]interface{}{
-						"type":        "array",
-						"description": "Global image pull secrets",
-						"items": map[string]interface{}{
-							"type": "object",
-						},
-					},
-				},
-			},
-			"services": map[string]interface{}{
-				"type":       "object",
-				"properties": buildServiceSchemaProperties(services),
-			},
-		},
-	}
-
-	// Helm requires values.schema.json to be JSON, not YAML.
-	schemaBytes, _ := json.MarshalIndent(schema, "", "  ")
-	return string(schemaBytes) + "\n"
+// InferValuesSchema derives a values.schema.json (JSON Schema draft-07, the
+// draft every Helm 3 release understands) from a chart's default values.
+//
+// The structure is strict where mistakes are structural: objects stay objects,
+// lists stay lists and booleans stay booleans, so `helm install --set` or a
+// values file with a misplaced or mistyped section fails early. Scalars are
+// lenient: strings and numbers are interchangeable (Kubernetes accepts
+// `cpu: 1` and `cpu: "1"`), and nulls accept anything. Unknown keys are
+// allowed, so values overlays may add settings.
+func InferValuesSchema(values map[string]interface{}) string {
+	schema := inferSchema(values)
+	schema["$schema"] = "http://json-schema.org/draft-07/schema#"
+	out, _ := json.MarshalIndent(schema, "", "  ")
+	return string(out) + "\n"
 }
 
-func buildServiceSchemaProperties(services []string) map[string]interface{} {
-	props := make(map[string]interface{})
-
-	for _, svc := range services {
-		props[svc] = map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"enabled": map[string]interface{}{
-					"type":        "boolean",
-					"description": fmt.Sprintf("Enable %s service", svc),
-				},
-			},
+func inferSchema(v interface{}) map[string]interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		props := make(map[string]interface{}, len(val))
+		for k, child := range val {
+			props[k] = inferSchema(child)
 		}
+		s := map[string]interface{}{"type": "object"}
+		if len(props) > 0 {
+			s["properties"] = props
+		}
+		return s
+	case []interface{}:
+		return map[string]interface{}{"type": "array"}
+	case []string, []map[string]interface{}:
+		return map[string]interface{}{"type": "array"}
+	case bool:
+		return map[string]interface{}{"type": "boolean"}
+	case string, int, int32, int64, uint, uint32, uint64, float32, float64:
+		return map[string]interface{}{"type": []string{"string", "number"}}
+	default:
+		// null or a value we cannot classify: accept anything.
+		return map[string]interface{}{}
 	}
-
-	return props
 }

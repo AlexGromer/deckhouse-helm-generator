@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -113,7 +114,7 @@ var scenarios = []scenario{
 	{"umbrella", []string{"--mode", "umbrella", "--include-schema", "--include-tests"}},
 	{"deckhouse-module", []string{"--mode", "universal", "--deckhouse-module"}},
 	// Post-processing flags of `dhg generate`.
-	{"env-values", []string{"--env-values"}},
+	{"env-values", []string{"--env-values", "--include-schema"}},
 	{"airgap", []string{"--airgap-registry", "registry.example.com"}},
 	{"namespace-resources", []string{"--namespace-resources"}},
 	{"multi-tenant", []string{"--multi-tenant"}},
@@ -216,6 +217,13 @@ func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 			}
 		}
 
+		// Generated helm-unittest suites must pass when the plugin is installed.
+		if fileExists(filepath.Join(chart, "tests")) && hasUnittestPlugin(helm) {
+			if out, err := run(helm, "unittest", chart); err != nil {
+				t.Errorf("helm unittest %s failed:\n%s", rel, out)
+			}
+		}
+
 		// Every values overlay shipped with the chart must render too.
 		overlays, _ := filepath.Glob(filepath.Join(chart, "values-*.yaml"))
 		for _, overlay := range overlays {
@@ -286,6 +294,19 @@ func nested(obj map[string]interface{}, path ...string) map[string]interface{} {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+var unittestPlugin struct {
+	once sync.Once
+	ok   bool
+}
+
+func hasUnittestPlugin(helm string) bool {
+	unittestPlugin.once.Do(func() {
+		out, err := run(helm, "plugin", "list")
+		unittestPlugin.ok = err == nil && strings.Contains(out, "unittest")
+	})
+	return unittestPlugin.ok
 }
 
 func hasKustomize() bool {

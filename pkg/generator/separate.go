@@ -99,15 +99,23 @@ func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Opti
 	// Generate NOTES.txt.
 	notes := helm.GenerateNOTES(chartName, []string{chartName}, helm.NOTESContext{})
 
-	return &types.GeneratedChart{
-		Name:       chartName,
-		Path:       opts.OutputDir,
-		ChartYAML:  chartYAML,
-		ValuesYAML: valuesYAML,
-		Templates:  templates,
-		Helpers:    helpers,
-		Notes:      notes,
-	}, nil
+	var valuesSchema string
+	if opts.IncludeSchema {
+		valuesSchema = helm.InferValuesSchema(values)
+	}
+
+	chart := &types.GeneratedChart{
+		Name:         chartName,
+		Path:         opts.OutputDir,
+		ChartYAML:    chartYAML,
+		ValuesYAML:   valuesYAML,
+		Templates:    templates,
+		Helpers:      helpers,
+		Notes:        notes,
+		ValuesSchema: valuesSchema,
+	}
+	addTestsAndHooks(chart, opts)
+	return chart, nil
 }
 
 // buildFlatValues builds flat values for a service group.
