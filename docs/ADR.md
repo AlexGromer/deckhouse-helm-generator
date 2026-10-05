@@ -3,7 +3,7 @@
 > **Тип:** Справочник
 > **Аудитория:** участники разработки, архитекторы
 > **Последнее обновление:** 2026-10-05
-> **Связанные документы:** [ARCHITECTURE.md](../ARCHITECTURE.md), [DEVELOPER.md](DEVELOPER.md)
+> **Связанные документы:** [README.md](../README.md), [DEVELOPER.md](DEVELOPER.md)
 
 ## Обзор
 
