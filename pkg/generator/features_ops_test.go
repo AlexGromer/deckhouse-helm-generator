@@ -136,14 +136,35 @@ spec:
 // generator) on opsTestManifests in the given mode.
 func generateOpsCharts(t *testing.T, mode types.OutputMode) ([]*types.GeneratedChart, *types.ResourceGraph) {
 	t.Helper()
+	return generateChartsFromManifests(t, opsTestManifests, mode)
+}
+
+// generateChartsFromManifests runs the processing, analysis and generation
+// steps of `dhg generate` on a YAML stream.
+func generateChartsFromManifests(t *testing.T, manifests string, mode types.OutputMode) ([]*types.GeneratedChart, *types.ResourceGraph) {
+	t.Helper()
+	return generateChartsWithOptions(t, manifests, Options{Mode: mode})
+}
+
+// generateChartsWithOptions is generateChartsFromManifests with generator
+// options; chart name, versions and the file manager are filled in.
+func generateChartsWithOptions(t *testing.T, manifests string, opts Options) ([]*types.GeneratedChart, *types.ResourceGraph) {
+	t.Helper()
 	ctx := context.Background()
+	mode := opts.Mode
 
 	var extracted []*types.ExtractedResource
 	all := map[types.ResourceKey]*types.ExtractedResource{}
-	for _, doc := range strings.Split(opsTestManifests, "\n---\n") {
+	for _, doc := range strings.Split(manifests, "\n---\n") {
+		if strings.TrimSpace(doc) == "" {
+			continue
+		}
 		obj := &unstructured.Unstructured{}
 		if err := yaml.Unmarshal([]byte(doc), &obj.Object); err != nil {
 			t.Fatalf("parsing manifest: %v", err)
+		}
+		if obj.GetKind() == "" {
+			continue // comments only
 		}
 		r := &types.ExtractedResource{Object: obj, Source: types.SourceFile, GVK: obj.GroupVersionKind()}
 		extracted = append(extracted, r)
@@ -178,6 +199,8 @@ func generateOpsCharts(t *testing.T, mode types.OutputMode) ([]*types.GeneratedC
 		})
 	}
 
+	processor.ResolveCollisions(processed)
+
 	a := analyzer.NewDefaultAnalyzer()
 	detector.RegisterAll(a)
 	graph, err := a.Analyze(ctx, processed)
@@ -188,13 +211,9 @@ func generateOpsCharts(t *testing.T, mode types.OutputMode) ([]*types.GeneratedC
 	if err != nil {
 		t.Fatal(err)
 	}
-	charts, err := gen.Generate(ctx, graph, Options{
-		ChartName:           "app",
-		ChartVersion:        "0.1.0",
-		AppVersion:          "1.0.0",
-		Mode:                mode,
-		ExternalFileManager: files,
-	})
+	opts.ChartName, opts.ChartVersion, opts.AppVersion = "app", "0.1.0", "1.0.0"
+	opts.ExternalFileManager = files
+	charts, err := gen.Generate(ctx, graph, opts)
 	if err != nil {
 		t.Fatal(err)
 	}

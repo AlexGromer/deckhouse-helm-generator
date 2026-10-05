@@ -2,13 +2,21 @@ package extractor
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeExecKubeconfig writes a kubeconfig whose user runs plugin (a shell
@@ -130,5 +138,72 @@ func TestClusterClient_TokenFile(t *testing.T) {
 	}
 	if gotAuth != "Bearer file-token" {
 		t.Errorf("Authorization = %q", gotAuth)
+	}
+}
+
+// selfSignedPEM returns a PEM certificate and key for a test client.
+func selfSignedPEM(t *testing.T) (certPEM, keyPEM string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "dhg"}, NotAfter: time.Now().Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+}
+
+func TestClusterClient_ExecPluginClientCertificate(t *testing.T) {
+	certPEM, keyPEM := selfSignedPEM(t)
+	status, _ := json.Marshal(map[string]interface{}{
+		"apiVersion": "client.authentication.k8s.io/v1beta1",
+		"kind":       "ExecCredential",
+		"status":     map[string]string{"clientCertificateData": certPEM, "clientKeyData": keyPEM},
+	})
+	user := "      exec:\n        apiVersion: client.authentication.k8s.io/v1beta1\n        command: ./plugin.sh\n        interactiveMode: IfAvailable\n"
+	cc, err := newClusterClient(writeExecKubeconfig(t, "https://127.0.0.1:1", "cat <<'JSON'\n"+string(status)+"\nJSON\n", user), "")
+	if err != nil {
+		t.Fatalf("newClusterClient: %v", err)
+	}
+	transport, _ := cc.httpClient.Transport.(*http.Transport)
+	if transport == nil || len(transport.TLSClientConfig.Certificates) != 1 {
+		t.Fatal("client certificate from the plugin is not used")
+	}
+	if cc.headers.Get("Authorization") != "" {
+		t.Error("no bearer token expected with certificate credentials")
+	}
+}
+
+func TestClusterClient_ExecPluginMoreErrors(t *testing.T) {
+	certPEM, _ := selfSignedPEM(t)
+	certOnly, _ := json.Marshal(map[string]interface{}{
+		"apiVersion": "client.authentication.k8s.io/v1",
+		"kind":       "ExecCredential",
+		"status":     map[string]string{"clientCertificateData": certPEM},
+	})
+	tests := []struct {
+		name, plugin, user, want string
+	}{
+		{"certificate without key", "cat <<'JSON'\n" + string(certOnly) + "\nJSON\n", execUser, "without its key"},
+		{"empty command", "", "      exec:\n        apiVersion: client.authentication.k8s.io/v1\n        command: \"\"\n", "command is empty"},
+		{"missing command without hint", "", "      exec:\n        apiVersion: client.authentication.k8s.io/v1\n        command: kubectl-no-such-plugin\n", "not found"},
+		// go test does not run with a terminal on stdin.
+		{"interactive required", "", "      exec:\n        apiVersion: client.authentication.k8s.io/v1\n        command: ./plugin.sh\n        interactiveMode: Always\n", "interactive terminal"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := newClusterClient(writeExecKubeconfig(t, "https://127.0.0.1:1", tt.plugin, tt.user), "")
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.want)
+			}
+		})
 	}
 }

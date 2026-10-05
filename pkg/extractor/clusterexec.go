@@ -138,7 +138,16 @@ func runExecPlugin(cfg *execConfig, kubeconfigDir string, cluster kubeconfigClus
 	return st, nil
 }
 
+// stdinIsTerminal reports whether stdin can answer a prompt: a character
+// device other than the null device (CI runners and `< /dev/null` give
+// the latter, which is a character device too).
 func stdinIsTerminal() bool {
 	fi, err := os.Stdin.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(fi, null) {
+		return false
+	}
+	return true
 }
