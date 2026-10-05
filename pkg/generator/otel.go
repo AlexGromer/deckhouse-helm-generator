@@ -2,159 +2,164 @@ package generator
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// OTELOptions configures OpenTelemetry instrumentation generation.
-type OTELOptions struct {
-	ExporterEndpoint string
-	ExporterProtocol string
-	Propagators      []string
-	SamplingRate     float64
-	Namespace        string
+// OpenTelemetry auto-instrumentation (`dhg generate --with otel`).
+//
+// The feature adds one OpenTelemetry Operator `Instrumentation` resource per
+// chart (exporter, propagators and sampler come from `.Values.otel.instrumentation`)
+// and annotates the pod template of every Deployment/StatefulSet/DaemonSet
+// whose language is known with `instrumentation.opentelemetry.io/inject-<lang>`
+// pointing at that Instrumentation. The language is detected from the first
+// container image, or forced for all workloads with the `language` parameter.
+
+// otelLanguages are the languages the Operator can auto-instrument without
+// extra per-workload settings (Go additionally needs the target executable
+// path and a privileged sidecar, so it is not offered).
+var otelLanguages = map[string]bool{"java": true, "nodejs": true, "python": true, "dotnet": true}
+
+var otelSamplers = map[string]bool{
+	"always_on": true, "always_off": true, "traceidratio": true,
+	"parentbased_always_on": true, "parentbased_always_off": true, "parentbased_traceidratio": true,
+	"jaeger_remote": true, "parentbased_jaeger_remote": true, "xray": true,
 }
 
-// OTELResult holds detected language and generated Instrumentation YAML.
-type OTELResult struct {
-	// DetectedLanguages maps workload name → detected language.
-	DetectedLanguages map[string]string
-	// Instrumentations maps workload name → Instrumentation YAML.
-	Instrumentations map[string]string
-	// NOTESTxt is an optional human-readable summary.
-	NOTESTxt string
+// languageImageTokens maps image name tokens to an instrumentation language.
+var languageImageTokens = map[string]string{
+	"java": "java", "openjdk": "java", "jdk": "java", "jre": "java", "temurin": "java",
+	"corretto": "java", "amazoncorretto": "java", "spring": "java", "tomcat": "java", "wildfly": "java", "jboss": "java",
+	"python": "python", "django": "python", "flask": "python", "fastapi": "python",
+	"gunicorn": "python", "uvicorn": "python",
+	"node": "nodejs", "nodejs": "nodejs", "express": "nodejs", "nestjs": "nodejs",
+	"dotnet": "dotnet", "aspnet": "dotnet", "aspnetcore": "dotnet",
 }
 
-// GenerateOTELInstrumentation detects languages from workload images and generates
-// OpenTelemetry Instrumentation CRs for the given graph.
-func GenerateOTELInstrumentation(graph *types.ResourceGraph, opts OTELOptions) *OTELResult {
-	result := &OTELResult{
-		DetectedLanguages: make(map[string]string),
-		Instrumentations:  make(map[string]string),
-	}
-
-	if graph == nil {
-		return result
-	}
-
-	for _, r := range graph.Resources {
-		kind := r.Original.GVK.Kind
-		if kind != "Deployment" && kind != "StatefulSet" && kind != "DaemonSet" {
-			continue
-		}
-		name := r.Original.Object.GetName()
-		image := extractImageFromResource(r)
-		lang := detectLanguageFromImage(image)
-		if lang == "" || lang == "unknown" {
-			continue
-		}
-		result.DetectedLanguages[name] = lang
-		result.Instrumentations[name] = generateInstrumentationYAML(name, lang, opts)
-	}
-
-	return result
-}
-
-// detectLanguageFromImage infers a language from an image name.
+// detectLanguageFromImage infers the instrumentation language from a
+// container image reference by looking at the tokens of its repository name
+// (registry and tag are ignored). It returns "" when unsure.
 func detectLanguageFromImage(image string) string {
-	lower := strings.ToLower(image)
-	switch {
-	case strings.Contains(lower, "java") || strings.Contains(lower, "openjdk") ||
-		strings.Contains(lower, "spring") || strings.Contains(lower, "corretto"):
-		return "java"
-	case strings.Contains(lower, "python") || strings.Contains(lower, "django") ||
-		strings.Contains(lower, "flask") || strings.Contains(lower, "fastapi"):
-		return "python"
-	case strings.Contains(lower, "node") || strings.Contains(lower, "npm") ||
-		strings.Contains(lower, "express"):
-		return "nodejs"
-	case strings.Contains(lower, "golang") || strings.Contains(lower, "/go:") ||
-		strings.Contains(lower, "go-"):
-		return "go"
-	case strings.Contains(lower, "dotnet") || strings.Contains(lower, "aspnet") ||
-		strings.Contains(lower, "aspnetcore"):
-		return "dotnet"
-	default:
-		return ""
+	repo := strings.ToLower(image)
+	if i := strings.Index(repo, "@"); i >= 0 {
+		repo = repo[:i]
 	}
+	if i := strings.LastIndex(repo, ":"); i > strings.LastIndex(repo, "/") {
+		repo = repo[:i]
+	}
+	if parts := strings.Split(repo, "/"); len(parts) > 1 && strings.ContainsAny(parts[0], ".:") {
+		repo = strings.Join(parts[1:], "/") // drop the registry host
+	}
+	tokens := strings.FieldsFunc(repo, func(r rune) bool { return r == '/' || r == '-' || r == '_' || r == '.' })
+	for _, t := range tokens {
+		if t == "exporter" { // e.g. node-exporter is not a Node.js application
+			return ""
+		}
+	}
+	for _, t := range tokens {
+		if lang, ok := languageImageTokens[t]; ok {
+			return lang
+		}
+	}
+	return ""
 }
 
-// extractImageFromResource extracts the container image from a processed resource.
-func extractImageFromResource(r *types.ProcessedResource) string {
-	obj := r.Original.Object.Object
-	spec, ok := obj["spec"].(map[string]interface{})
-	if !ok {
+// firstContainerImage returns the image of the first container of a workload.
+func firstContainerImage(obj map[string]interface{}) string {
+	containers := asList(nestedMap(obj, "spec", "template", "spec")["containers"])
+	if len(containers) == 0 {
 		return ""
 	}
-	template, ok := spec["template"].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	tSpec, ok := template["spec"].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	containers, ok := tSpec["containers"].([]interface{})
-	if !ok || len(containers) == 0 {
-		return ""
-	}
-	c, ok := containers[0].(map[string]interface{})
-	if !ok {
-		return ""
-	}
+	c, _ := containers[0].(map[string]interface{})
 	image, _ := c["image"].(string)
 	return image
 }
 
-func generateInstrumentationYAML(name, lang string, opts OTELOptions) string {
-	var sb strings.Builder
-	sb.WriteString("apiVersion: opentelemetry.io/v1alpha1\n")
-	sb.WriteString("kind: Instrumentation\n")
-	sb.WriteString("metadata:\n")
-	sb.WriteString(fmt.Sprintf("  name: %s-instrumentation\n", name))
-	sb.WriteString("spec:\n")
-	sb.WriteString(fmt.Sprintf("  # language: %s\n", lang))
-	if opts.ExporterEndpoint != "" {
-		sb.WriteString("  exporter:\n")
-		sb.WriteString(fmt.Sprintf("    endpoint: %s\n", opts.ExporterEndpoint))
-	}
-	if len(opts.Propagators) > 0 {
-		sb.WriteString("  propagators:\n")
-		for _, p := range opts.Propagators {
-			sb.WriteString(fmt.Sprintf("    - %s\n", p))
-		}
-	}
-	if opts.SamplingRate > 0 {
-		sb.WriteString("  sampler:\n")
-		sb.WriteString("    type: parentbased_traceidratio\n")
-		sb.WriteString(fmt.Sprintf("    argument: \"%g\"\n", opts.SamplingRate))
-	}
-	return sb.String()
-}
+const otelInstrumentationTemplate = `{{- if .Values.otel.enabled }}
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: {{ include "%[1]s.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+%[2]sspec:
+  {{- toYaml .Values.otel.instrumentation | nindent 2 }}
+{{- end }}
+`
 
-// InjectOTELInstrumentation injects Instrumentation CRs into a chart's templates.
-// Returns (nil, 0) if chart is nil.
-func InjectOTELInstrumentation(chart *types.GeneratedChart, result *OTELResult) (*types.GeneratedChart, int) {
-	if chart == nil {
-		return nil, 0
+func applyOTelFeature(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {
+	forced := fc.Param("language")
+	if forced != "" && !otelLanguages[forced] {
+		return nil, fmt.Errorf("language must be one of java, nodejs, python, dotnet (or empty to detect); got %q", forced)
+	}
+	sampler := fc.Param("sampler")
+	if !otelSamplers[sampler] {
+		return nil, fmt.Errorf("unknown sampler %q", sampler)
+	}
+	ratio, err := strconv.ParseFloat(fc.Param("sampling-ratio"), 64)
+	if err != nil || ratio < 0 || ratio > 1 {
+		return nil, fmt.Errorf("sampling-ratio must be a number between 0 and 1; got %q", fc.Param("sampling-ratio"))
 	}
 
-	newChart := copyChartTemplates(chart)
-	count := 0
-
-	if result == nil {
-		return newChart, 0
+	workloads := resourceTemplates(chart, func(k string) bool { return podWorkloadKinds[k] })
+	prefix := chartHelperPrefix(chart)
+	if len(workloads) == 0 || prefix == "" {
+		return chart, nil
 	}
 
-	for workload, yaml := range result.Instrumentations {
-		path := fmt.Sprintf("templates/otel-%s.yaml", strings.ToLower(workload))
-		if _, exists := newChart.Templates[path]; exists {
+	out := cloneChart(chart)
+	for _, rt := range workloads {
+		if strings.Contains(chart.Templates[rt.path], "instrumentation.opentelemetry.io/") {
 			continue
 		}
-		newChart.Templates[path] = yaml
-		count++
+		lang := forced
+		if lang == "" {
+			if r := graphResourceFor(fc.Graph, rt); r != nil {
+				lang = detectLanguageFromImage(firstContainerImage(r.Original.Object.Object))
+			}
+		}
+		if lang == "" {
+			continue
+		}
+		ok := rt.injectAnnotations(rt.podTemplateMetadata(), "$.Values.otel.enabled", func(indent int) []string {
+			return annotationLines("$.Values.otel.enabled", indent, [][2]string{{
+				"instrumentation.opentelemetry.io/inject-" + lang,
+				fmt.Sprintf(`{{ include "%s.fullname" $ | quote }}`, prefix),
+			}})
+		})
+		if ok {
+			out.Templates[rt.path] = rt.render()
+		}
 	}
 
-	return newChart, count
+	labels := ""
+	if chartHasHelper(chart, prefix+".labels") {
+		labels = fmt.Sprintf("  labels:\n    {{- include %q . | nindent 4 }}\n", prefix+".labels")
+	}
+	content := fmt.Sprintf(otelInstrumentationTemplate, prefix, labels)
+	if err := addTemplate(out, "templates/otel-instrumentation.yaml", content); err != nil {
+		return nil, err
+	}
+
+	instrumentation := map[string]interface{}{
+		"sampler": map[string]interface{}{
+			"type":     sampler,
+			"argument": strconv.FormatFloat(ratio, 'f', -1, 64),
+		},
+	}
+	if endpoint := fc.Param("endpoint"); endpoint != "" {
+		instrumentation["exporter"] = map[string]interface{}{"endpoint": endpoint}
+	}
+	if propagators := fc.ListParam("propagators"); len(propagators) > 0 {
+		instrumentation["propagators"] = propagators
+	}
+	err = addFeatureValues(out, "otel", map[string]interface{}{
+		"enabled":         true,
+		"instrumentation": instrumentation,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
