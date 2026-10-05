@@ -1,0 +1,29 @@
+apiVersion: example.com/v1
+kind: Widget
+metadata:
+  name: my-widget
+  namespace: default
+  labels:
+    app: widget-app
+  annotations:
+    example.com/note: "rendered by {{ .Release.Name }}"
+spec:
+  size: 3
+  color: blue
+data:
+  greeting: hello
+  template: "Hi {{ .Name }}"
+status:
+  ready: true
+---
+apiVersion: policy.example.com/v1alpha1
+kind: AccessRules
+metadata:
+  name: widget-rules
+  labels:
+    app: widget-app
+rules:
+  - match: "*"
+    action: allow
+  - match: admin
+    action: deny
