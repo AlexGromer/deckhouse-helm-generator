@@ -262,10 +262,6 @@ func TestEscapeTemplateString(t *testing.T) {
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
-
-
-
-
 func TestRegistry_GetProcessors(t *testing.T) {
 	r := NewRegistry()
 	gvk := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
@@ -290,8 +286,6 @@ func TestRegistry_GetProcessors_NotFound(t *testing.T) {
 		t.Error("expected nil for missing GVK")
 	}
 }
-
-
 
 // ── Registry.Process ─────────────────────────────────────────────────────────
 
@@ -366,6 +360,44 @@ func TestGenerateGenericTemplate_HasEnabledCheck(t *testing.T) {
 	}
 	if vals["enabled"] != true {
 		t.Error("values should contain enabled=true")
+	}
+}
+
+func TestGenerateGenericTemplate_KeepsInputName(t *testing.T) {
+	for name, want := range map[string]string{
+		"my-widget":       "  name: my-widget\n",
+		"system:auth":     "  name: \"system:auth\"\n",
+		"1st-widget":      "  name: \"1st-widget\"\n",
+		"widgets.example": "  name: widgets.example\n",
+	} {
+		obj := makeObj("Widget", name, "default")
+		tpl, _ := generateGenericTemplate(Context{ChartName: "app"}, obj, "w")
+		if !strings.Contains(tpl, want) {
+			t.Errorf("%s: template misses %q:\n%s", name, want, tpl)
+		}
+		if strings.Contains(tpl, "fullname") {
+			t.Errorf("%s: the name must not get the release prefix:\n%s", name, tpl)
+		}
+	}
+}
+
+func TestObjectName(t *testing.T) {
+	for name, want := range map[string]string{
+		"web":               "web",
+		"web-api.v2":        "web-api.v2",
+		"Upper_case":        "Upper_case",
+		"system:controller": `"system:controller"`,
+		"123":               `"123"`,
+		"1e3":               `"1e3"`,
+		"yes":               `"yes"`,
+		"Off":               `"Off"`,
+		"null":              `"null"`,
+		"with space":        `"with space"`,
+		"":                  `""`,
+	} {
+		if got := ObjectName(name); got != want {
+			t.Errorf("ObjectName(%q) = %s, want %s", name, got, want)
+		}
 	}
 }
 
