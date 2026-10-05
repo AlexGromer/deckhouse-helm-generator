@@ -334,9 +334,12 @@ func ValidateChart(chart *types.GeneratedChart) error {
 	if chart.ValuesYAML == "" {
 		return fmt.Errorf("values.yaml is empty")
 	}
-	// An umbrella parent chart legitimately has no templates of its own: its
-	// content is the set of subcharts declared as dependencies.
-	if len(chart.Templates) == 0 && !strings.Contains(chart.ChartYAML, "\ndependencies:") {
+	// An umbrella parent chart legitimately has no templates of its own (its
+	// content is the set of subcharts declared as dependencies), nor does a
+	// library chart (its content is _helpers.tpl).
+	isLibrary := strings.Contains(chart.ChartYAML, "\ntype: library") && chart.Helpers != ""
+	hasDeps := strings.Contains(chart.ChartYAML, "\ndependencies:")
+	if len(chart.Templates) == 0 && !isLibrary && !hasDeps {
 		return fmt.Errorf("no templates generated")
 	}
 	return nil
