@@ -76,8 +76,24 @@ func (r *Registry) Process(ctx Context, obj *unstructured.Unstructured) (*Result
 	if err != nil || result == nil {
 		return result, err
 	}
+	normalizeServiceName(result)
 	result.TemplateContent = NormalizeResourceNames(result.TemplateContent, result.ServiceName)
 	return result, nil
+}
+
+// normalizeServiceName enforces the invariant every template relies on: the
+// service name (and the services.<name> segment of ValuesPath) is the
+// sanitized identifier used in `.Values.services.<name>`.
+func normalizeServiceName(result *Result) {
+	sanitized := SanitizeServiceName(result.ServiceName)
+	if sanitized == result.ServiceName {
+		return
+	}
+	prefix := "services." + result.ServiceName + "."
+	if strings.HasPrefix(result.ValuesPath, prefix) {
+		result.ValuesPath = "services." + sanitized + "." + strings.TrimPrefix(result.ValuesPath, prefix)
+	}
+	result.ServiceName = sanitized
 }
 
 func (r *Registry) process(ctx Context, obj *unstructured.Unstructured) (*Result, error) {

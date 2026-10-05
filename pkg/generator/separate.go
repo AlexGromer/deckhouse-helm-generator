@@ -46,7 +46,7 @@ func (g *SeparateGenerator) Generate(ctx context.Context, graph *types.ResourceG
 			return nil, ctx.Err()
 		}
 
-		chart, err := g.generateChartForGroup(group, opts)
+		chart, err := g.generateChartForGroup(group, opts, opts.ChartName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate chart for group %s: %w", group.Name, err)
 		}
@@ -57,7 +57,9 @@ func (g *SeparateGenerator) Generate(ctx context.Context, graph *types.ResourceG
 }
 
 // generateChartForGroup creates a complete Helm chart for a single service group.
-func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Options) (*types.GeneratedChart, error) {
+// sourceChartName is the chart name the processors rendered templates with;
+// their helper references are rewritten to the group chart's own helpers.
+func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Options, sourceChartName string) (*types.GeneratedChart, error) {
 	chartName := group.Name
 
 	// Build Chart.yaml.
@@ -86,6 +88,7 @@ func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Opti
 	for _, resource := range group.Resources {
 		if resource.TemplatePath != "" && resource.TemplateContent != "" {
 			content := rewriteTemplateForSeparateMode(resource.TemplateContent, resource.ServiceName)
+			content = rewriteHelperReferences(content, sourceChartName, chartName)
 			templates[resource.TemplatePath] = content
 		}
 	}
@@ -97,24 +100,49 @@ func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Opti
 	notes := helm.GenerateNOTES(chartName, []string{chartName}, helm.NOTESContext{})
 
 	return &types.GeneratedChart{
-		Name:      chartName,
-		Path:      opts.OutputDir,
-		ChartYAML: chartYAML,
+		Name:       chartName,
+		Path:       opts.OutputDir,
+		ChartYAML:  chartYAML,
 		ValuesYAML: valuesYAML,
-		Templates: templates,
-		Helpers:   helpers,
-		Notes:     notes,
+		Templates:  templates,
+		Helpers:    helpers,
+		Notes:      notes,
 	}, nil
 }
 
 // buildFlatValues builds flat values for a service group.
-// Unlike universal mode, values are NOT nested under a service name.
+// Unlike universal mode, values are NOT nested under a service name: the
+// services.<svc>. prefix of each resource's ValuesPath is stripped, matching
+// rewriteTemplateForSeparateMode.
 func (g *SeparateGenerator) buildFlatValues(group *ServiceGroup) map[string]interface{} {
-	values := make(map[string]interface{})
+	b := helm.NewValuesBuilder()
+	// Processor templates are guarded by `if $svc.enabled`; in separate mode
+	// $svc is .Values itself, so the chart must be enabled by default.
+	b.SetValue("enabled", true)
+	// Templates reference $.Values.global.*; an umbrella parent overrides it.
+	b.SetValue("global", map[string]interface{}{})
 
-	// Organize resources by kind.
-	resourcesByKind := make(map[string][]*types.ProcessedResource)
+	var unplaced []*types.ProcessedResource
 	for _, resource := range group.Resources {
+		path := resource.ValuesPath
+		if parts := strings.SplitN(path, ".", 3); len(parts) == 3 && parts[0] == "services" {
+			path = parts[2]
+		}
+		if path == "" {
+			unplaced = append(unplaced, resource)
+			continue
+		}
+		values := resource.Values
+		if values == nil {
+			values = map[string]interface{}{}
+		}
+		b.SetValue(path, values)
+	}
+	values := b.BuildMap()
+
+	// Organize resources without a ValuesPath by kind.
+	resourcesByKind := make(map[string][]*types.ProcessedResource)
+	for _, resource := range unplaced {
 		kind := resource.Original.GVK.Kind
 		resourcesByKind[kind] = append(resourcesByKind[kind], resource)
 	}
@@ -167,8 +195,9 @@ func marshalFlatValues(chartName string, values map[string]interface{}) (string,
 
 // rewriteTemplateForSeparateMode rewrites template content to use flat value paths.
 // Replaces patterns like:
-//   .Values.services.<svc>.<path> -> .Values.<path>
-//   $svc := .Values.services.<svc> -> $svc := .Values
+//
+//	.Values.services.<svc>.<path> -> .Values.<path>
+//	$svc := .Values.services.<svc> -> $svc := .Values
 func rewriteTemplateForSeparateMode(content, serviceName string) string {
 	if serviceName == "" {
 		return content
@@ -180,5 +209,17 @@ func rewriteTemplateForSeparateMode(content, serviceName string) string {
 		".Values.services."+serviceName,
 		".Values")
 
+	return content
+}
+
+// rewriteHelperReferences points include/template calls at the helpers of the
+// chart the template ends up in: `include "app.labels"` → `include "frontend.labels"`.
+func rewriteHelperReferences(content, from, to string) string {
+	if from == "" || from == to {
+		return content
+	}
+	for _, fn := range []string{"include", "template"} {
+		content = strings.ReplaceAll(content, fn+` "`+from+`.`, fn+` "`+to+`.`)
+	}
 	return content
 }

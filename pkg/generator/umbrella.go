@@ -57,7 +57,7 @@ func (g *UmbrellaGenerator) Generate(ctx context.Context, graph *types.ResourceG
 		// Generate subchart using SeparateGenerator logic.
 		subOpts := opts
 		subOpts.ChartName = group.Name
-		subchart, err := sep.generateChartForGroup(group, subOpts)
+		subchart, err := sep.generateChartForGroup(group, subOpts, opts.ChartName)
 		if err != nil {
 			return nil, fmt.Errorf("generating subchart for %s: %w", group.Name, err)
 		}

@@ -123,16 +123,22 @@ func TestGeneratedChartsPassHelm(t *testing.T) {
 				out := t.TempDir()
 				args := append([]string{"generate", "-f", input, "-o", out, "--chart-name", "app"}, sc.args...)
 				runOK(t, dhgBin, args...)
-				checkCharts(t, helm, out)
+				rendered, complete := checkCharts(t, helm, out)
+				if want := countInputObjects(t, input); complete && rendered < want {
+					t.Errorf("rendered %d objects, want at least %d (one per input manifest)", rendered, want)
+				}
 			})
 		}
 	}
 }
 
-// checkCharts lints and renders every chart under dir. Subcharts below a
-// charts/ directory are validated through their parent.
-func checkCharts(t *testing.T, helm, dir string) {
+// checkCharts lints and renders every chart under dir and returns the number
+// of rendered objects; complete is false when some chart could not be
+// rendered hermetically. Subcharts below a charts/ directory are validated
+// through their parent.
+func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 	t.Helper()
+	complete = true
 	charts := findCharts(t, dir)
 	if len(charts) == 0 {
 		t.Fatalf("no Chart.yaml produced under %s", dir)
@@ -149,6 +155,7 @@ func checkCharts(t *testing.T, helm, dir string) {
 			if out, err := run(helm, "lint", chart); err != nil && !strings.Contains(out, "missing in charts/") {
 				t.Errorf("helm lint %s failed:\n%s", rel, out)
 			}
+			complete = false
 			continue
 		}
 		if bytes.Contains(chartYAML, []byte("file://")) {
@@ -165,10 +172,53 @@ func checkCharts(t *testing.T, helm, dir string) {
 		if bytes.Contains(chartYAML, []byte("type: library")) {
 			continue // library charts are not installable and cannot be templated
 		}
-		if out, err := run(helm, "template", "golden", chart); err != nil {
+		out, err := run(helm, "template", "golden", chart)
+		if err != nil {
 			t.Errorf("helm template %s failed:\n%s", rel, out)
+			continue
+		}
+		n := countObjects(out)
+		if n == 0 {
+			t.Errorf("helm template %s rendered no objects", rel)
+		}
+		rendered += n
+	}
+	return rendered, complete
+}
+
+// countObjects counts top-level Kubernetes objects in a YAML stream.
+func countObjects(yamlStream string) int {
+	n := 0
+	for _, line := range strings.Split(yamlStream, "\n") {
+		if strings.HasPrefix(line, "kind: ") {
+			n++
 		}
 	}
+	return n
+}
+
+// countInputObjects counts the manifests dhg is given as input.
+func countInputObjects(t *testing.T, dir string) int {
+	t.Helper()
+	n := 0
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		if ext := filepath.Ext(path); ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		n += countObjects(string(data))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 // hasExternalDeps reports whether Chart.yaml declares a dependency fetched

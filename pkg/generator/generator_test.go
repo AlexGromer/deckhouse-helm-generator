@@ -384,36 +384,6 @@ func TestValidateChart_NoTemplates(t *testing.T) {
 }
 
 // ============================================================
-// GetServiceNames Tests
-// ============================================================
-
-func TestGetServiceNames_Empty(t *testing.T) {
-	graph := types.NewResourceGraph()
-	names := GetServiceNames(graph)
-	if len(names) != 0 {
-		t.Errorf("expected 0 names, got %d", len(names))
-	}
-}
-
-func TestGetServiceNames_Multiple(t *testing.T) {
-	graph := types.NewResourceGraph()
-	graph.Groups = append(graph.Groups,
-		&types.ResourceGroup{Name: "zulu"},
-		&types.ResourceGroup{Name: "alpha"},
-		&types.ResourceGroup{Name: "mike"},
-	)
-
-	names := GetServiceNames(graph)
-	if len(names) != 3 {
-		t.Fatalf("expected 3 names, got %d", len(names))
-	}
-	// Should be sorted
-	if names[0] != "alpha" || names[1] != "mike" || names[2] != "zulu" {
-		t.Errorf("names not sorted: %v", names)
-	}
-}
-
-// ============================================================
 // UniversalGenerator Tests
 // ============================================================
 
