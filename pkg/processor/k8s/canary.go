@@ -42,7 +42,7 @@ func (p *FlaggerCanaryProcessor) Process(ctx processor.Context, obj *unstructure
 	namespace := obj.GetNamespace()
 
 	values, deps := p.extractValues(obj)
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -108,7 +108,7 @@ func (p *FlaggerCanaryProcessor) extractValues(obj *unstructured.Unstructured) (
 
 // splitAPIVersion is defined in hpa.go (shared utility for this package).
 
-func (p *FlaggerCanaryProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
+func (p *FlaggerCanaryProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 	sanitized := processor.SanitizeServiceName(serviceName)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
@@ -135,5 +135,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, sanitized, serviceName, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName)
 }

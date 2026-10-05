@@ -13,18 +13,15 @@ const aaDeploymentTemplate = `{{- $svc := .Values -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "web.fullname" $ }}-web
+  name: web
 spec:
   replicas: {{ .replicas | default 1 }}
   selector:
-    matchLabels:
-      {{- include "web.selectorLabels" $ | nindent 6 }}
-      app.kubernetes.io/component: web
+    {{- toYaml .selector | nindent 4 }}
   template:
     metadata:
       labels:
-        {{- include "web.labels" $ | nindent 8 }}
-        app.kubernetes.io/component: web
+        {{- toYaml (merge (dict) (.podLabels | default dict) (include "web.labels" $ | fromYaml)) | nindent 8 }}
     spec:
       containers:
         {{- range .containers }}
@@ -34,7 +31,35 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
 {{- end }}
+`
+
+// aaLiteralSelectorTemplate is a workload with a literal selector using
+// matchLabels and matchExpressions.
+const aaLiteralSelectorTemplate = `apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+spec:
+  selector:
+    matchLabels:
+      app: db
+    matchExpressions:
+      - key: tier
+        operator: In
+        values: [data]
+  template:
+    metadata:
+      labels:
+        app: db
+        tier: data
+    spec:
+      containers:
+        - name: db
 `
 
 func aaChart(templates map[string]string) *types.GeneratedChart {
@@ -60,11 +85,16 @@ func TestInjectAntiAffinity_Deployment(t *testing.T) {
 		"      {{- if and $dhgAntiAffinity.enabled (not .affinity) }}\n      affinity:\n        podAntiAffinity:",
 		"preferredDuringSchedulingIgnoredDuringExecution:",
 		"requiredDuringSchedulingIgnoredDuringExecution:",
-		"                    {{- include \"web.selectorLabels\" $ | nindent 20 }}\n                    app.kubernetes.io/component: web\n",
-		"                  {{- include \"web.selectorLabels\" $ | nindent 18 }}\n                  app.kubernetes.io/component: web\n",
+		// The pods are selected by the workload's own selector.
+		"              labelSelector:\n                {{- toYaml .selector | nindent 16 }}\n",
+		"                labelSelector:\n                  {{- toYaml .selector | nindent 18 }}\n",
 		"    topologyKey: " + zoneTopologyKey,
-		// The values-driven affinity of the template is kept.
+		"          labelSelector:\n            {{- toYaml .selector | nindent 12 }}\n",
+		// Zone spread gives way to topologySpreadConstraints from values.
+		"{{- if and $dhgAntiAffinity.enabled $dhgZoneSpread.enabled (not .topologySpreadConstraints) }}",
+		// The values-driven affinity and spread constraints of the template are kept.
 		"      {{- with .affinity }}",
+		"      {{- with .topologySpreadConstraints }}",
 	} {
 		if !strings.Contains(tpl, want) {
 			t.Errorf("template misses %q:\n%s", want, tpl)
@@ -128,13 +158,29 @@ func TestReindentBlock(t *testing.T) {
 	}
 }
 
-func TestExtractSelectorMatchLabels(t *testing.T) {
+func TestWorkloadSelectorLines(t *testing.T) {
 	lines := strings.Split(aaDeploymentTemplate, "\n")
-	got, ok := extractSelectorMatchLabels(lines)
-	if !ok || len(got) != 2 || !strings.Contains(got[0], "selectorLabels") || strings.TrimSpace(got[1]) != "app.kubernetes.io/component: web" {
-		t.Errorf("extractSelectorMatchLabels = %q, %v", got, ok)
+	got, ok := workloadSelectorLines(lines)
+	if !ok || len(got) != 1 || strings.TrimSpace(got[0]) != "{{- toYaml .selector | nindent 4 }}" {
+		t.Errorf("workloadSelectorLines = %q, %v", got, ok)
 	}
-	if _, ok := extractSelectorMatchLabels([]string{"spec:", "  replicas: 1"}); ok {
+	got, ok = workloadSelectorLines(strings.Split(aaLiteralSelectorTemplate, "\n"))
+	if !ok || len(got) != 6 || strings.TrimSpace(got[0]) != "matchLabels:" || strings.TrimSpace(got[2]) != "matchExpressions:" {
+		t.Errorf("workloadSelectorLines = %q, %v", got, ok)
+	}
+	if _, ok := workloadSelectorLines([]string{"spec:", "  replicas: 1"}); ok {
 		t.Error("expected no selector")
+	}
+}
+
+func TestInjectAntiAffinity_LiteralSelector(t *testing.T) {
+	in := aaChart(map[string]string{"templates/db.yaml": aaLiteralSelectorTemplate})
+	out, res, err := InjectAntiAffinity(in, AntiAffinityOptions{Mode: AffinityModeRequired})
+	if err != nil || len(res.Injected) != 1 {
+		t.Fatalf("err=%v res=%+v", err, res)
+	}
+	want := "              labelSelector:\n                matchLabels:\n                  app: db\n                matchExpressions:\n                  - key: tier\n"
+	if tpl := out.Templates["templates/db.yaml"]; !strings.Contains(tpl, want) {
+		t.Errorf("template misses %q:\n%s", want, tpl)
 	}
 }

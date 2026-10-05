@@ -44,7 +44,6 @@ func (r *Registry) Register(p Processor) {
 	}
 }
 
-
 // GetProcessors returns all processors for a GVK, sorted by priority.
 func (r *Registry) GetProcessors(gvk schema.GroupVersionKind) []Processor {
 	r.mu.RLock()
@@ -68,7 +67,6 @@ func (r *Registry) Process(ctx Context, obj *unstructured.Unstructured) (*Result
 		return result, err
 	}
 	normalizeServiceName(result)
-	result.TemplateContent = NormalizeResourceNames(result.TemplateContent, result.ServiceName)
 	return result, nil
 }
 
@@ -140,14 +138,6 @@ var genericSkippedFields = map[string]bool{
 	"status":     true,
 }
 
-// fixedNameKinds are kinds whose metadata.name is dictated by their content
-// (CRD: <plural>.<group>, APIService: <version>.<group>); the API server
-// rejects them under any other name, so the release prefix must not be added.
-var fixedNameKinds = map[string]bool{
-	"CustomResourceDefinition": true,
-	"APIService":               true,
-}
-
 // staticBodyKinds are kinds whose body is rendered verbatim instead of being
 // moved to values.yaml. A CRD's OpenAPI schema is not chart configuration and
 // would bloat values.yaml (and every schema derived from it).
@@ -187,11 +177,10 @@ func generateGenericTemplate(ctx Context, obj *unstructured.Unstructured, servic
 	b.WriteString("kind: " + kind + "\n")
 
 	b.WriteString("metadata:\n")
-	if fixedNameKinds[kind] {
-		b.WriteString("  name: " + name + "\n")
-	} else {
-		b.WriteString("  name: {{ include \"" + ctx.ChartName + ".fullname\" . }}-" + name + "\n")
-	}
+	// The name from the input, verbatim: other objects refer to it, and some
+	// kinds (CRD: <plural>.<group>, APIService: <version>.<group>) are only
+	// accepted under the name dictated by their content.
+	b.WriteString("  name: " + ObjectName(name) + "\n")
 	if namespace != "" {
 		b.WriteString("  namespace: {{ .Release.Namespace }}\n")
 	}
@@ -319,5 +308,3 @@ func escapeTemplateString(s string) string {
 	}
 	return b.String()
 }
-
-

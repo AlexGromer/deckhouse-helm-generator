@@ -42,7 +42,7 @@ func (p *ServiceMonitorProcessor) Process(ctx processor.Context, obj *unstructur
 	namespace := obj.GetNamespace()
 
 	values, deps := p.extractValues(obj)
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -93,7 +93,7 @@ func (p *ServiceMonitorProcessor) extractValues(obj *unstructured.Unstructured) 
 	return values, deps
 }
 
-func (p *ServiceMonitorProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
+func (p *ServiceMonitorProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 	sanitized := processor.SanitizeServiceName(serviceName)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
@@ -121,5 +121,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, sanitized, serviceName, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName)
 }

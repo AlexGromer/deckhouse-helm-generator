@@ -128,7 +128,6 @@ func splitAPIVersion(apiVersion string) [2]string {
 }
 
 func (p *HPAProcessor) generateTemplate(ctx processor.Context, obj *unstructured.Unstructured, serviceName string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -136,7 +135,7 @@ func (p *HPAProcessor) generateTemplate(ctx processor.Context, obj *unstructured
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -145,7 +144,7 @@ spec:
   scaleTargetRef:
     apiVersion: {{ .scaleTargetRef.apiVersion | default "apps/v1" }}
     kind: {{ .scaleTargetRef.kind | default "Deployment" }}
-    name: %s-{{ .scaleTargetRef.name }}
+    name: {{ .scaleTargetRef.name }}
   minReplicas: {{ .minReplicas | default 1 }}
   maxReplicas: {{ .maxReplicas | default 10 }}
   {{- with .metrics }}
@@ -158,5 +157,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName, fullnameHelper)
+`, serviceName, processor.ObjectName(obj.GetName()), ctx.ChartName, serviceName)
 }

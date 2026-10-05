@@ -65,196 +65,38 @@ func (p *DeploymentProcessor) Process(ctx processor.Context, obj *unstructured.U
 
 func (p *DeploymentProcessor) extractValues(obj *unstructured.Unstructured) (map[string]interface{}, []types.ResourceKey) {
 	values := make(map[string]interface{})
-	var deps []types.ResourceKey
 
 	spec, _, _ := unstructured.NestedMap(obj.Object, "spec")
 	if spec == nil {
-		return values, deps
+		return values, nil
 	}
 
 	// Replicas (default to 1 when not specified)
-	if replicas, found, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas"); found {
+	if replicas, ok := nestedInt64(obj.Object, "spec", "replicas"); ok {
 		values["replicas"] = replicas
 	} else {
 		values["replicas"] = int64(1)
 	}
 
-	// Pod template spec
-	podSpec, _, _ := unstructured.NestedMap(obj.Object, "spec", "template", "spec")
-	if podSpec == nil {
-		return values, deps
-	}
-
-	// Pod-level securityContext
-	if podSC, found, _ := unstructured.NestedMap(obj.Object, "spec", "template", "spec", "securityContext"); found {
-		values["podSecurityContext"] = podSC
-	}
-
-	// Containers
-	containers, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
-	if len(containers) > 0 {
-		containerValues := make([]map[string]interface{}, 0, len(containers))
-		for _, c := range containers {
-			container, ok := c.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			cv := make(map[string]interface{})
-
-			// Name
-			if name, ok := container["name"].(string); ok {
-				cv["name"] = name
-			}
-
-			// Image
-			if image, ok := container["image"].(string); ok {
-				repo, tag := parseImage(image)
-				cv["image"] = map[string]interface{}{
-					"repository": repo,
-					"tag":        tag,
-				}
-			}
-
-			// Resources
-			if resources, ok := container["resources"].(map[string]interface{}); ok {
-				cv["resources"] = resources
-			}
-
-			// Ports
-			if ports, ok := container["ports"].([]interface{}); ok {
-				cv["ports"] = ports
-			}
-
-			// Environment variables
-			if env, ok := container["env"].([]interface{}); ok {
-				cv["env"] = env
-				// Detect ConfigMap/Secret references in env
-				deps = append(deps, extractEnvDependencies(env, obj.GetNamespace())...)
-			}
-
-			// EnvFrom
-			if envFrom, ok := container["envFrom"].([]interface{}); ok {
-				cv["envFrom"] = envFrom
-				deps = append(deps, extractEnvFromDependencies(envFrom, obj.GetNamespace())...)
-			}
-
-			// Volume mounts
-			if volumeMounts, ok := container["volumeMounts"].([]interface{}); ok {
-				cv["volumeMounts"] = volumeMounts
-			}
-
-			// Liveness probe
-			if probe, ok := container["livenessProbe"].(map[string]interface{}); ok {
-				cv["livenessProbe"] = probe
-			}
-
-			// Readiness probe
-			if probe, ok := container["readinessProbe"].(map[string]interface{}); ok {
-				cv["readinessProbe"] = probe
-			}
-
-			// Startup probe
-			if probe, ok := container["startupProbe"].(map[string]interface{}); ok {
-				cv["startupProbe"] = probe
-			}
-
-			// Container-level securityContext
-			if sc, ok := container["securityContext"].(map[string]interface{}); ok {
-				cv["securityContext"] = sc
-			}
-
-			containerValues = append(containerValues, cv)
-		}
-		values["containers"] = containerValues
-	}
-
-	// Volumes
-	if volumes, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "volumes"); len(volumes) > 0 {
-		values["volumes"] = volumes
-		deps = append(deps, extractVolumeDependencies(volumes, obj.GetNamespace())...)
-	}
-
-	// ServiceAccount
-	if sa, found, _ := unstructured.NestedString(obj.Object, "spec", "template", "spec", "serviceAccountName"); found && sa != "" {
-		values["serviceAccountName"] = sa
-		deps = append(deps, types.ResourceKey{
-			GVK:       schema.GroupVersionKind{Version: "v1", Kind: "ServiceAccount"},
-			Namespace: obj.GetNamespace(),
-			Name:      sa,
-		})
-	}
-
-	// ImagePullSecrets
-	if secrets, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "imagePullSecrets"); len(secrets) > 0 {
-		values["imagePullSecrets"] = secrets
-		for _, s := range secrets {
-			if secret, ok := s.(map[string]interface{}); ok {
-				if name, ok := secret["name"].(string); ok {
-					deps = append(deps, types.ResourceKey{
-						GVK:       schema.GroupVersionKind{Version: "v1", Kind: "Secret"},
-						Namespace: obj.GetNamespace(),
-						Name:      name,
-					})
-				}
-			}
-		}
-	}
-
-	// Node selector
-	if nodeSelector, found, _ := unstructured.NestedStringMap(obj.Object, "spec", "template", "spec", "nodeSelector"); found {
-		values["nodeSelector"] = nodeSelector
-	}
-
-	// Tolerations
-	if tolerations, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "tolerations"); len(tolerations) > 0 {
-		values["tolerations"] = tolerations
-	}
-
-	// Affinity
-	if affinity, found, _ := unstructured.NestedMap(obj.Object, "spec", "template", "spec", "affinity"); found {
-		values["affinity"] = affinity
-	}
-
-	// TopologySpreadConstraints
-	if tsc, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "topologySpreadConstraints"); len(tsc) > 0 {
-		values["topologySpreadConstraints"] = tsc
-	}
+	deps := extractPodTemplateValues(obj, values, "spec", "template")
+	extractWorkloadSelector(obj, values)
 
 	// Strategy
 	if strategy, found, _ := unstructured.NestedMap(obj.Object, "spec", "strategy"); found {
 		values["strategy"] = strategy
 	}
 
-	// Selector (for reference, usually shouldn't be templated)
-	if selector, found, _ := unstructured.NestedMap(obj.Object, "spec", "selector"); found {
-		values["selector"] = selector
-	}
-
-	// Pod labels
-	if labels, found, _ := unstructured.NestedStringMap(obj.Object, "spec", "template", "metadata", "labels"); found {
-		values["podLabels"] = labels
-	}
-
-	// Pod annotations
-	if annotations, found, _ := unstructured.NestedStringMap(obj.Object, "spec", "template", "metadata", "annotations"); found {
-		values["podAnnotations"] = annotations
-	}
-
 	return values, deps
 }
 
 func (p *DeploymentProcessor) generateTemplate(ctx processor.Context, obj *unstructured.Unstructured, serviceName string) string {
-	valuesPath := fmt.Sprintf(".Values.services.%s.deployment", serviceName)
-	fullnameHelper := fmt.Sprintf("{{ include \"%s.fullname\" $ }}", ctx.ChartName)
-
-	template := fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
+	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
 {{- with $svc.deployment }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -263,110 +105,14 @@ spec:
   {{- if not .autoscaling }}
   replicas: {{ .replicas | default 1 }}
   {{- end }}
-  selector:
-    matchLabels:
-      {{- include "%s.selectorLabels" $ | nindent 6 }}
-      app.kubernetes.io/component: %s
-  {{- with .strategy }}
+%s  {{- with .strategy }}
   strategy:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-  template:
-    metadata:
-      {{- with .podAnnotations }}
-      annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      labels:
-        {{- /* Chart labels win over pod labels from values: the selector must match. */}}
-        {{- $podLabels := include "%s.labels" $ | fromYaml }}
-        {{- $_ := set $podLabels "app.kubernetes.io/component" "%s" }}
-        {{- toYaml (merge $podLabels (.podLabels | default dict)) | nindent 8 }}
-    spec:
-      {{- with $.Values.global.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .serviceAccountName }}
-      serviceAccountName: {{ . }}
-      {{- end }}
-      {{- with .podSecurityContext }}
-      securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      containers:
-        {{- range .containers }}
-        - name: {{ .name }}
-          image: "{{ .image.repository }}:{{ .image.tag }}"
-          imagePullPolicy: {{ .image.pullPolicy | default "IfNotPresent" }}
-          {{- with .ports }}
-          ports:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .env }}
-          env:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .envFrom }}
-          envFrom:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .volumeMounts }}
-          volumeMounts:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .livenessProbe }}
-          livenessProbe:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .readinessProbe }}
-          readinessProbe:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .startupProbe }}
-          startupProbe:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .securityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-        {{- end }}
-      {{- with .volumes }}
-      volumes:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, serviceName, fullnameHelper, serviceName,
-		ctx.ChartName, serviceName,
-		ctx.ChartName, serviceName,
-		ctx.ChartName, serviceName)
-
-	// Remove unused variable warning
-	_ = valuesPath
-
-	return template
+`, serviceName, processor.ObjectName(obj.GetName()), ctx.ChartName, serviceName,
+		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, ""))
 }
 
 // Helper functions

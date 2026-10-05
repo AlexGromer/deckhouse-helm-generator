@@ -41,7 +41,7 @@ func (p *ClusterRoleProcessor) Process(ctx processor.Context, obj *unstructured.
 
 	values := p.extractValues(obj)
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -70,8 +70,7 @@ func (p *ClusterRoleProcessor) extractValues(obj *unstructured.Unstructured) map
 	return values
 }
 
-func (p *ClusterRoleProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
+func (p *ClusterRoleProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -79,7 +78,7 @@ func (p *ClusterRoleProcessor) generateTemplate(ctx processor.Context, serviceNa
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: %s-%s
+  name: %s
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
     app.kubernetes.io/component: %s
@@ -93,5 +92,5 @@ rules:
 {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
 }

@@ -3,7 +3,6 @@ package k8s
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -44,7 +43,7 @@ func (p *CronJobProcessor) Process(ctx processor.Context, obj *unstructured.Unst
 
 	values, deps := p.extractValues(obj)
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, name)
 
 	return &processor.Result{
 		Processed:       true,
@@ -118,44 +117,8 @@ func (p *CronJobProcessor) extractValues(obj *unstructured.Unstructured) (map[st
 		values["jobTemplate"] = jobTemplate
 	}
 
-	// Extract containers from pod template
-	if containers, ok, _ := unstructured.NestedSlice(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "containers"); ok {
-		extractedContainers := make([]map[string]interface{}, 0, len(containers))
-		for _, c := range containers {
-			cm, ok := c.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			container := make(map[string]interface{})
-			if name, ok := cm["name"].(string); ok {
-				container["name"] = name
-			}
-			if image, ok := cm["image"].(string); ok {
-				parts := strings.SplitN(image, ":", 2)
-				imageMap := map[string]interface{}{"repository": parts[0]}
-				if len(parts) > 1 {
-					imageMap["tag"] = parts[1]
-				}
-				container["image"] = imageMap
-			}
-			if resources, ok := cm["resources"].(map[string]interface{}); ok {
-				container["resources"] = resources
-			}
-			if env, ok := cm["env"].([]interface{}); ok {
-				container["env"] = env
-			}
-			if cmd, ok := cm["command"].([]interface{}); ok {
-				container["command"] = cmd
-			}
-			if args, ok := cm["args"].([]interface{}); ok {
-				container["args"] = args
-			}
-			extractedContainers = append(extractedContainers, container)
-		}
-		if len(extractedContainers) > 0 {
-			values["containers"] = extractedContainers
-		}
-	}
+	// Pod template (labels, annotations, containers, volumes, scheduling, ...)
+	deps = append(deps, extractPodTemplateValues(obj, values, "spec", "jobTemplate", "spec", "template")...)
 
 	// Extract restartPolicy
 	if policy, ok, _ := unstructured.NestedString(obj.Object, "spec", "jobTemplate", "spec", "template", "spec", "restartPolicy"); ok {
@@ -165,8 +128,7 @@ func (p *CronJobProcessor) extractValues(obj *unstructured.Unstructured) (map[st
 	return values, deps
 }
 
-func (p *CronJobProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
+func (p *CronJobProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -174,7 +136,7 @@ func (p *CronJobProcessor) generateTemplate(ctx processor.Context, serviceName s
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -215,29 +177,8 @@ spec:
       activeDeadlineSeconds: {{ . }}
       {{- end }}
       {{- end }}
-      template:
-        spec:
-          restartPolicy: {{ .restartPolicy | default "OnFailure" }}
-          {{- with .containers }}
-          containers:
-            {{- range . }}
-            - name: {{ .name }}
-              image: "{{ .image.repository }}:{{ .image.tag | default "latest" }}"
-              {{- with .command }}
-              command:
-                {{- toYaml . | nindent 16 }}
-              {{- end }}
-              {{- with .args }}
-              args:
-                {{- toYaml . | nindent 16 }}
-              {{- end }}
-              {{- with .resources }}
-              resources:
-                {{- toYaml . | nindent 16 }}
-              {{- end }}
-            {{- end }}
-          {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName,
+		podTemplate(ctx.ChartName, 6, "OnFailure"))
 }

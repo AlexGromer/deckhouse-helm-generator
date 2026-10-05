@@ -42,7 +42,7 @@ func (p *NetworkPolicyProcessor) Process(ctx processor.Context, obj *unstructure
 
 	values := p.extractValues(obj)
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -84,8 +84,7 @@ func (p *NetworkPolicyProcessor) extractValues(obj *unstructured.Unstructured) m
 	return values
 }
 
-func (p *NetworkPolicyProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
+func (p *NetworkPolicyProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -93,7 +92,7 @@ func (p *NetworkPolicyProcessor) generateTemplate(ctx processor.Context, service
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -117,5 +116,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
 }

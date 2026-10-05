@@ -106,5 +106,5 @@ data:
   {{- end }}
 {{- end }}
 {{- end }}
-`, sanitized, name, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName)
 }

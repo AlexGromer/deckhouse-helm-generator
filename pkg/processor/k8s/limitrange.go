@@ -43,7 +43,7 @@ func (p *LimitRangeProcessor) Process(ctx processor.Context, obj *unstructured.U
 
 	values := p.extractValues(obj)
 
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	return &processor.Result{
 		Processed:       true,
@@ -71,8 +71,7 @@ func (p *LimitRangeProcessor) extractValues(obj *unstructured.Unstructured) map[
 	return values
 }
 
-func (p *LimitRangeProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
-	fullnameHelper := fmt.Sprintf(`{{ include "%s.fullname" $ }}`, ctx.ChartName)
+func (p *LimitRangeProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -80,7 +79,7 @@ func (p *LimitRangeProcessor) generateTemplate(ctx processor.Context, serviceNam
 apiVersion: v1
 kind: LimitRange
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -92,5 +91,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, fullnameHelper, serviceName, ctx.ChartName, serviceName)
+`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
 }

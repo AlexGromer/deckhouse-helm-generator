@@ -125,7 +125,6 @@ func (p *ConfigMapProcessor) extractValues(ctx processor.Context, obj *unstructu
 
 func (p *ConfigMapProcessor) generateTemplate(ctx processor.Context, obj *unstructured.Unstructured, serviceName, configMapName string) string {
 	sanitizedName := sanitizeName(configMapName)
-	fullnameHelper := fmt.Sprintf("{{ include \"%s.fullname\" $ }}", ctx.ChartName)
 
 	template := fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
@@ -134,7 +133,7 @@ func (p *ConfigMapProcessor) generateTemplate(ctx processor.Context, obj *unstru
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: %s-%s
+  name: %s
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
@@ -170,7 +169,7 @@ binaryData:
 {{- end }}
 {{- end }}
 `, serviceName, sanitizedName,
-		fullnameHelper, configMapName,
+		processor.ObjectName(configMapName),
 		ctx.ChartName, serviceName)
 
 	return template

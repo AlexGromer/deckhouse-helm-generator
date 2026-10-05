@@ -250,7 +250,6 @@ func TestAntiAffinityFeature(t *testing.T) {
 			})
 			workloads := 0
 			for _, chart := range charts {
-				prefix := opsHelperPrefix(chart)
 				paths := append(templatesOfKind(chart, "Deployment"), templatesOfKind(chart, "StatefulSet")...)
 				for _, p := range paths {
 					workloads++
@@ -260,8 +259,8 @@ func TestAntiAffinityFeature(t *testing.T) {
 					}
 					// The selector is copied from spec.selector and re-indented
 					// for each place it is used.
-					for _, n := range []string{"18", "20", "14"} {
-						want := `{{- include "` + prefix + `.selectorLabels" $ | nindent ` + n + ` }}`
+					for _, n := range []string{"16", "18", "12"} {
+						want := `{{- toYaml .selector | nindent ` + n + ` }}`
 						if !strings.Contains(tpl, want) {
 							t.Errorf("%s/%s: missing %q", chart.Name, p, want)
 						}

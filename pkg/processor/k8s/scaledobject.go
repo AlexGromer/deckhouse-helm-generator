@@ -42,7 +42,7 @@ func (p *ScaledObjectProcessor) Process(ctx processor.Context, obj *unstructured
 	namespace := obj.GetNamespace()
 
 	values, deps := p.extractValues(obj)
-	template := p.generateTemplate(ctx, serviceName)
+	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 
 	metadata := map[string]interface{}{
 		"name":      name,
@@ -117,7 +117,7 @@ func (p *ScaledObjectProcessor) extractValues(obj *unstructured.Unstructured) (m
 	return values, deps
 }
 
-func (p *ScaledObjectProcessor) generateTemplate(ctx processor.Context, serviceName string) string {
+func (p *ScaledObjectProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
 	sanitized := processor.SanitizeServiceName(serviceName)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
@@ -145,5 +145,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, sanitized, serviceName, ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName)
 }
