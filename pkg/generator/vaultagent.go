@@ -2,145 +2,125 @@ package generator
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
 )
 
-// VaultAgentOptions configures Vault Agent injector annotation generation.
-type VaultAgentOptions struct {
-	VaultAddress       string
-	VaultRole          string
-	AuthPath           string
-	PrePopulate        bool
-	ExitOnRetryFailure bool
-}
-
-// VaultAgentSecret describes a secret to be injected via Vault Agent.
-type VaultAgentSecret struct {
-	Name      string
-	Namespace string
-	VaultPath string
-	// Template is an optional Vault Agent template for the secret.
-	// If empty, no agent-inject-template annotation is generated.
-	Template string
-}
-
-// GenerateVaultAgentAnnotations generates a map of Vault Agent injector annotations
-// for the given secrets and options.
-func GenerateVaultAgentAnnotations(secrets []VaultAgentSecret, opts VaultAgentOptions) map[string]string {
-	annotations := make(map[string]string)
-
-	// Core injection annotation.
-	annotations["vault.hashicorp.com/agent-inject"] = "true"
-
-	// Role annotation.
-	if opts.VaultRole != "" {
-		annotations["vault.hashicorp.com/role"] = opts.VaultRole
-	}
-
-	// Auth path annotation.
-	if opts.AuthPath != "" {
-		annotations["vault.hashicorp.com/auth-path"] = opts.AuthPath
-	}
-
-	// Pre-populate annotation.
-	if opts.PrePopulate {
-		annotations["vault.hashicorp.com/agent-pre-populate"] = "true"
-	}
-
-	// Exit on retry failure annotation.
-	if opts.ExitOnRetryFailure {
-		annotations["vault.hashicorp.com/agent-exit-on-retry-failure"] = "true"
-	}
-
-	// Per-secret annotations.
-	for _, s := range secrets {
-		if s.VaultPath != "" {
-			annotations[fmt.Sprintf("vault.hashicorp.com/agent-inject-secret-%s", s.Name)] = s.VaultPath
-		}
-		if s.Template != "" {
-			annotations[fmt.Sprintf("vault.hashicorp.com/agent-inject-template-%s", s.Name)] = s.Template
-		}
-	}
-
-	return annotations
-}
-
-// InjectVaultAgentAnnotations injects Vault Agent annotations into workload templates
-// in the chart that reference secrets from the graph. Returns the updated chart
-// (copy-on-write) and the count of workloads that received annotations.
+// HashiCorp Vault Agent injection (feature "vault-agent").
 //
-// Returns (nil, 0) if chart is nil.
-func InjectVaultAgentAnnotations(chart *types.GeneratedChart, graph *types.ResourceGraph, opts VaultAgentOptions) (*types.GeneratedChart, int) {
-	if chart == nil {
-		return nil, 0
+// Every Deployment, StatefulSet and DaemonSet that consumes Secrets gets the
+// Vault Agent injector annotations for those Secrets: the agent renders
+// <path-prefix>/<secret> to /vault/secrets/<secret> (as KEY=value lines with
+// format=env). The annotations are computed at render time from the
+// vaultAgent values block, so the role, paths and the whole injection can be
+// changed per environment.
+
+// vaultAgentPodAnnotationsHook is the pod-annotations block of the generated
+// Deployment/StatefulSet/DaemonSet templates that the feature extends.
+const vaultAgentPodAnnotationsHook = "{{- with .podAnnotations }}"
+
+// vaultAgentWorkloadKinds are the kinds whose generated templates carry the
+// pod-annotations hook.
+var vaultAgentWorkloadKinds = map[string]bool{"Deployment": true, "StatefulSet": true, "DaemonSet": true}
+
+func applyVaultAgentFeature(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {
+	kv, err := strconv.Atoi(fc.Param("kv-version"))
+	if err != nil || (kv != 1 && kv != 2) {
+		return nil, fmt.Errorf("kv-version must be 1 or 2, got %q", fc.Param("kv-version"))
+	}
+	format := fc.Param("format")
+	if format != "env" && format != "raw" {
+		return nil, fmt.Errorf("format must be env or raw, got %q", format)
+	}
+	if fc.Param("path-prefix") == "" {
+		return nil, fmt.Errorf("path-prefix must not be empty")
 	}
 
-	result := copyChartTemplates(chart)
-	count := 0
+	// Named templates are global across an umbrella chart and its subcharts
+	// (and library-mode wrappers share the library prefix): key it by chart.
+	define := chart.Name + ".vaultAgent.podAnnotations"
 
-	// Collect Vault secrets from the graph (Secrets referenced by workloads).
-	var secrets []VaultAgentSecret
-	if graph != nil {
-		for _, r := range graph.Resources {
-			if r.Original.GVK.Kind != "Secret" {
-				continue
-			}
-			obj := r.Original.Object
-			secrets = append(secrets, VaultAgentSecret{
-				Name:      obj.GetName(),
-				Namespace: obj.GetNamespace(),
-				VaultPath: fmt.Sprintf("secret/data/%s/%s", obj.GetNamespace(), obj.GetName()),
-			})
-		}
-	}
-
-	annotations := GenerateVaultAgentAnnotations(secrets, opts)
-
-	for path, content := range result.Templates {
-		if !isWorkloadTemplate(content) {
+	out := cloneChart(chart)
+	patched := 0
+	for _, w := range secChartWorkloads(chart, fc.Graph) {
+		if !vaultAgentWorkloadKinds[w.kind] {
 			continue
 		}
-		updated := injectVaultAnnotationsIntoTemplate(content, annotations)
-		if updated != content {
-			result.Templates[path] = updated
-			count++
+		refs := secSecretRefs(w.podSpec)
+		if len(refs) == 0 {
+			continue
 		}
+		path := w.res.TemplatePath
+		content := out.Templates[path]
+		if strings.Count(content, vaultAgentPodAnnotationsHook) != 1 {
+			continue // template does not have the expected shape; leave it alone
+		}
+		names := make([]string, 0, len(refs))
+		for _, r := range refs {
+			names = append(names, fmt.Sprintf("%q", r.Name))
+		}
+		replacement := fmt.Sprintf(`{{- with include %q (dict "root" $ "podAnnotations" .podAnnotations "secrets" (list %s)) | fromYaml }}`,
+			define, strings.Join(names, " "))
+		out.Templates[path] = strings.Replace(content, vaultAgentPodAnnotationsHook, replacement, 1)
+		patched++
+	}
+	if patched == 0 {
+		return chart, nil
 	}
 
-	return result, count
+	role := fc.Param("role")
+	if role == "" {
+		role = chart.Name
+	}
+	if err := secAddValues(out, "vaultAgent",
+		"# HashiCorp Vault Agent injection (dhg feature: vault-agent).\n"+
+			"# Workloads using a Secret <name> get it from <secretPathPrefix>/<name>\n"+
+			"# rendered to /vault/secrets/<name> (secretFormat env: KEY=value lines).\n",
+		map[string]interface{}{
+			"enabled":          true,
+			"role":             role,
+			"authPath":         fc.Param("auth-path"),
+			"secretPathPrefix": fc.Param("path-prefix"),
+			"kvVersion":        kv,
+			"secretFormat":     format,
+			"prePopulateOnly":  fc.BoolParam("pre-populate-only"),
+			"extraAnnotations": map[string]interface{}{},
+		}); err != nil {
+		return nil, err
+	}
+	tplPath := "templates/_vault-agent.tpl"
+	if err := secAddTemplate(out, tplPath, vaultAgentHelperTemplate(define)); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
-// injectVaultAnnotationsIntoTemplate injects Vault Agent annotations into a template's
-// spec.template.metadata.annotations section (for Deployments/StatefulSets/etc).
-func injectVaultAnnotationsIntoTemplate(content string, annotations map[string]string) string {
-	if len(annotations) == 0 {
-		return content
-	}
-
-	// Build annotation block.
-	var sb strings.Builder
-	for k, v := range annotations {
-		sb.WriteString(fmt.Sprintf("        %s: %q\n", k, v))
-	}
-	annotationBlock := sb.String()
-
-	// Look for "annotations: {}" pattern (empty annotations).
-	oldAnnotations := "      annotations: {}"
-	newAnnotations := "      annotations:\n" + annotationBlock
-
-	if strings.Contains(content, oldAnnotations) {
-		return strings.Replace(content, oldAnnotations, newAnnotations, 1)
-	}
-
-	// Look for existing "annotations:" block under spec.template.metadata.
-	if strings.Contains(content, "      annotations:") {
-		return strings.Replace(content,
-			"      annotations:",
-			"      annotations:\n"+annotationBlock+"      # end vault annotations",
-			1)
-	}
-
-	return content
+// vaultAgentHelperTemplate renders the named template that merges the Vault
+// Agent annotations with the workload's own pod annotations (the latter win).
+func vaultAgentHelperTemplate(define string) string {
+	return `{{- /* Generated by dhg feature "vault-agent". Requires the Vault Agent injector. */}}
+{{- define "` + define + `" -}}
+{{- $annotations := dict -}}
+{{- $va := .root.Values.vaultAgent -}}
+{{- if and $va $va.enabled -}}
+{{- $_ := set $annotations "vault.hashicorp.com/agent-inject" "true" -}}
+{{- $_ := set $annotations "vault.hashicorp.com/role" (toString $va.role) -}}
+{{- with $va.authPath }}{{ $_ := set $annotations "vault.hashicorp.com/auth-path" (toString .) }}{{ end -}}
+{{- if $va.prePopulateOnly }}{{ $_ := set $annotations "vault.hashicorp.com/agent-pre-populate-only" "true" }}{{ end -}}
+{{- $data := ternary ".Data.data" ".Data" (eq (int ($va.kvVersion | default 2)) 2) -}}
+{{- range .secrets -}}
+{{- $path := printf "%s/%s" (trimSuffix "/" (toString $va.secretPathPrefix)) . -}}
+{{- $_ := set $annotations (printf "vault.hashicorp.com/agent-inject-secret-%s" .) $path -}}
+{{- if eq (toString $va.secretFormat) "env" -}}
+{{- $_ := set $annotations (printf "vault.hashicorp.com/agent-inject-template-%s" .) (printf "{{- with secret %q -}}\n{{- range $k, $v := %s }}\n{{ $k }}={{ $v }}\n{{- end }}\n{{- end }}\n" $path $data) -}}
+{{- end -}}
+{{- end -}}
+{{- with $va.extraAnnotations }}{{ $annotations = mergeOverwrite $annotations . }}{{ end -}}
+{{- end -}}
+{{- with .podAnnotations }}{{ $annotations = mergeOverwrite $annotations . }}{{ end -}}
+{{- toYaml $annotations -}}
+{{- end -}}
+`
 }
