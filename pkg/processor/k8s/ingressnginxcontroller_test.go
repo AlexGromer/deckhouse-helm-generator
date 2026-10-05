@@ -218,8 +218,8 @@ func TestIngressNginxControllerProcessor_Template(t *testing.T) {
 
 	testutil.AssertContains(t, tpl, "apiVersion: deckhouse.io/v1", "template should have apiVersion")
 	testutil.AssertContains(t, tpl, "kind: IngressNginxController", "template should have kind")
-	testutil.AssertContains(t, tpl, ".inlet", "template should reference inlet")
-	testutil.AssertContains(t, tpl, ".ingressClass", "template should reference ingressClass")
+	testutil.AssertContains(t, tpl, `"inlet"`, "template should reference inlet")
+	testutil.AssertContains(t, tpl, `"ingressClass"`, "template should reference ingressClass")
 }
 
 // ============================================================

@@ -85,18 +85,7 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  applicationDomain: {{ .applicationDomain }}
-  {{- if .sendAuthorizationHeader }}
-  sendAuthorizationHeader: {{ .sendAuthorizationHeader }}
-  {{- end }}
-  {{- with .applicationIngressClassName }}
-  applicationIngressClassName: {{ . }}
-  {{- end }}
-  {{- with .allowedGroups }}
-  allowedGroups:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+%s{{- end }}
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "applicationDomain", "sendAuthorizationHeader", "applicationIngressClassName", "allowedGroups"))
 }

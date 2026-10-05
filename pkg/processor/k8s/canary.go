@@ -121,19 +121,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .targetRef }}
-  targetRef:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .progressDeadlineSeconds }}
-  progressDeadlineSeconds: {{ . }}
-  {{- end }}
-  {{- with .analysis }}
-  analysis:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "targetRef", "analysis", "progressDeadlineSeconds"))
 }

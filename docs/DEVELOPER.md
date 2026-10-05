@@ -389,7 +389,7 @@ go test ./pkg/generator -run TestApplyFeatures -v
 - `helm lint --strict`, `helm template --include-crds`, все `values-*.yaml`;
 - число объектов не меньше входного; селекторы workload'ов совпадают с метками pod'ов;
 - ссылки (ConfigMap/Secret/PVC/SA, backend'ы Ingress, roleRef, …) и селекторы Service/PDB/NetworkPolicy продолжают разрешаться (`integrity_test.go`);
-- `helm unittest` (если установлен плагин), post-renderer (если есть kustomize/kubectl);
+- `helm unittest` (если установлен плагин), post-renderer и `kustomize build` overlay'ев (если есть kustomize/kubectl);
 - источники `cluster` (fake API-сервер) и `gitops` (локальный репозиторий).
 
 Новый вход — каталог в `tests/integration/fixtures/` или `examples/`: golden подхватит его автоматически.

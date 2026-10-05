@@ -13,8 +13,10 @@ type object map[string]interface{}
 func parseStream(stream string) []object {
 	var out []object
 	for _, doc := range strings.Split(stream, "\n---") {
+		// Splitting consumed the line break that ends the document; a
+		// trailing "|" block scalar needs it to keep its final newline.
 		var obj map[string]interface{}
-		if err := yaml.Unmarshal([]byte(doc), &obj); err == nil && obj != nil && obj["kind"] != nil {
+		if err := yaml.Unmarshal([]byte(doc+"\n"), &obj); err == nil && obj != nil && obj["kind"] != nil {
 			out = append(out, obj)
 		}
 	}

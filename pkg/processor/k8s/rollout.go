@@ -91,16 +91,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .strategy }}
-  strategy:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .template }}
-  template:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "strategy", "template"))
 }

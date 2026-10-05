@@ -100,6 +100,13 @@ func TestUserProcessor_Password_NotInValues(t *testing.T) {
 	if _, ok := result.Values["password"]; ok {
 		t.Error("Password should NOT be in values (sensitive field)")
 	}
+	spec, _ := result.Values["spec"].(map[string]interface{})
+	if _, ok := spec["password"]; ok {
+		t.Error("Password should NOT be in values.spec (sensitive field)")
+	}
+	if _, ok, _ := unstructured.NestedString(obj.Object, "spec", "password"); !ok {
+		t.Error("processing must not modify the input object")
+	}
 }
 
 func TestUserProcessor_Password_InMetadata(t *testing.T) {

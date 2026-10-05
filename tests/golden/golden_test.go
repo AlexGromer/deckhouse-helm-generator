@@ -104,29 +104,31 @@ func sortedKeys(m map[string]string) []string {
 type scenario struct {
 	name string
 	args []string
+	// fidelity: rendering with default values must reproduce the input.
+	fidelity bool
 }
 
 var scenarios = []scenario{
-	{"universal", []string{"--mode", "universal"}},
-	{"universal-full", []string{"--mode", "universal", "--include-schema", "--include-tests", "--hooks", "--values-flat"}},
-	{"separate", []string{"--mode", "separate", "--include-schema", "--include-tests"}},
-	{"library", []string{"--mode", "library", "--include-schema", "--include-tests"}},
-	{"umbrella", []string{"--mode", "umbrella", "--include-schema", "--include-tests"}},
-	{"deckhouse-module", []string{"--mode", "universal", "--deckhouse-module"}},
+	{"universal", []string{"--mode", "universal"}, true},
+	{"universal-full", []string{"--mode", "universal", "--include-schema", "--include-tests", "--hooks", "--values-flat"}, false},
+	{"separate", []string{"--mode", "separate", "--include-schema", "--include-tests"}, true},
+	{"library", []string{"--mode", "library", "--include-schema", "--include-tests"}, true},
+	{"umbrella", []string{"--mode", "umbrella", "--include-schema", "--include-tests"}, true},
+	{"deckhouse-module", []string{"--mode", "universal", "--deckhouse-module"}, false},
 	// Post-processing flags of `dhg generate`.
-	{"env-values", []string{"--env-values", "--include-schema"}},
-	{"airgap", []string{"--airgap-registry", "registry.example.com"}},
-	{"namespace-resources", []string{"--namespace-resources"}},
-	{"multi-tenant", []string{"--multi-tenant"}},
-	{"feature-flags", []string{"--feature-flags"}},
-	{"cloud-aws", []string{"--cloud-provider", "aws"}},
-	{"detect-ingress", []string{"--detect-ingress"}},
-	{"spot", []string{"--spot", "--cloud-provider", "gcp"}},
-	{"auto-deps", []string{"--auto-deps"}},
-	{"kustomize", []string{"--kustomize"}},
-	{"monorepo", []string{"--monorepo"}},
-	{"post-renderer", []string{"--post-renderer"}},
-	{"separate-post", []string{"--mode", "separate", "--env-values", "--namespace-resources", "--feature-flags", "--spot"}},
+	{"env-values", []string{"--env-values", "--include-schema"}, false},
+	{"airgap", []string{"--airgap-registry", "registry.example.com"}, false},
+	{"namespace-resources", []string{"--namespace-resources"}, false},
+	{"multi-tenant", []string{"--multi-tenant"}, false},
+	{"feature-flags", []string{"--feature-flags"}, false},
+	{"cloud-aws", []string{"--cloud-provider", "aws"}, false},
+	{"detect-ingress", []string{"--detect-ingress"}, false},
+	{"spot", []string{"--spot", "--cloud-provider", "gcp"}, false},
+	{"auto-deps", []string{"--auto-deps"}, false},
+	{"kustomize", []string{"--kustomize"}, false},
+	{"monorepo", []string{"--monorepo"}, false},
+	{"post-renderer", []string{"--post-renderer"}, false},
+	{"separate-post", []string{"--mode", "separate", "--env-values", "--namespace-resources", "--feature-flags", "--spot"}, false},
 }
 
 func TestGeneratedChartsPassHelm(t *testing.T) {
@@ -146,7 +148,7 @@ func TestGeneratedChartsPassHelm(t *testing.T) {
 					t.Errorf("rendered %d objects, want at least %d (one per input manifest)", rendered, want)
 				}
 				if complete {
-					checkReleaseIntegrity(t, helm, input, out)
+					checkReleaseIntegrity(t, helm, input, out, sc.fidelity)
 				}
 			})
 		}
@@ -155,7 +157,7 @@ func TestGeneratedChartsPassHelm(t *testing.T) {
 
 // checkReleaseIntegrity renders every top-level chart and checks references
 // and selectors against the input manifests.
-func checkReleaseIntegrity(t *testing.T, helm, input, out string) {
+func checkReleaseIntegrity(t *testing.T, helm, input, out string, fidelity bool) {
 	t.Helper()
 	var rendered []object
 	for _, chart := range findCharts(t, out) {
@@ -179,6 +181,11 @@ func checkReleaseIntegrity(t *testing.T, helm, input, out string) {
 	})
 	for _, p := range checkIntegrity(inputs, rendered) {
 		t.Errorf("integrity: %s", p)
+	}
+	if fidelity {
+		for _, p := range checkFidelity(inputs, rendered) {
+			t.Errorf("fidelity: %s", p)
+		}
 	}
 }
 
@@ -245,6 +252,25 @@ func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 					t.Errorf("helm template %s with post-renderer %s failed:\n%s", rel, env, out)
 				} else if countObjects(out) != n {
 					t.Errorf("post-renderer %s changed the object count: %d, want %d", env, countObjects(out), n)
+				}
+			}
+		}
+
+		// A generated Kustomize layout must build for every overlay and keep
+		// one object per base manifest.
+		if layout := filepath.Join(chart, "kustomize"); fileExists(layout) && hasKustomize() {
+			base, _ := filepath.Glob(filepath.Join(layout, "base", "*.yaml"))
+			want := len(base) - 1 // kustomization.yaml
+			overlays, _ := filepath.Glob(filepath.Join(layout, "overlays", "*"))
+			if want < 1 || len(overlays) == 0 {
+				t.Errorf("kustomize layout %s is incomplete: %d manifests, %d overlays", rel, want, len(overlays))
+			}
+			for _, overlay := range overlays {
+				out, err := kustomizeBuild(overlay)
+				if err != nil {
+					t.Errorf("kustomize build %s failed:\n%s", overlay, out)
+				} else if got := countObjects(out); got != want {
+					t.Errorf("kustomize build %s: %d objects, want %d", overlay, got, want)
 				}
 			}
 		}
@@ -348,6 +374,13 @@ func hasKustomize() bool {
 		}
 	}
 	return false
+}
+
+func kustomizeBuild(dir string) (string, error) {
+	if _, err := exec.LookPath("kustomize"); err == nil {
+		return run("kustomize", "build", dir)
+	}
+	return run("kubectl", "kustomize", dir)
 }
 
 // countObjects counts top-level Kubernetes objects in a YAML stream.

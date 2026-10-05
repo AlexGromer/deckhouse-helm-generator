@@ -297,7 +297,8 @@ func TestExternalFileManager_AddFromProcessed(t *testing.T) {
 		pv := &ProcessedValue{
 			ShouldExternalize: true,
 			ExternalPath:      "files/config_json.json",
-			FormattedValue:    `{"key": "value"}`,
+			Original:          `{"key":"value"}`,
+			FormattedValue:    "{\n  \"key\": \"value\"\n}",
 			DetectedType:      DataTypeJSON,
 			Checksum:          "deadbeef",
 		}
@@ -312,8 +313,10 @@ func TestExternalFileManager_AddFromProcessed(t *testing.T) {
 		if file.Path != pv.ExternalPath {
 			t.Errorf("file.Path = %q, want %q", file.Path, pv.ExternalPath)
 		}
-		if file.Content != pv.FormattedValue {
-			t.Errorf("file.Content = %q, want %q", file.Content, pv.FormattedValue)
+		// The external file holds the original bytes: it becomes the
+		// ConfigMap value, which must not change.
+		if file.Content != pv.Original {
+			t.Errorf("file.Content = %q, want the original %q", file.Content, pv.Original)
 		}
 		if file.SourceKey != "config.json" {
 			t.Errorf("file.SourceKey = %q, want %q", file.SourceKey, "config.json")

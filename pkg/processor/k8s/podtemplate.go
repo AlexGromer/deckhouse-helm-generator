@@ -112,10 +112,13 @@ func extractContainerValues(container map[string]interface{}, namespace string) 
 		cv["name"] = name
 	}
 	if image, ok := container["image"].(string); ok {
-		repo, tag := parseImage(image)
-		img := map[string]interface{}{
-			"repository": repo,
-			"tag":        tag,
+		repo, tag, digest := parseImage(image)
+		img := map[string]interface{}{"repository": repo}
+		if tag != "" {
+			img["tag"] = tag
+		}
+		if digest != "" {
+			img["digest"] = digest
 		}
 		if policy, ok := container["imagePullPolicy"].(string); ok && policy != "" {
 			img["pullPolicy"] = policy
@@ -251,8 +254,10 @@ func containerTemplate(indent int) string {
 	var b strings.Builder
 	w := func(s string) { b.WriteString(pad + s + "\n") }
 	w(`- name: {{ .name }}`)
-	w(`  image: "{{ .image.repository }}:{{ .image.tag }}"`)
-	w(`  imagePullPolicy: {{ .image.pullPolicy | default "IfNotPresent" }}`)
+	w(`  image: "{{ .image.repository }}{{ with .image.tag }}:{{ . }}{{ end }}{{ with .image.digest }}@{{ . }}{{ end }}"`)
+	w(`  {{- with .image.pullPolicy }}`)
+	w(`  imagePullPolicy: {{ . }}`)
+	w(`  {{- end }}`)
 	for _, field := range []string{
 		"command", "args", "workingDir", "ports", "env", "envFrom", "volumeMounts",
 		"resources", "livenessProbe", "readinessProbe", "startupProbe", "lifecycle",

@@ -192,25 +192,25 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
     app.kubernetes.io/component: %s%s
 spec:
-  {{- with .completions }}
-  completions: {{ . }}
+  {{- if hasKey . "completions" }}
+  completions: {{ .completions }}
   {{- end }}
-  {{- with .parallelism }}
-  parallelism: {{ . }}
+  {{- if hasKey . "parallelism" }}
+  parallelism: {{ .parallelism }}
   {{- end }}
-  {{- with .backoffLimit }}
-  backoffLimit: {{ . }}
+  {{- if hasKey . "backoffLimit" }}
+  backoffLimit: {{ .backoffLimit }}
   {{- end }}
-  {{- with .activeDeadlineSeconds }}
-  activeDeadlineSeconds: {{ . }}
+  {{- if hasKey . "activeDeadlineSeconds" }}
+  activeDeadlineSeconds: {{ .activeDeadlineSeconds }}
   {{- end }}
-  {{- with .ttl }}
-  ttlSecondsAfterFinished: {{ . }}
+  {{- if hasKey . "ttl" }}
+  ttlSecondsAfterFinished: {{ .ttl }}
   {{- end }}
   {{- with .completionMode }}
   completionMode: {{ . }}
   {{- end }}
-  {{- if .suspend }}
+  {{- if hasKey . "suspend" }}
   suspend: {{ .suspend }}
   {{- end }}
 %s{{- end }}

@@ -106,21 +106,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  secretName: {{ .secretName }}
-  issuerRef:
-    {{- toYaml .issuerRef | nindent 4 }}
-  {{- with .dnsNames }}
-  dnsNames:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .duration }}
-  duration: {{ . }}
-  {{- end }}
-  {{- with .renewBefore }}
-  renewBefore: {{ . }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "dnsNames", "issuerRef", "secretName", "duration", "renewBefore"))
 }

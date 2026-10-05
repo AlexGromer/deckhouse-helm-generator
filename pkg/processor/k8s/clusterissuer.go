@@ -93,20 +93,8 @@ metadata:
   name: %s
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .acme }}
-  acme:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .selfSigned }}
-  selfSigned:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .ca }}
-  ca:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "acme", "selfSigned", "ca"))
 }

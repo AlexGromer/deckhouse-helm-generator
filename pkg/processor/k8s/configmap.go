@@ -91,11 +91,11 @@ func (p *ConfigMapProcessor) extractValues(ctx processor.Context, obj *unstructu
 						}
 					} else {
 						// Fallback to inline if external file creation failed
-						processedData[key] = pv.FormattedValue
+						processedData[key] = pv.Original
 					}
 				} else {
 					// Keep inline
-					processedData[key] = pv.FormattedValue
+					processedData[key] = pv.Original
 				}
 			}
 			values["data"] = processedData
@@ -147,18 +147,13 @@ immutable: {{ . }}
 {{- end }}
 {{- with $cm.data }}
 data:
+  {{- /* JSON strings are YAML scalars that keep the value byte for byte
+         (a "|" block scalar would append a newline). */}}
   {{- range $key, $value := . }}
-  {{- if kindIs "map" $value }}
-  {{- if hasKey $value "_externalFile" }}
-  {{ $key }}: |
-    {{- $.Files.Get $value._externalFile | nindent 4 }}
+  {{- if and (kindIs "map" $value) (hasKey $value "_externalFile") }}
+  {{ $key | toJson }}: {{ $.Files.Get $value._externalFile | toJson }}
   {{- else }}
-  {{ $key }}: |
-    {{- $value | nindent 4 }}
-  {{- end }}
-  {{- else }}
-  {{ $key }}: |
-    {{- $value | nindent 4 }}
+  {{ $key | toJson }}: {{ $value | toString | toJson }}
   {{- end }}
   {{- end }}
 {{- end }}

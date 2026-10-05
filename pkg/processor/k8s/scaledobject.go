@@ -130,20 +130,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  scaleTargetRef:
-    {{- toYaml .scaleTargetRef | nindent 4 }}
-  {{- with .minReplicaCount }}
-  minReplicaCount: {{ . }}
-  {{- end }}
-  {{- with .maxReplicaCount }}
-  maxReplicaCount: {{ . }}
-  {{- end }}
-  {{- with .triggers }}
-  triggers:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "scaleTargetRef", "minReplicaCount", "maxReplicaCount", "triggers"))
 }

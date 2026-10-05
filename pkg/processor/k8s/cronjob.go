@@ -149,32 +149,32 @@ spec:
   {{- with .concurrencyPolicy }}
   concurrencyPolicy: {{ . }}
   {{- end }}
-  {{- if .suspend }}
+  {{- if hasKey . "suspend" }}
   suspend: {{ .suspend }}
   {{- end }}
-  {{- with .successfulJobsHistoryLimit }}
-  successfulJobsHistoryLimit: {{ . }}
+  {{- if hasKey . "successfulJobsHistoryLimit" }}
+  successfulJobsHistoryLimit: {{ .successfulJobsHistoryLimit }}
   {{- end }}
-  {{- with .failedJobsHistoryLimit }}
-  failedJobsHistoryLimit: {{ . }}
+  {{- if hasKey . "failedJobsHistoryLimit" }}
+  failedJobsHistoryLimit: {{ .failedJobsHistoryLimit }}
   {{- end }}
-  {{- with .startingDeadlineSeconds }}
-  startingDeadlineSeconds: {{ . }}
+  {{- if hasKey . "startingDeadlineSeconds" }}
+  startingDeadlineSeconds: {{ .startingDeadlineSeconds }}
   {{- end }}
   jobTemplate:
     spec:
       {{- with .jobTemplate }}
-      {{- with .completions }}
-      completions: {{ . }}
+      {{- if hasKey . "completions" }}
+      completions: {{ .completions }}
       {{- end }}
-      {{- with .parallelism }}
-      parallelism: {{ . }}
+      {{- if hasKey . "parallelism" }}
+      parallelism: {{ .parallelism }}
       {{- end }}
-      {{- with .backoffLimit }}
-      backoffLimit: {{ . }}
+      {{- if hasKey . "backoffLimit" }}
+      backoffLimit: {{ .backoffLimit }}
       {{- end }}
-      {{- with .activeDeadlineSeconds }}
-      activeDeadlineSeconds: {{ . }}
+      {{- if hasKey . "activeDeadlineSeconds" }}
+      activeDeadlineSeconds: {{ .activeDeadlineSeconds }}
       {{- end }}
       {{- end }}
 %s{{- end }}

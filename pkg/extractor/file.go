@@ -167,8 +167,10 @@ func (e *FileExtractor) parseYAMLStream(ctx context.Context, reader io.Reader, s
 			return ctx.Err()
 		}
 
-		doc = bytes.TrimSpace(doc)
-		if len(doc) == 0 {
+		// Trim only to detect empty documents: trimming the document itself
+		// would drop the line break that ends a trailing "|" block scalar,
+		// and with it the final newline of the value.
+		if len(bytes.TrimSpace(doc)) == 0 {
 			continue
 		}
 
@@ -295,7 +297,9 @@ func splitYAMLDocuments(content []byte) [][]byte {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.TrimSpace(line) == "---" {
+		// A separator starts at column 0; an indented "---" belongs to a
+		// block scalar (e.g. a YAML file embedded in a ConfigMap).
+		if isDocumentSeparator(line) {
 			if currentDoc.Len() > 0 {
 				documents = append(documents, bytes.Clone(currentDoc.Bytes()))
 				currentDoc.Reset()
@@ -312,6 +316,17 @@ func splitYAMLDocuments(content []byte) [][]byte {
 	}
 
 	return documents
+}
+
+// isDocumentSeparator reports whether line is a YAML document marker:
+// "---" at column 0, optionally followed by whitespace or a comment.
+func isDocumentSeparator(line string) bool {
+	rest, ok := strings.CutPrefix(line, "---")
+	if !ok {
+		return false
+	}
+	rest = strings.TrimSpace(rest)
+	return rest == "" || strings.HasPrefix(rest, "#")
 }
 
 // isYAMLFile checks if a file has a YAML extension.

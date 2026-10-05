@@ -96,20 +96,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .secretTargetRef }}
-  secretTargetRef:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .env }}
-  env:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .podIdentity }}
-  podIdentity:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "secretTargetRef", "env", "podIdentity"))
 }

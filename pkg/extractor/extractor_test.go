@@ -478,6 +478,17 @@ func TestSplitYAMLDocuments_SingleDoc(t *testing.T) {
 	}
 }
 
+func TestSplitYAMLDocuments_IndentedSeparatorIsData(t *testing.T) {
+	input := []byte("data:\n  a: |\n    x\n    ---\n    y\n--- # next\nkind: B\n")
+	docs := splitYAMLDocuments(input)
+	if len(docs) != 2 {
+		t.Fatalf("got %d docs; want 2", len(docs))
+	}
+	if !strings.Contains(string(docs[0]), "    ---\n") {
+		t.Errorf("indented separator was not kept in the block scalar: %q", docs[0])
+	}
+}
+
 // ── isYAMLFile ───────────────────────────────────────────────────────────────
 
 func TestIsYAMLFile(t *testing.T) {

@@ -98,11 +98,11 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
     app.kubernetes.io/component: %s
 spec:
-  {{- with .minAvailable }}
-  minAvailable: {{ . }}
+  {{- if hasKey . "minAvailable" }}
+  minAvailable: {{ .minAvailable }}
   {{- end }}
-  {{- with .maxUnavailable }}
-  maxUnavailable: {{ . }}
+  {{- if hasKey . "maxUnavailable" }}
+  maxUnavailable: {{ .maxUnavailable }}
   {{- end }}
   {{- with .unhealthyPodEvictionPolicy }}
   unhealthyPodEvictionPolicy: {{ . }}

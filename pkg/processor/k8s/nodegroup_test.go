@@ -190,7 +190,7 @@ func TestNodeGroupProcessor_Template(t *testing.T) {
 	}
 	testutil.AssertContains(t, tpl, "apiVersion: deckhouse.io/v1", "template apiVersion")
 	testutil.AssertContains(t, tpl, "kind: NodeGroup", "template kind")
-	testutil.AssertContains(t, tpl, ".nodeType", "template should reference nodeType")
+	testutil.AssertContains(t, tpl, `"nodeType"`, "template should reference nodeType")
 }
 
 func TestNodeGroupProcessor_ServiceName(t *testing.T) {

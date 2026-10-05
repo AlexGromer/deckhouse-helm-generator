@@ -101,8 +101,7 @@ metadata:
     grafana_dashboard: "1"
 data:
   {{- range $key, $value := .dashboards }}
-  {{ $key }}: |
-    {{ $value | nindent 4 }}
+  {{ $key | toJson }}: {{ $value | toString | toJson }}
   {{- end }}
 {{- end }}
 {{- end }}

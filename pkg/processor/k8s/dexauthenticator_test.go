@@ -117,7 +117,7 @@ func TestDexAuthenticatorProcessor_Template(t *testing.T) {
 	tpl := result.TemplateContent
 	testutil.AssertContains(t, tpl, "apiVersion: deckhouse.io/v1", "apiVersion")
 	testutil.AssertContains(t, tpl, "kind: DexAuthenticator", "kind")
-	testutil.AssertContains(t, tpl, ".applicationDomain", "applicationDomain ref")
+	testutil.AssertContains(t, tpl, `"applicationDomain"`, "applicationDomain ref")
 }
 
 func TestDexAuthenticatorProcessor_ServiceName(t *testing.T) {

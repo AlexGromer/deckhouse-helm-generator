@@ -103,7 +103,7 @@ metadata:
     app.kubernetes.io/component: %s
 spec:
   {{- if not .autoscaling }}
-  replicas: {{ .replicas | default 1 }}
+  replicas: {{ if hasKey . "replicas" }}{{ .replicas }}{{ else }}1{{ end }}
   {{- end }}
 %s  {{- with .strategy }}
   strategy:
@@ -117,26 +117,19 @@ spec:
 
 // Helper functions
 
-func parseImage(image string) (repository, tag string) {
-	// Handle digest format
-	if strings.Contains(image, "@") {
-		parts := strings.SplitN(image, "@", 2)
-		return parts[0], parts[1]
+// parseImage splits an image reference into repository, tag and digest
+// ("registry:5000/app:1.0@sha256:…" → "registry:5000/app", "1.0", "sha256:…").
+// Missing parts are empty: the reference is reassembled exactly as written.
+func parseImage(image string) (repository, tag, digest string) {
+	if i := strings.Index(image, "@"); i >= 0 {
+		image, digest = image[:i], image[i+1:]
 	}
-
-	// Handle tag format
 	lastColon := strings.LastIndex(image, ":")
-	if lastColon == -1 {
-		return image, "latest"
+	// A colon followed by a path is a registry port, not a tag.
+	if lastColon == -1 || strings.Contains(image[lastColon+1:], "/") {
+		return image, "", digest
 	}
-
-	// Check if colon is part of port (e.g., registry:5000/image)
-	afterColon := image[lastColon+1:]
-	if strings.Contains(afterColon, "/") {
-		return image, "latest"
-	}
-
-	return image[:lastColon], afterColon
+	return image[:lastColon], image[lastColon+1:], digest
 }
 
 func extractEnvDependencies(env []interface{}, namespace string) []types.ResourceKey {

@@ -88,15 +88,7 @@ metadata:
   name: %s
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  enabled: {{ $svc.moduleConfig.enabled }}
-  {{- with $svc.moduleConfig.version }}
-  version: {{ . }}
-  {{- end }}
-  {{- with $svc.moduleConfig.settings }}
-  settings:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(obj.GetName()), ctx.ChartName)
+%s{{- end }}
+`, sanitized, processor.ObjectName(obj.GetName()), ctx.ChartName,
+		processor.SpecOverlay("$svc.moduleConfig", "enabled", "version", "settings"))
 }

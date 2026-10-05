@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
 	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer/pattern"
@@ -788,7 +789,8 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 			fmt.Printf("\n[5d/5] Generating Kustomize layout...\n")
 		}
 		for _, chart := range charts {
-			kustomizeOutput, err := generator.GenerateKustomizeLayout(chart)
+			objects := chartObjects(chart, processedResources)
+			kustomizeOutput, err := generator.GenerateKustomizeLayout(objects)
 			if err != nil {
 				if opts.verbose {
 					fmt.Fprintf(os.Stderr, "  Warning: Kustomize generation skipped for %s: %v\n", chart.Name, err)
@@ -796,27 +798,13 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 				continue
 			}
 			kustomizeDir := filepath.Join(opts.outputDir, chart.Name, "kustomize")
-			// Write base
-			baseDir := filepath.Join(kustomizeDir, "base")
-			if err := os.MkdirAll(baseDir, 0755); err != nil {
-				return fmt.Errorf("failed to create base dir: %w", err)
+			dirs := []*generator.KustomizeDir{kustomizeOutput.Base}
+			for _, overlay := range kustomizeOutput.Overlays {
+				dirs = append(dirs, overlay)
 			}
-			if err := os.WriteFile(filepath.Join(baseDir, "kustomization.yaml"), []byte(kustomizeOutput.Base.Kustomization), 0644); err != nil {
-				return fmt.Errorf("failed to write base kustomization: %w", err)
-			}
-			// Write overlays
-			for envName, overlay := range kustomizeOutput.Overlays {
-				overlayDir := filepath.Join(kustomizeDir, "overlays", envName)
-				if err := os.MkdirAll(overlayDir, 0755); err != nil {
-					return fmt.Errorf("failed to create overlay dir: %w", err)
-				}
-				if err := os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(overlay.Kustomization), 0644); err != nil {
-					return fmt.Errorf("failed to write overlay kustomization: %w", err)
-				}
-				for _, patch := range overlay.Patches {
-					if err := os.WriteFile(filepath.Join(overlayDir, patch.Target), []byte(patch.Patch), 0644); err != nil {
-						return fmt.Errorf("failed to write patch %s: %w", patch.Target, err)
-					}
+			for _, dir := range dirs {
+				if err := writeKustomizeDir(filepath.Join(kustomizeDir, dir.Path), dir); err != nil {
+					return err
 				}
 			}
 			if opts.verbose {
@@ -1615,4 +1603,35 @@ func newFeaturesCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&namesOnly, "names", false, "Print feature names only")
 	return cmd
+}
+
+// chartObjects returns the input objects rendered by the chart's templates.
+func chartObjects(chart *types.GeneratedChart, processed []*types.ProcessedResource) []*unstructured.Unstructured {
+	var objects []*unstructured.Unstructured
+	for _, pr := range processed {
+		if pr.Original == nil || pr.Original.Object == nil {
+			continue
+		}
+		if _, ok := chart.Templates[pr.TemplatePath]; ok {
+			objects = append(objects, pr.Original.Object)
+		}
+	}
+	return objects
+}
+
+// writeKustomizeDir writes a kustomization.yaml and its resources to dir.
+func writeKustomizeDir(dir string, kd *generator.KustomizeDir) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", dir, err)
+	}
+	files := map[string]string{"kustomization.yaml": kd.Kustomization}
+	for name, content := range kd.Resources {
+		files[name] = content
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", filepath.Join(dir, name), err)
+		}
+	}
+	return nil
 }

@@ -137,7 +137,7 @@ helm upgrade --install shop ./charts/shop --set database.enabled=false
 | `--spot`, `--spot-grace-period` | Tolerations для spot-узлов, `terminationGracePeriodSeconds` и PDB на каждый workload (`spot.enabled`) |
 | `--auto-deps` | Bitnami-зависимости (PostgreSQL, Redis, …), найденные по env, выключенные по умолчанию |
 | `--airgap-registry` | `images.txt`, `mirror-images.sh`, `values-airgap.yaml` |
-| `--kustomize` | Kustomize-раскладка base + overlays |
+| `--kustomize` | `<chart>/kustomize/`: base из входных манифестов и overlay'и dev/staging/prod (replicas 1/2/3 для каждого Deployment/StatefulSet) — путь доставки без Helm |
 | `--post-renderer` | `post-renderer/kustomize.sh` — post-renderer для Helm с оверлеями dev/staging/prod: `helm install … --post-renderer ./post-renderer/kustomize.sh --post-renderer-args prod` |
 | `--monorepo` | Makefile, `ct.yaml` для chart-testing |
 | `--values-flat` | Комментарии с путями `--set` в `values.yaml` |
@@ -228,8 +228,9 @@ template-dir: ./chart-overrides
    - backend'ы Ingress, `serviceName` у StatefulSet, `roleRef`, цель HPA.
 
    Service, PDB и NetworkPolicy, выбиравшие pod'ы, продолжают их выбирать.
-5. `helm unittest` для сгенерированных тестов (если установлен плагин) и запуск post-renderer'а через `helm template --post-renderer` (если есть kustomize или kubectl).
-6. **Источники.** Генерация из fake API-сервера с «шумом» живого кластера и из локального git-репозитория.
+5. **Точность (fidelity).** В режимах universal/separate/library/umbrella рендер со значениями по умолчанию содержит каждое поле входных манифестов с тем же значением: метки, данные ConfigMap байт в байт, нулевые значения (`replicas: 0`, `enabled: false`), image digest, весь `spec` custom resources.
+6. `helm unittest` для сгенерированных тестов (если установлен плагин), запуск post-renderer'а через `helm template --post-renderer` и `kustomize build` каждого overlay `--kustomize` (если есть kustomize или kubectl).
+7. **Источники.** Генерация из fake API-сервера с «шумом» живого кластера и из локального git-репозитория.
 
 ```bash
 DHG_REQUIRE_HELM=1 go test ./tests/golden/   # без helm набор пропускается; с DHG_REQUIRE_HELM=1 — падает

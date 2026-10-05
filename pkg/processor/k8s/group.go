@@ -72,11 +72,7 @@ metadata:
   name: %s
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .members }}
-  members:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+%s{{- end }}
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "members"))
 }

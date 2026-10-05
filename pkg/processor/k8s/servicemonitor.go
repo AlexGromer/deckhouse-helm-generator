@@ -106,20 +106,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .endpoints }}
-  endpoints:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .namespaceSelector }}
-  namespaceSelector:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .selector }}
-  selector:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "endpoints", "namespaceSelector", "selector"))
 }

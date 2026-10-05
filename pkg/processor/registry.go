@@ -1,8 +1,10 @@
 package processor
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -67,7 +69,57 @@ func (r *Registry) Process(ctx Context, obj *unstructured.Unstructured) (*Result
 		return result, err
 	}
 	normalizeServiceName(result)
+	result.TemplateContent = PreserveObjectLabels(result.TemplateContent, obj.GetLabels())
 	return result, nil
+}
+
+// metadataLabelsBlock matches the metadata.labels block processors emit (the
+// chart's labels helper, optionally followed by literal extra labels).
+var metadataLabelsBlock = regexp.MustCompile(
+	`(?m)^  labels:\n    \{\{- include "([^"]+)\.labels" ([$.]) \| nindent 4 \}\}\n((?:    [A-Za-z0-9./_-]+: [^{\n]*\n)*)`)
+
+var literalLabelLine = regexp.MustCompile(`^    ([A-Za-z0-9./_-]+): (.*)$`)
+
+// PreserveObjectLabels makes an object keep the labels of its input
+// manifest: they are merged over the chart's labels (and any literal labels
+// a processor adds), so the input's labels win and selectors written against
+// them keep matching. Labels are identity, like names, and are therefore
+// written into the template rather than values.
+func PreserveObjectLabels(template string, inputLabels map[string]string) string {
+	m := metadataLabelsBlock.FindStringSubmatchIndex(template)
+	if m == nil {
+		return template
+	}
+	helperPrefix := template[m[2]:m[3]]
+	root := template[m[4]:m[5]]
+
+	dictOf := func(labels map[string]string) string {
+		keys := make([]string, 0, len(labels))
+		for k := range labels {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		var b strings.Builder
+		b.WriteString("(dict")
+		for _, k := range keys {
+			fmt.Fprintf(&b, " %s %s", strconv.Quote(k), strconv.Quote(labels[k]))
+		}
+		b.WriteString(")")
+		return b.String()
+	}
+
+	extras := map[string]string{}
+	for _, line := range strings.Split(strings.TrimRight(template[m[6]:m[7]], "\n"), "\n") {
+		if sub := literalLabelLine.FindStringSubmatch(line); sub != nil {
+			extras[sub[1]] = strings.Trim(sub[2], `"'`)
+		}
+	}
+	if len(inputLabels) == 0 && len(extras) == 0 {
+		return template
+	}
+	block := fmt.Sprintf("  labels:\n    {{- toYaml (merge %s %s (include %q %s | fromYaml)) | nindent 4 }}\n",
+		dictOf(inputLabels), dictOf(extras), helperPrefix+".labels", root)
+	return template[:m[0]] + block + template[m[1]:]
 }
 
 // normalizeServiceName enforces the invariant every template relies on: the

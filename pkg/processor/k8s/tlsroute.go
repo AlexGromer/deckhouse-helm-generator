@@ -112,16 +112,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .parentRefs }}
-  parentRefs:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .rules }}
-  rules:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "parentRefs", "rules"))
 }

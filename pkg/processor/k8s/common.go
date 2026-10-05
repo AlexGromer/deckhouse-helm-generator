@@ -69,8 +69,8 @@ metadata:
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-{{- with .automountServiceAccountToken }}
-automountServiceAccountToken: {{ . }}
+{{- if hasKey . "automountServiceAccountToken" }}
+automountServiceAccountToken: {{ .automountServiceAccountToken }}
 {{- end }}
 {{- with .imagePullSecrets }}
 imagePullSecrets:
@@ -179,7 +179,7 @@ spec:
   {{- with .serviceName }}
   serviceName: {{ . }}
   {{- end }}
-  replicas: {{ .replicas | default 1 }}
+  replicas: {{ if hasKey . "replicas" }}{{ .replicas }}{{ else }}1{{ end }}
   {{- with .podManagementPolicy }}
   podManagementPolicy: {{ . }}
   {{- end }}

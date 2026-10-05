@@ -221,7 +221,9 @@ func TestProcessDeployment_ExtractsImage(t *testing.T) {
 		containers := result.Values["containers"].([]map[string]interface{})
 		img := containers[0]["image"].(map[string]interface{})
 		testutil.AssertEqual(t, "nginx", img["repository"], "image repository")
-		testutil.AssertEqual(t, "latest", img["tag"], "image tag should default to latest")
+		if _, ok := img["tag"]; ok {
+			t.Errorf("an untagged image must stay untagged (no invented tag), got %v", img["tag"])
+		}
 	})
 }
 
@@ -1406,26 +1408,26 @@ func TestNewDeploymentProcessor(t *testing.T) {
 
 func TestParseImage(t *testing.T) {
 	tests := []struct {
-		name     string
-		image    string
-		wantRepo string
-		wantTag  string
+		name, image, wantRepo, wantTag, wantDigest string
 	}{
-		{"WithTag", "nginx:1.21", "nginx", "1.21"},
-		{"NoTag", "nginx", "nginx", "latest"},
-		{"LatestTag", "nginx:latest", "nginx", "latest"},
-		{"WithRegistry", "gcr.io/my-project/app:v2", "gcr.io/my-project/app", "v2"},
-		{"Digest", "nginx@sha256:abc123", "nginx", "sha256:abc123"},
-		{"RegistryPort", "registry:5000/myapp", "registry:5000/myapp", "latest"},
-		{"RegistryPortWithTag", "registry:5000/myapp:v1", "registry:5000/myapp", "v1"},
-		{"PrivateRegistry", "my.registry.io/org/image:1.0", "my.registry.io/org/image", "1.0"},
+		{"WithTag", "nginx:1.21", "nginx", "1.21", ""},
+		{"NoTag", "nginx", "nginx", "", ""},
+		{"LatestTag", "nginx:latest", "nginx", "latest", ""},
+		{"WithRegistry", "gcr.io/my-project/app:v2", "gcr.io/my-project/app", "v2", ""},
+		{"Digest", "nginx@sha256:abc123", "nginx", "", "sha256:abc123"},
+		{"TagAndDigest", "nginx:1.27@sha256:abc123", "nginx", "1.27", "sha256:abc123"},
+		{"RegistryPort", "registry:5000/myapp", "registry:5000/myapp", "", ""},
+		{"RegistryPortWithTag", "registry:5000/myapp:v1", "registry:5000/myapp", "v1", ""},
+		{"RegistryPortDigest", "registry:5000/myapp@sha256:abc", "registry:5000/myapp", "", "sha256:abc"},
+		{"PrivateRegistry", "my.registry.io/org/image:1.0", "my.registry.io/org/image", "1.0", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo, tag := parseImage(tt.image)
+			repo, tag, digest := parseImage(tt.image)
 			testutil.AssertEqual(t, tt.wantRepo, repo, "repository for %q", tt.image)
 			testutil.AssertEqual(t, tt.wantTag, tag, "tag for %q", tt.image)
+			testutil.AssertEqual(t, tt.wantDigest, digest, "digest for %q", tt.image)
 		})
 	}
 }

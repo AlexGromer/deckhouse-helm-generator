@@ -96,19 +96,8 @@ metadata:
   namespace: {{ $.Release.Namespace }}
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
-spec:
-  {{- with .jobLabel }}
-  jobLabel: {{ . }}
-  {{- end }}
-  {{- with .podMetricsEndpoints }}
-  podMetricsEndpoints:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .selector }}
-  selector:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+%s{{- end }}
 {{- end }}
-{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "podMetricsEndpoints", "jobLabel", "selector"))
 }

@@ -57,6 +57,8 @@ func (p *UserProcessor) extractValues(obj *unstructured.Unstructured) (map[strin
 	var sensitiveFields []string
 
 	if spec, ok, _ := unstructured.NestedMap(obj.Object, "spec"); ok {
+		// The password is rendered from passwordRef, never kept in values.
+		delete(spec, "password")
 		values["spec"] = spec
 	}
 
@@ -91,16 +93,10 @@ metadata:
   name: %s
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
+%s{{- $_ := set $dhgSpec "password" (.passwordRef | default "CHANGE_ME") }}
 spec:
-  email: {{ .email }}
-  {{- with .groups }}
-  groups:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .ttl }}
-  ttl: {{ . }}
-  {{- end }}
-  password: {{ .passwordRef | default "CHANGE_ME" }}
+  {{- toYaml $dhgSpec | nindent 2 }}
 {{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName)
+`, sanitized, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlayVars(".", "email", "groups", "ttl"))
 }
