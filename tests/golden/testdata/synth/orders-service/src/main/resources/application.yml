@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: orders
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:postgres}:5432/orders
+    username: orders
+    password: ${DB_PASSWORD}
+  kafka:
+    bootstrap-servers: kafka:9092
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://keycloak.example.com/realms/shop
+server:
+  port: 8080
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+server:
+  port: 9000

@@ -52,6 +52,24 @@ type Options struct {
 
 	// GitAuth contains authentication credentials for private repos.
 	GitAuth *GitAuthOptions
+
+	// Images are image references for image extraction, or the image of the
+	// application for source extraction.
+	Images []string
+
+	// Platform selects the manifest of multi-platform images (os/arch[/variant]).
+	Platform string
+
+	// InsecureRegistry talks plain HTTP to the registry.
+	InsecureRegistry bool
+}
+
+// Reporter is implemented by extractors that synthesize manifests: Notes
+// returns what they decided or could not decide, for SYNTHESIS.md.
+type Reporter interface {
+	Notes() []string
+	// Inputs describes what the manifests were built from.
+	Inputs() []string
 }
 
 // GitAuthOptions contains git authentication options.
@@ -104,5 +122,8 @@ func DefaultRegistry() *Registry {
 	r.Register(NewFileExtractor())
 	r.Register(NewClusterExtractor())
 	r.Register(NewGitOpsExtractor())
+	r.Register(NewImageExtractor())
+	r.Register(NewComposeExtractor())
+	r.Register(NewSourceExtractor())
 	return r
 }

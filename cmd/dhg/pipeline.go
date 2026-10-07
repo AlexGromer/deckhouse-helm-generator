@@ -35,10 +35,13 @@ type pipelineResult struct {
 	processed     []*types.ProcessedResource
 	graph         *types.ResourceGraph
 	externalFiles *value.ExternalFileManager
+	// synthesis is set when the source built the manifests (image, compose,
+	// source) instead of reading them.
+	synthesis extractor.Reporter
 }
 
 func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, error) {
-	extracted, err := extractResources(ctx, opts)
+	extracted, synthesis, err := extractResources(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -115,23 +118,26 @@ func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, er
 		fmt.Printf("  Detected relationships: %d\n  Service groups: %d\n", len(graph.Relationships), len(graph.Groups))
 	}
 
-	return &pipelineResult{extracted: extracted, processed: processed, graph: graph, externalFiles: externalFiles}, nil
+	return &pipelineResult{extracted: extracted, processed: processed, graph: graph, externalFiles: externalFiles, synthesis: synthesis}, nil
 }
 
 // extractResources runs the extractor for opts.source, drops duplicate
-// objects and warns about deprecated APIs.
-func extractResources(ctx context.Context, opts pipelineOptions) ([]*types.ExtractedResource, error) {
+// objects and warns about deprecated APIs. For sources that synthesize
+// manifests it also returns their Reporter, and any error is fatal: a
+// half-read image or compose file would give a misleading chart.
+func extractResources(ctx context.Context, opts pipelineOptions) ([]*types.ExtractedResource, extractor.Reporter, error) {
 	if opts.verbose {
 		fmt.Printf("\n[1/5] Extracting resources from %s...\n", opts.source)
 	}
 	ext, ok := extractor.DefaultRegistry().Get(opts.source)
 	if !ok {
-		return nil, fmt.Errorf("no extractor available for source type: %s", opts.source)
+		return nil, nil, fmt.Errorf("no extractor available for source type: %s", opts.source)
 	}
 	if err := ext.Validate(ctx, opts.extract); err != nil {
-		return nil, fmt.Errorf("extractor validation failed: %w", err)
+		return nil, nil, fmt.Errorf("extractor validation failed: %w", err)
 	}
 
+	reporter, synthesizes := ext.(extractor.Reporter)
 	resCh, errCh := ext.Extract(ctx, opts.extract)
 	var resources []*types.ExtractedResource
 	for resCh != nil || errCh != nil {
@@ -150,13 +156,16 @@ func extractResources(ctx context.Context, opts pipelineOptions) ([]*types.Extra
 				errCh = nil
 				continue
 			}
+			if synthesizes {
+				return nil, nil, err
+			}
 			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		}
 	}
 	if len(resources) == 0 {
-		return nil, fmt.Errorf("no resources extracted")
+		return nil, nil, fmt.Errorf("no resources extracted")
 	}
 
 	resources, duplicates := extractor.Deduplicate(resources)
@@ -167,5 +176,8 @@ func extractResources(ctx context.Context, opts pipelineOptions) ([]*types.Extra
 	if opts.verbose {
 		fmt.Printf("  Total extracted: %d resources\n", len(resources))
 	}
-	return resources, nil
+	if !synthesizes {
+		reporter = nil
+	}
+	return resources, reporter, nil
 }

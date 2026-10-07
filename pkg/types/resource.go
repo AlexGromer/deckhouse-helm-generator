@@ -13,6 +13,11 @@ const (
 	SourceCluster Source = "cluster"
 	SourceFile    Source = "file"
 	SourceGitOps  Source = "gitops"
+	// SourceImage, SourceCompose and SourceCode synthesize manifests from an
+	// image's configuration, a docker-compose file or a project's sources.
+	SourceImage   Source = "image"
+	SourceCompose Source = "compose"
+	SourceCode    Source = "source"
 )
 
 // ExtractedResource represents a Kubernetes resource extracted from any source.

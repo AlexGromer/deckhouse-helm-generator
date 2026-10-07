@@ -17,6 +17,7 @@ import (
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer/pattern"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/extractor"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/generator"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/synth"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
@@ -95,6 +96,9 @@ func newGenerateCmd() *cobra.Command {
 		gitRepo            string
 		gitBranch          string
 		sshKey             string
+		images             []string
+		platform           string
+		insecureRegistry   bool
 		includeTests       bool
 		includeREADME      bool
 		includeSchema      bool
@@ -165,6 +169,9 @@ Examples:
 				gitRepo:            gitRepo,
 				gitBranch:          gitBranch,
 				sshKey:             sshKey,
+				images:             images,
+				platform:           platform,
+				insecureRegistry:   insecureRegistry,
 				includeTests:       includeTests,
 				includeREADME:      includeREADME,
 				includeSchema:      includeSchema,
@@ -203,7 +210,11 @@ Examples:
 	cmd.Flags().StringVar(&chartVersion, "chart-version", "0.1.0", "Chart version")
 	cmd.Flags().StringVar(&appVersion, "app-version", "1.0.0", "Application version")
 	cmd.Flags().StringVar(&mode, "mode", "universal", "Output mode: universal, separate, library, umbrella")
-	cmd.Flags().StringVarP(&source, "source", "s", "file", "Source type: file, cluster (live cluster via kubeconfig) or gitops (shallow git clone)")
+	cmd.Flags().StringVarP(&source, "source", "s", "file", "Source type: file, cluster (live cluster via kubeconfig), gitops (shallow git clone), "+
+		"or synthesized from: image (registry image config), compose (docker-compose files), source (project directory: Dockerfile, Spring Boot)")
+	cmd.Flags().StringSliceVar(&images, "image", nil, "Image reference: the images to read for --source image, the application image for --source source")
+	cmd.Flags().StringVar(&platform, "platform", "linux/amd64", "Platform of multi-platform images for --source image (os/arch[/variant])")
+	cmd.Flags().BoolVar(&insecureRegistry, "insecure-registry", false, "Talk plain HTTP to the registry (--source image)")
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
 	cmd.Flags().StringSliceVar(&namespaces, "namespaces", []string{}, "Filter by multiple namespaces")
 	cmd.Flags().StringVarP(&labelSelector, "selector", "l", "", "Label selector filter")
@@ -282,6 +293,9 @@ type generateOptions struct {
 	gitRepo            string
 	gitBranch          string
 	sshKey             string
+	images             []string
+	platform           string
+	insecureRegistry   bool
 	includeTests       bool
 	includeREADME      bool
 	includeSchema      bool
@@ -347,8 +361,14 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		sourceType = types.SourceCluster
 	case "gitops":
 		sourceType = types.SourceGitOps
+	case "image":
+		sourceType = types.SourceImage
+	case "compose":
+		sourceType = types.SourceCompose
+	case "source":
+		sourceType = types.SourceCode
 	default:
-		return fmt.Errorf("invalid source: %s (must be file, cluster, or gitops)", opts.source)
+		return fmt.Errorf("invalid source: %s (must be file, cluster, gitops, image, compose or source)", opts.source)
 	}
 
 	// Validate mutually exclusive flags
@@ -374,19 +394,22 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	}
 
 	extractOpts := extractor.Options{
-		Paths:          opts.paths,
-		Namespace:      opts.namespace,
-		Namespaces:     opts.namespaces,
-		LabelSelector:  opts.labelSelector,
-		IncludeKinds:   opts.includeKinds,
-		ExcludeKinds:   opts.excludeKinds,
-		Recursive:      opts.recursive,
-		KubeConfig:     opts.kubeConfig,
-		KubeContext:    opts.kubeContext,
-		ClusterSecrets: opts.clusterSecrets,
-		GitURL:         opts.gitRepo,
-		GitBranch:      opts.gitBranch,
-		GitPath:        opts.gitPath,
+		Paths:            opts.paths,
+		Namespace:        opts.namespace,
+		Namespaces:       opts.namespaces,
+		LabelSelector:    opts.labelSelector,
+		IncludeKinds:     opts.includeKinds,
+		ExcludeKinds:     opts.excludeKinds,
+		Recursive:        opts.recursive,
+		KubeConfig:       opts.kubeConfig,
+		KubeContext:      opts.kubeContext,
+		ClusterSecrets:   opts.clusterSecrets,
+		GitURL:           opts.gitRepo,
+		GitBranch:        opts.gitBranch,
+		GitPath:          opts.gitPath,
+		Images:           opts.images,
+		Platform:         opts.platform,
+		InsecureRegistry: opts.insecureRegistry,
 	}
 	if opts.sshKey != "" {
 		extractOpts.GitAuth = &extractor.GitAuthOptions{SSHKeyPath: opts.sshKey}
@@ -681,6 +704,11 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 				fmt.Printf("---\n# templates/_helpers.tpl\n%s\n", chart.Helpers)
 			}
 		}
+		if pipeline.synthesis != nil {
+			for _, n := range pipeline.synthesis.Notes() {
+				fmt.Fprintf(os.Stderr, "Note: %s\n", n)
+			}
+		}
 		return nil
 	}
 
@@ -810,6 +838,12 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 			if opts.verbose {
 				fmt.Printf("  Written: kustomize layout for %s\n", chart.Name)
 			}
+		}
+	}
+
+	if pipeline.synthesis != nil {
+		if err := writeSynthesisReport(opts.outputDir, pipeline); err != nil {
+			return err
 		}
 	}
 
@@ -1633,5 +1667,25 @@ func writeKustomizeDir(dir string, kd *generator.KustomizeDir) error {
 			return fmt.Errorf("failed to write %s: %w", filepath.Join(dir, name), err)
 		}
 	}
+	return nil
+}
+
+// writeSynthesisReport prints the notes of a synthesizing source and writes
+// them to SYNTHESIS.md in the output directory.
+func writeSynthesisReport(outputDir string, p *pipelineResult) error {
+	notes := p.synthesis.Notes()
+	for _, n := range notes {
+		fmt.Fprintf(os.Stderr, "Note: %s\n", n)
+	}
+	objects := make([]*unstructured.Unstructured, 0, len(p.extracted))
+	for _, r := range p.extracted {
+		objects = append(objects, r.Object)
+	}
+	report := synth.Report(p.synthesis.Inputs(), objects, notes)
+	path := filepath.Join(outputDir, "SYNTHESIS.md")
+	if err := os.WriteFile(path, []byte(report), 0644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
+	}
+	fmt.Printf("  Written: %s (review before deploying)\n", path)
 	return nil
 }

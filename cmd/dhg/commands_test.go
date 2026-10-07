@@ -206,3 +206,45 @@ func TestGenerateCmd_EveryFeatureEveryMode(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateCmd_SynthesizedSources(t *testing.T) {
+	compose := "../../tests/golden/testdata/synth/compose/docker-compose.yml"
+	project := "../../tests/golden/testdata/synth/orders-service"
+
+	out := t.TempDir()
+	if _, err := executeCmd(t, "generate", "-s", "compose", "-f", compose, "-o", out, "--chart-name", "shop"); err != nil {
+		t.Fatalf("compose: %v", err)
+	}
+	report, err := os.ReadFile(filepath.Join(out, "SYNTHESIS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"compose file", "| Deployment | api |", "PVC api-uploads", "depends_on is not enforced"} {
+		if !strings.Contains(string(report), want) {
+			t.Errorf("SYNTHESIS.md lacks %q:\n%s", want, report)
+		}
+	}
+
+	out = t.TempDir()
+	if _, err := executeCmd(t, "generate", "-s", "source", "-f", project, "--image", "orders:2", "-o", out, "--chart-name", "orders"); err != nil {
+		t.Fatalf("source: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "SYNTHESIS.md")); err != nil {
+		t.Error("SYNTHESIS.md not written for source")
+	}
+
+	dry := t.TempDir()
+	if _, err := executeCmd(t, "generate", "-s", "source", "-f", project, "-o", dry, "--chart-name", "orders", "--dry-run"); err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dry, "SYNTHESIS.md")); err == nil {
+		t.Error("--dry-run must not write SYNTHESIS.md")
+	}
+
+	if _, err := executeCmd(t, "generate", "-s", "image", "-o", t.TempDir(), "--chart-name", "x"); err == nil || !strings.Contains(err.Error(), "--image") {
+		t.Errorf("image without --image: %v", err)
+	}
+	if _, err := executeCmd(t, "generate", "-s", "nope", "-o", t.TempDir(), "--chart-name", "x"); err == nil || !strings.Contains(err.Error(), "compose") {
+		t.Errorf("unknown source: %v", err)
+	}
+}

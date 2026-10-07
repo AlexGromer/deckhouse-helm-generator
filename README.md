@@ -77,6 +77,9 @@ dhg generate -f ./manifests -o ./charts --chart-name myapp \
 | `file` (по умолчанию) | `-f` (файлы/каталоги, можно несколько), `-r` | Читает YAML (многодокументные файлы, рекурсивно) |
 | `cluster` | `--kubeconfig`, `--context`, `-n`, `--cluster-secrets skip\|mask\|include` | Выгружает объекты через API-сервер (kubeconfig: CA, client-cert, bearer token) |
 | `gitops` | `--git-repo`, `--git-branch`, `--git-path`, `--ssh-key` | `git clone --depth 1` во временный каталог, далее как `file` |
+| `image` | `--image` (можно несколько), `--platform`, `--insecure-registry` | Строит манифесты из конфигурации образа в registry (см. ниже) |
+| `compose` | `-f docker-compose.yml` (можно несколько) | Строит манифесты из сервисов docker-compose |
+| `source` | `-f <каталог проекта>`, `--image` | Строит манифесты из Dockerfile и проекта Spring Boot |
 
 Общие фильтры: `-n/--namespace`, `--namespaces`, `-l/--selector` (синтаксис kubectl), `--include-kinds`, `--exclude-kinds`. Одинаковый объект в нескольких файлах берётся один раз (первое определение), с предупреждением.
 
@@ -94,6 +97,24 @@ dhg generate -s gitops --git-repo https://github.com/org/manifests --git-path ap
 ```
 
 Входные манифесты с устаревшими или удалёнными API (например, `policy/v1beta1` PodDisruptionBudget) дают предупреждение с заменой.
+
+### Генерация без манифестов: `image`, `compose`, `source`
+
+Если манифестов ещё нет, dhg строит их сам из фактов, а дальше они проходят тот же конвейер: режимы, флаги, `--with`. Выдуманных значений нет. То, чего во входе нет (requests/limits, пароли, размеры томов, Ingress), dhg не подставляет, а выносит в `SYNTHESIS.md` рядом с chart'ом и печатает в stderr как `Note:`.
+
+```bash
+dhg generate -s image   --image registry.example.com/team/api:1.4.2 --chart-name api -o ./charts
+dhg generate -s compose -f docker-compose.yml --chart-name shop --mode separate -o ./charts
+dhg generate -s source  -f ./orders-service --image registry.example.com/orders:2.1.0 --chart-name orders -o ./charts
+```
+
+| Источник | Что берётся |
+|---|---|
+| `image` | Из конфигурации образа (манифест и config-блоб, слои не скачиваются): `ExposedPorts`, `User` (→ `runAsUser`/`runAsNonRoot`), `Volumes`, `Healthcheck` (→ exec-probes), имя из `org.opencontainers.image.title`. Мультиплатформенные образы — по `--platform`. Учётные данные — из `~/.docker/config.json` (`auths`; credential helpers не поддерживаются). |
+| `compose` | `image`, `ports`/`expose`, `environment`/`env_file` (секретные имена → Secret), `command`/`entrypoint`, `user`, `volumes` (именованные → PVC, файлы ≤ 1 MiB → ConfigMap, остальное → emptyDir), `healthcheck`, `deploy.replicas`/`resources`, подстановка `${VAR:-default}` с `.env`. Service называется как сервис compose, поэтому адреса вида `db:5432` продолжают работать. |
+| `source` | Dockerfile (последняя стадия): `EXPOSE`, `USER`, `HEALTHCHECK`, `VOLUME`. Spring Boot (`pom.xml`/`build.gradle`): имя, версия, `server.port`, actuator → HTTP-probes `/actuator/health/liveness` и `/readiness` (с учётом `base-path`, `management.server.port`, `context-path`), datasource/Kafka/OAuth2 issuer (Keycloak) → env. Пароль datasource — пустым значением в Secret. |
+
+Порт получает имя `http` только там, где протокол известен (Spring Boot); остальные — `tcp-<порт>`, потому что имя порта влияет на определение протокола в mesh. Подробности и границы — в [docs/SPEC_SYNTHESIS.md](docs/SPEC_SYNTHESIS.md).
 
 ---
 
@@ -236,7 +257,7 @@ template-dir: ./chart-overrides
    Service, PDB и NetworkPolicy, выбиравшие pod'ы, продолжают их выбирать.
 5. **Точность (fidelity).** В режимах universal/separate/library/umbrella рендер со значениями по умолчанию содержит каждое поле входных манифестов с тем же значением: метки, данные ConfigMap байт в байт, нулевые значения (`replicas: 0`, `enabled: false`), image digest, весь `spec` custom resources.
 6. `helm unittest` для сгенерированных тестов (если установлен плагин), запуск post-renderer'а через `helm template --post-renderer` и `kustomize build` каждого overlay `--kustomize` (если есть kustomize или kubectl).
-7. **Источники.** Генерация из fake API-сервера с «шумом» живого кластера и из локального git-репозитория.
+7. **Источники.** Генерация из fake API-сервера с «шумом» живого кластера и из локального git-репозитория; синтез из docker-compose, проекта Spring Boot и образа из fake registry (Bearer-аутентификация, мультиплатформенный index) — с проверкой, что выведенные порты, probes, securityContext и переменные дошли до рендера.
 
 ```bash
 DHG_REQUIRE_HELM=1 go test ./tests/golden/   # без helm набор пропускается; с DHG_REQUIRE_HELM=1 — падает
@@ -266,7 +287,7 @@ make lint           # golangci-lint v2
 Архитектура конвейера (`cmd/dhg/pipeline.go`):
 
 ```
-extractor (file | cluster | gitops) → дедупликация
+extractor (file | cluster | gitops | image | compose | source → pkg/synth) → дедупликация
   → processor.Registry (процессоры по GVK + плагины; общий fallback для неизвестных kinds)
   → analyzer (детекторы связей → граф → сервисные группы)
   → generator (universal | separate | library | umbrella)
