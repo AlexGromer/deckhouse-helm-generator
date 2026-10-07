@@ -46,7 +46,7 @@ jobs:
       with:
         name: coverage-unit
         path: coverage.txt
-        retention-days: 1
+        retention-days: 7
 
   # ── Job 2: Integration Tests ───────────────────────────────────
   integration-tests:
@@ -82,7 +82,7 @@ jobs:
       with:
         name: coverage-integration
         path: coverage-integration.txt
-        retention-days: 1
+        retention-days: 7
 
   # ── Job 3: E2E Tests ───────────────────────────────────────────
   e2e-tests:
@@ -121,7 +121,7 @@ jobs:
       with:
         name: coverage-e2e
         path: coverage-e2e.txt
-        retention-days: 1
+        retention-days: 7
 
   # ── Job 4: Lint ────────────────────────────────────────────────
   lint:
