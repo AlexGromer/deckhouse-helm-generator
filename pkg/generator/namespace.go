@@ -46,21 +46,35 @@ func GenerateNamespaceResources(chartName string, groups []*ServiceGroup, opts N
 	return result
 }
 
-// GenerateResourceQuotaTemplate generates a ResourceQuota template from aggregated resources.
-func GenerateResourceQuotaTemplate(chartName string, group *ServiceGroup) string {
-	cpuReq, memReq, cpuLim, memLim := extractFirstResourceValues(group)
+// Fallback quota for a group without pod-creating workloads (e.g. only
+// ConfigMaps and Services): nothing in the input says what the namespace
+// needs, but the template is still emitted so that the
+// namespace.resourceQuota toggle behaves the same for every group. These
+// values are not derived from the input; the template says so in a comment.
+const (
+	quotaFallbackCPURequest    = "1"
+	quotaFallbackMemoryRequest = "1Gi"
+	quotaFallbackCPULimit      = "2"
+	quotaFallbackMemoryLimit   = "2Gi"
+)
 
-	if cpuReq == "" {
-		cpuReq = "1"
-	}
-	if memReq == "" {
-		memReq = "1Gi"
-	}
-	if cpuLim == "" {
-		cpuLim = "2"
-	}
-	if memLim == "" {
-		memLim = "2Gi"
+// GenerateResourceQuotaTemplate generates a ResourceQuota template sized for
+// all workloads of the group: requests.* and limits.* are the sum, over the
+// workloads, of the effective pod requests/limits (app containers summed,
+// init containers by the Kubernetes max rule, unset values filled with the
+// group's LimitRange defaults) times the peak number of pods (replicas or
+// HPA maxReplicas, plus a Deployment's rollout surge). See quota.go.
+//
+// A ResourceQuota without scopes counts every pod of the namespace; when
+// several groups (or releases) share a namespace, each quota must be raised
+// to cover all of them. The template states this in a comment.
+func GenerateResourceQuotaTemplate(chartName string, group *ServiceGroup) string {
+	cpuReq, memReq := quotaFallbackCPURequest, quotaFallbackMemoryRequest
+	cpuLim, memLim := quotaFallbackCPULimit, quotaFallbackMemoryLimit
+	totals, ok := groupQuotaTotals(group)
+	if ok {
+		cpuReq, memReq = qString(totals.requests["cpu"]), qString(totals.requests["memory"])
+		cpuLim, memLim = qString(totals.limits["cpu"]), qString(totals.limits["memory"])
 	}
 
 	var sb strings.Builder
@@ -73,6 +87,22 @@ func GenerateResourceQuotaTemplate(chartName string, group *ServiceGroup) string
 	sb.WriteString("  labels:\n")
 	fmt.Fprintf(&sb, "    {{- include \"%s.labels\" . | nindent 4 }}\n", chartName)
 	sb.WriteString("spec:\n")
+	// The explanation goes inside the document: features only recognise
+	// templates whose lines before apiVersion are template actions.
+	if ok {
+		sb.WriteString("  # Sized by dhg for the workloads of this group (peak pods x effective pod resources):\n")
+		daemonSet := false
+		for _, note := range totals.notes {
+			sb.WriteString("  #   " + note + "\n")
+			daemonSet = daemonSet || strings.HasPrefix(note, "DaemonSet ")
+		}
+		sb.WriteString("  # The quota counts every pod of the namespace: raise it when other workloads share the namespace.\n")
+		if daemonSet {
+			sb.WriteString("  # DaemonSets are counted for one node: multiply their share by the number of nodes.\n")
+		}
+	} else {
+		sb.WriteString("  # No workload in this group: placeholder values, not derived from the input.\n")
+	}
 	sb.WriteString("  hard:\n")
 	fmt.Fprintf(&sb, "    requests.cpu: \"%s\"\n", cpuReq)
 	fmt.Fprintf(&sb, "    requests.memory: \"%s\"\n", memReq)
@@ -83,22 +113,14 @@ func GenerateResourceQuotaTemplate(chartName string, group *ServiceGroup) string
 	return sb.String()
 }
 
-// GenerateLimitRangeTemplate generates a LimitRange template with defaults from workload analysis.
+// GenerateLimitRangeTemplate generates a LimitRange template whose
+// per-container defaults (applied to containers that declare no requests or
+// limits) are the largest values declared by the group's containers; see
+// groupLimitDefaults for why the maximum is used.
 func GenerateLimitRangeTemplate(chartName string, group *ServiceGroup) string {
-	cpuReq, memReq, cpuLim, memLim := extractFirstResourceValues(group)
-
-	if cpuReq == "" {
-		cpuReq = "100m"
-	}
-	if memReq == "" {
-		memReq = "128Mi"
-	}
-	if cpuLim == "" {
-		cpuLim = "500m"
-	}
-	if memLim == "" {
-		memLim = "512Mi"
-	}
+	d := groupLimitDefaults(groupWorkloads(group))
+	cpuReq, memReq := qString(d.request["cpu"]), qString(d.request["memory"])
+	cpuLim, memLim := qString(d.limit["cpu"]), qString(d.limit["memory"])
 
 	var sb strings.Builder
 	sb.WriteString("{{- if .Values.namespace.limitRange.enabled }}\n")
@@ -162,36 +184,6 @@ func GenerateNetworkPolicyTemplate(chartName string, group *ServiceGroup) string
 	sb.WriteString("{{- end }}\n")
 
 	return sb.String()
-}
-
-// TODO(HC-4): Implement proper aggregation using k8s.io/apimachinery/pkg/api/resource.Quantity
-
-// extractFirstResourceValues returns the first non-empty resource values found in the group's workloads.
-// For accurate quota calculation with multiple workloads, implement proper aggregation.
-func extractFirstResourceValues(group *ServiceGroup) (cpuReq, memReq, cpuLim, memLim string) {
-	for _, r := range group.Resources {
-		resources, ok := r.Values["resources"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if req, ok := resources["requests"].(map[string]interface{}); ok {
-			if v, ok := req["cpu"].(string); ok && cpuReq == "" {
-				cpuReq = v
-			}
-			if v, ok := req["memory"].(string); ok && memReq == "" {
-				memReq = v
-			}
-		}
-		if lim, ok := resources["limits"].(map[string]interface{}); ok {
-			if v, ok := lim["cpu"].(string); ok && cpuLim == "" {
-				cpuLim = v
-			}
-			if v, ok := lim["memory"].(string); ok && memLim == "" {
-				memLim = v
-			}
-		}
-	}
-	return
 }
 
 // ApplyNamespaceResources adds namespace governance templates (ResourceQuota,

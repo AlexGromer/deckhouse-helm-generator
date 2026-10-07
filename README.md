@@ -156,7 +156,7 @@ helm upgrade --install shop ./charts/shop --set database.enabled=false
 | Флаг | Что добавляет |
 |---|---|
 | `--env-values` | `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml` с профилями по типу нагрузки |
-| `--namespace-resources` | ResourceQuota, LimitRange, NetworkPolicy по умолчанию и NetworkPolicy по связям сервисов (переключатели `namespace.*`) |
+| `--namespace-resources` | ResourceQuota, LimitRange, NetworkPolicy по умолчанию и NetworkPolicy по связям сервисов (переключатели `namespace.*`). Квота — сумма по всем workload'ам группы: ресурсы pod'а (init-контейнеры по правилу Kubernetes) × пиковое число pod'ов (replicas или maxReplicas HPA + maxSurge); расчёт описан комментарием в шаблоне |
 | `--multi-tenant`, `--tenant-count` | Оверлей с изоляцией арендаторов |
 | `--feature-flags` | Переключатели monitoring/ingress/autoscaling/security/storage/rbac |
 | `--cloud-provider aws\|gcp\|azure`, `--cloud-internal` | Аннотации балансировщика для Service (сливаются с аннотациями из values) |
