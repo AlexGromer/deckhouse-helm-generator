@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/helm"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // LibraryGenerator generates a Helm library chart holding the shared helpers

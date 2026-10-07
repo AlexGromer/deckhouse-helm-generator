@@ -12,13 +12,13 @@ import (
 
 	sigsyaml "sigs.k8s.io/yaml"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer/detector"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/extractor"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/generator"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor/k8s"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer/detector"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/extractor"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/generator"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor/k8s"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // TestHarness manages test lifecycle including temporary directories and cleanup.

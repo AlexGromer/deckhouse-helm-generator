@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // threeServiceGraph builds a graph with frontend, backend, database deployments.

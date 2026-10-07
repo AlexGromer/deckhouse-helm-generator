@@ -6,8 +6,8 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/helm"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // GenerateDeckhouseModule transforms a standard Helm chart into a Deckhouse module structure.

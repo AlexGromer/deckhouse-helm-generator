@@ -14,10 +14,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/analyzer/pattern"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/extractor"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/generator"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer/pattern"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/extractor"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/generator"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 var (

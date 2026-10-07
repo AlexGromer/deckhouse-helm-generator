@@ -3,7 +3,7 @@ package generator
 import (
 	"testing"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 func TestParseResourceTemplate_RejectsUnknownShapes(t *testing.T) {

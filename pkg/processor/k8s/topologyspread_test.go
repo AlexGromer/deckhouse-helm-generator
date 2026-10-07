@@ -3,7 +3,7 @@ package k8s
 import (
 	"testing"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/testutil"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/testutil"
 )
 
 // TopologySpreadConstraints tests verify extraction from Deployment pod spec.

@@ -3,7 +3,7 @@ package generator
 import (
 	"sort"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // Stakater Reloader integration (`dhg generate --with reloader`).

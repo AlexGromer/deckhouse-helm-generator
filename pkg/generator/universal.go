@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/helm"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/helm"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // UniversalGenerator generates a single chart with all services in values.yaml.

@@ -3,7 +3,7 @@ package pattern
 import (
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // MicroservicesDetector detects microservices architecture.

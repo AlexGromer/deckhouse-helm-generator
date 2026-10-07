@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // IngressController identifies the type of ingress controller in use.

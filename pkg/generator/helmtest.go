@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // skipTestFiles contains template basenames that should not get test scaffolds.

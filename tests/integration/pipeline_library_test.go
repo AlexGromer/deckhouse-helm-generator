@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // findChartByTypeLibrary returns the library chart from output.

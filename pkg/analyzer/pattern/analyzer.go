@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // Analyzer analyzes resource graph for patterns and best practices.

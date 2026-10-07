@@ -3,7 +3,7 @@ package generator
 import (
 	"fmt"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // HookType identifies a Helm hook lifecycle event.

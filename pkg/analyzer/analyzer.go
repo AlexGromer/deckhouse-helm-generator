@@ -6,7 +6,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // Analyzer analyzes processed resources and builds a resource graph with relationships.

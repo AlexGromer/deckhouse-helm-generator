@@ -8,7 +8,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/generator"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/generator"
 )
 
 const (

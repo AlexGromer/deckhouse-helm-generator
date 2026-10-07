@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // envPortMapping maps environment variable name patterns to service ports.

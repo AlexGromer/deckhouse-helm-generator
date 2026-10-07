@@ -1,7 +1,7 @@
 package k8s
 
 import (
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/processor"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
 )
 
 // RegisterAll registers all standard Kubernetes processors with the registry.

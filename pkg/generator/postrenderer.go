@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // postRendererScript is a Helm post-renderer: Helm pipes the rendered

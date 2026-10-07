@@ -42,7 +42,13 @@ cd deckhouse-helm-generator
 make build            # ./bin/dhg
 ```
 
-> `go install github.com/AlexGromer/deckhouse-helm-generator/cmd/dhg@...` сейчас **не работает**: `go.mod` объявляет модуль как `github.com/deckhouse/deckhouse-helm-generator`, и Go отклоняет несовпадение путей. Используйте релизный бинарник или сборку из исходников.
+### Через `go install`
+
+```bash
+go install github.com/AlexGromer/deckhouse-helm-generator/cmd/dhg@main
+```
+
+`@latest` заработает со следующего релиза: в тегах до `v1.0.0` включительно `go.mod` объявляет прежний путь `github.com/deckhouse/deckhouse-helm-generator`, и Go отклоняет несовпадение.
 
 ---
 

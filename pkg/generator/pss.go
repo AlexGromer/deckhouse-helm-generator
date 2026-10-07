@@ -3,7 +3,7 @@ package generator
 import (
 	"strings"
 
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // pssWorkloadKinds lists Kubernetes workload kinds that contain pod templates.

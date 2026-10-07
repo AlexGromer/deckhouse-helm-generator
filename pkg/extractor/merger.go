@@ -1,7 +1,7 @@
 package extractor
 
 import (
-	"github.com/deckhouse/deckhouse-helm-generator/pkg/types"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
 // Deduplicate drops resources whose key (GVK, namespace, name) was already
