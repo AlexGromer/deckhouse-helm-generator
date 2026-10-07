@@ -29,6 +29,8 @@
 
 ## Новое
 
+- Генерация без манифестов (ADR-058 – ADR-060, [SPEC_SYNTHESIS.md](SPEC_SYNTHESIS.md)): `-s image` (конфигурация образа из registry), `-s compose` (docker-compose), `-s source` (Dockerfile и Spring Boot). Невыводимое перечисляется в `SYNTHESIS.md`.
+
 - Источники `cluster` (client-cert, token/`tokenFile`, exec-плагины ExecCredential v1/v1beta1 — kubelogin для OIDC/Dex; `--cluster-secrets skip|mask|include`) и `gitops` (`--git-path`); `--selector` для файлов.
 - `dhg validate` с разбором шаблонов и матрицей версий Kubernetes API, `dhg graph`, `dhg features`.
 - Плагины процессоров (`--plugin`), `.dhg.yaml` (`--config`), `--template-dir`.

@@ -43,6 +43,7 @@ output/
 .env
 .env.*
 *.env
+!tests/golden/testdata/synth/compose/.env
 .env.local
 .env.development
 .env.production
