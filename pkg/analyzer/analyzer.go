@@ -93,7 +93,8 @@ func (a *DefaultAnalyzer) groupResources(graph *types.ResourceGraph) error {
 	serviceMap := make(map[string]*types.ResourceGroup)
 
 	// First pass: create groups from existing service names
-	for key, resource := range graph.Resources {
+	for _, key := range graph.SortedKeys() {
+		resource := graph.Resources[key]
 		if resource.ServiceName != "" {
 			if _, exists := serviceMap[resource.ServiceName]; !exists {
 				serviceMap[resource.ServiceName] = &types.ResourceGroup{
@@ -108,7 +109,8 @@ func (a *DefaultAnalyzer) groupResources(graph *types.ResourceGraph) error {
 	}
 
 	// Second pass: group remaining resources based on relationships
-	for key, resource := range graph.Resources {
+	for _, key := range graph.SortedKeys() {
+		resource := graph.Resources[key]
 		if grouped[key.String()] {
 			continue
 		}
@@ -123,7 +125,8 @@ func (a *DefaultAnalyzer) groupResources(graph *types.ResourceGraph) error {
 	}
 
 	// Third pass: remaining resources are orphans or standalone services
-	for key, resource := range graph.Resources {
+	for _, key := range graph.SortedKeys() {
+		resource := graph.Resources[key]
 		if grouped[key.String()] {
 			continue
 		}
@@ -146,9 +149,14 @@ func (a *DefaultAnalyzer) groupResources(graph *types.ResourceGraph) error {
 		grouped[key.String()] = true
 	}
 
-	// Add groups to graph
-	for _, group := range serviceMap {
-		graph.AddGroup(group)
+	// Add groups to graph, in name order.
+	names := make([]string, 0, len(serviceMap))
+	for name := range serviceMap {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		graph.AddGroup(serviceMap[name])
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package generator
 
 import (
 	"sort"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -589,5 +590,65 @@ func TestGroupResources_GroupNaming_FromResourceName(t *testing.T) {
 	}
 	if result.Groups[0].Name != "standalone-worker" {
 		t.Errorf("expected group name 'standalone-worker', got '%s'", result.Groups[0].Name)
+	}
+}
+
+// TestGroupResources_DeterministicAndNoNameClash builds the graph many
+// times: groups, their names and members must not depend on map order, and
+// a relationship group named like a label group must not replace it.
+func TestGroupResources_DeterministicAndNoNameClash(t *testing.T) {
+	build := func() *types.ResourceGraph {
+		// Label group "worker" and an unlabelled component whose workload is
+		// also called "worker" (in another namespace).
+		labelled := makeProcessedResource("Deployment", "api", "a", map[string]string{"app.kubernetes.io/name": "worker"})
+		deploy := makeProcessedResource("Deployment", "worker", "b", nil)
+		cm := makeProcessedResource("ConfigMap", "worker-config", "b", nil)
+		other := makeProcessedResource("StatefulSet", "zeta", "b", nil)
+		otherSvc := makeProcessedResource("Service", "alpha", "b", nil)
+		// Namespace group "c" would clash with nothing; namespace "worker"
+		// clashes with the label group.
+		loose := makeProcessedResource("ConfigMap", "loose", "worker", nil)
+		return buildGraph([]*types.ProcessedResource{labelled, deploy, cm, other, otherSvc, loose}, []types.Relationship{
+			{From: resourceKey(deploy), To: resourceKey(cm), Type: types.RelationVolumeMount},
+			{From: resourceKey(otherSvc), To: resourceKey(other), Type: types.RelationLabelSelector},
+		})
+	}
+	describe := func(r *GroupingResult) string {
+		var parts []string
+		for _, g := range r.Groups {
+			var members []string
+			for _, m := range g.Resources {
+				members = append(members, m.Original.Object.GetName())
+			}
+			parts = append(parts, g.Name+"="+strings.Join(members, ","))
+		}
+		return strings.Join(parts, " ")
+	}
+	first, err := GroupResources(build())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "worker=api worker-2=worker,worker-config worker-3=loose zeta=alpha,zeta"
+	if got := describe(first); got != want {
+		t.Fatalf("groups = %s\nwant      %s", got, want)
+	}
+	for i := 0; i < 50; i++ {
+		r, _ := GroupResources(build())
+		if got := describe(r); got != want {
+			t.Fatalf("run %d: groups = %s, want %s", i, got, want)
+		}
+	}
+}
+
+func TestResourceKeyLessAndSortedKeys(t *testing.T) {
+	a := resourceKey(makeProcessedResource("Service", "x", "a", nil))
+	b := resourceKey(makeProcessedResource("Deployment", "x", "a", nil))
+	c := resourceKey(makeProcessedResource("Service", "x", "b", nil))
+	if !b.Less(a) || !a.Less(c) || a.Less(a) {
+		t.Error("Less must order by namespace, name, kind")
+	}
+	g := buildGraph([]*types.ProcessedResource{makeProcessedResource("Service", "x", "b", nil), makeProcessedResource("Service", "x", "a", nil)}, nil)
+	if keys := g.SortedKeys(); keys[0].Namespace != "a" {
+		t.Errorf("SortedKeys = %v", keys)
 	}
 }

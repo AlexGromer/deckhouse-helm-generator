@@ -130,6 +130,10 @@ func extractContainerValues(container map[string]interface{}, namespace string) 
 		"command", "args", "workingDir", "ports", "resources",
 		"volumeMounts", "livenessProbe", "readinessProbe", "startupProbe",
 		"lifecycle", "securityContext",
+		// restartPolicy: Always makes an init container a native sidecar
+		// (Kubernetes 1.29+); without it the pod waits for it forever.
+		"restartPolicy", "resizePolicy", "volumeDevices",
+		"terminationMessagePath", "terminationMessagePolicy", "stdin", "stdinOnce", "tty",
 	} {
 		if v, ok := container[field]; ok && v != nil {
 			cv[field] = v
@@ -261,7 +265,7 @@ func containerTemplate(indent int) string {
 	for _, field := range []string{
 		"command", "args", "workingDir", "ports", "env", "envFrom", "volumeMounts",
 		"resources", "livenessProbe", "readinessProbe", "startupProbe", "lifecycle",
-		"securityContext",
+		"securityContext", "volumeDevices", "resizePolicy",
 	} {
 		if field == "workingDir" {
 			w(`  {{- with .workingDir }}`)
@@ -272,6 +276,17 @@ func containerTemplate(indent int) string {
 		w(`  {{- with .` + field + ` }}`)
 		w(`  ` + field + `:`)
 		w(fmt.Sprintf(`    {{- toYaml . | nindent %d }}`, indent+4))
+		w(`  {{- end }}`)
+	}
+	// Scalars: false and "" are the API defaults, so with skips nothing.
+	for _, field := range []string{"restartPolicy", "terminationMessagePath", "terminationMessagePolicy"} {
+		w(`  {{- with .` + field + ` }}`)
+		w(`  ` + field + `: {{ . | quote }}`)
+		w(`  {{- end }}`)
+	}
+	for _, field := range []string{"stdin", "stdinOnce", "tty"} {
+		w(`  {{- with .` + field + ` }}`)
+		w(`  ` + field + `: {{ . }}`)
 		w(`  {{- end }}`)
 	}
 	return b.String()

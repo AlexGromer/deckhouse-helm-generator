@@ -51,6 +51,20 @@ type ResourceKey struct {
 	Name      string
 }
 
+// Less orders keys by namespace, name, kind, group and version, so that
+// walks over resource maps are reproducible.
+func (k ResourceKey) Less(o ResourceKey) bool {
+	for _, p := range [][2]string{
+		{k.Namespace, o.Namespace}, {k.Name, o.Name}, {k.GVK.Kind, o.GVK.Kind},
+		{k.GVK.Group, o.GVK.Group}, {k.GVK.Version, o.GVK.Version},
+	} {
+		if p[0] != p[1] {
+			return p[0] < p[1]
+		}
+	}
+	return false
+}
+
 // String returns a human-readable representation of the resource key.
 func (k ResourceKey) String() string {
 	if k.Namespace == "" {

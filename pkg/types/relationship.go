@@ -1,5 +1,7 @@
 package types
 
+import "sort"
+
 // RelationshipType represents the type of relationship between resources.
 type RelationshipType string
 
@@ -124,6 +126,17 @@ func NewResourceGraph() *ResourceGraph {
 		relFrom:       make(map[ResourceKey][]Relationship),
 		relTo:         make(map[ResourceKey][]Relationship),
 	}
+}
+
+// SortedKeys returns the keys of the graph's resources in ResourceKey.Less
+// order: walks that build output must not depend on map order.
+func (g *ResourceGraph) SortedKeys() []ResourceKey {
+	keys := make([]ResourceKey, 0, len(g.Resources))
+	for k := range g.Resources {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].Less(keys[j]) })
+	return keys
 }
 
 // AddResource adds a processed resource to the graph.
