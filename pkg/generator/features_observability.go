@@ -55,6 +55,17 @@ func init() {
 		Apply: applyIstioFeature,
 	})
 	RegisterFeature(Feature{
+		Name: "istio-ingress",
+		Description: "Istio Gateway + VirtualService per Ingress (hosts, paths, backends, TLS with HTTPS redirect); " +
+			"the Ingress can be switched off with istioIngress.replaceIngress",
+		Params: map[string]string{
+			"gateway-selector": "istio=ingressgateway",
+			"https-redirect":   "true",
+			"replace-ingress":  "false",
+		},
+		Apply: applyIstioIngressFeature,
+	})
+	RegisterFeature(Feature{
 		Name:        "otel",
 		Description: "OpenTelemetry Operator: Instrumentation resource plus auto-instrumentation annotations for workloads with a detected language",
 		Params: map[string]string{

@@ -160,7 +160,7 @@ helm upgrade --install shop ./charts/shop --set database.enabled=false
 | `--multi-tenant`, `--tenant-count` | Оверлей с изоляцией арендаторов |
 | `--feature-flags` | Переключатели monitoring/ingress/autoscaling/security/storage/rbac |
 | `--cloud-provider aws\|gcp\|azure`, `--cloud-internal` | Аннотации балансировщика для Service (сливаются с аннотациями из values) |
-| `--detect-ingress` | Аннотации для обнаруженного ingress-контроллера |
+| `--detect-ingress` | Аннотации для обнаруженного ingress-контроллера (по IngressClass, классу Ingress или образу). Для Istio аннотаций нет — Istio их не читает; печатается `Note:` с советом `--with istio-ingress` |
 | `--spot`, `--spot-grace-period` | Tolerations для spot-узлов, `terminationGracePeriodSeconds` и PDB на каждый workload (`spot.enabled`) |
 | `--auto-deps` | Bitnami-зависимости (PostgreSQL, Redis, …), найденные по env, выключенные по умолчанию |
 | `--airgap-registry` | `images.txt`, `mirror-images.sh`, `values-airgap.yaml` |
@@ -192,6 +192,7 @@ dhg generate -f ./manifests --chart-name app \
 | `ingress-tls` | TLS для Ingress без `tls`: аннотация issuer cert-manager и секрет сертификата |
 | `istio` | VirtualService, DestinationRule, PeerAuthentication, AuthorizationPolicy из values |
 | `istio-egress` | ServiceEntry для внешних хостов, найденных в env |
+| `istio-ingress` | Istio `Gateway` и `VirtualService` (`networking.istio.io/v1`, Istio ≥ 1.22) из каждого Ingress: хосты, пути, backend'ы, TLS с `credentialName` и HTTP→HTTPS redirect. Ingress остаётся; `istioIngress.replaceIngress=true` (или `--feature-opt istio-ingress.replace-ingress=true`) рендерит только Istio-ресурсы. Подробнее — ниже |
 | `linkerd` | Аннотация инъекции прокси |
 | `otel` | `Instrumentation` (OpenTelemetry Operator) и аннотации автоинструментирования |
 | `policies` | Политики безопасности workload'ов: Kyverno `Policy` и/или Rego для conftest в `policy/` |
@@ -201,7 +202,17 @@ dhg generate -f ./manifests --chart-name app \
 | `vault-agent` | Аннотации HashiCorp Vault Agent для workload'ов с Secrets |
 | `velero-backup` | `Schedule` Velero (≥ 1.10) для chart'ов с томами: объекты релиза, pod'ы его workload'ов и их PVC (`orLabelSelectors`, `veleroBackup.labelSelectors`) |
 
-Все 16 возможностей проверяются в CI и по отдельности, и все вместе, во всех режимах.
+Все 17 возможностей проверяются в CI и по отдельности, и все вместе, во всех режимах.
+
+**Ingress за Istio.** Istio обслуживает обычный Ingress с `ingressClassName: istio` (или устаревшей аннотацией `kubernetes.io/ingress.class: istio`), но только его `spec`: аннотации контроллеров (`nginx.ingress.kubernetes.io/ssl-redirect`, `rewrite-target`, …) не действуют, HTTP→HTTPS redirect не выполняется, а TLS-секрет должен лежать в namespace deployment'а ingress gateway (обычно `istio-system`). `--with istio-ingress` строит из Ingress эквивалент на `Gateway` + `VirtualService`: `Exact` → `exact`; `Prefix /p` → `exact: /p` или `prefix: /p/` (Prefix в Ingress сравнивает элементы пути, а `prefix` в Istio — символы); `ImplementationSpecific` → `prefix` (как в ingress-nginx); маршруты упорядочены по правилам Ingress (Exact, затем более длинные пути), потому что Istio берёт первый совпавший; именованный порт backend'а берётся из Service во входе. Всё, что перенести нельзя, записано комментарием `# Note:` в шаблоне. Конфигурация лежит в `istioIngress.ingresses` и правок `services.*.ingress` не отслеживает. Выбор между ними:
+
+| Что нужно | values |
+|---|---|
+| Только Ingress (контроллер nginx и т.п.) | `istioIngress.enabled: false` |
+| Только Istio Gateway/VirtualService | `istioIngress.replaceIngress: true` — обязательно, если у Ingress класс `istio`: иначе Istio обслужит оба объекта для одних и тех же хостов |
+| Оба (миграция с другого контроллера) | по умолчанию |
+
+Секрет из `credentialName` нужно создать в namespace ingress gateway (например, `Certificate` cert-manager в `istio-system`); селектор gateway — `--feature-opt istio-ingress.gateway-selector=istio=ingressgateway`.
 
 ---
 

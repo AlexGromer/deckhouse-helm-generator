@@ -599,7 +599,12 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		if opts.verbose {
 			fmt.Printf("  Detected controller: %s\n", controller)
 		}
-		if controller != generator.ControllerUnknown {
+		switch controller {
+		case generator.ControllerUnknown:
+			// Nothing detected: nothing to add.
+		case generator.ControllerIstio:
+			fmt.Fprintf(os.Stderr, "Note: %s\n", generator.IstioIngressNote)
+		default:
 			features := []generator.IngressFeature{
 				generator.IngressSSLRedirect,
 			}

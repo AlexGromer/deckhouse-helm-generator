@@ -170,6 +170,14 @@ _См. таблицу Phase 5 выше — ADR-022, ADR-023, ADR-024 затра�
 
 ---
 
+## Ingress за Istio (ADR-061)
+
+| ADR | Дата | Решение | Статус | Контекст |
+|-----|------|---------|--------|---------|
+| ADR-061 | 2026-10-07 | `--with istio-ingress` строит Istio `Gateway` + `VirtualService` из входного Ingress; конфигурация вычисляется при генерации и хранится в values (`istioIngress.ingresses`), Ingress по умолчанию остаётся, `istioIngress.replaceIngress` его выключает | Accepted | Istio обслуживает Ingress (`ingressClassName: istio`) без аннотаций, redirect и с секретом в namespace gateway, а `--detect-ingress` для Istio молча ничего не делал. Вычисление при генерации, а не в шаблоне: порядок маршрутов по правилам Ingress (Exact, длина пути) и именованные порты Service в Sprig не выразить. Ingress сохраняется по умолчанию ради fidelity (ADR-053); цена — правки `services.*.ingress` не переносятся в `istioIngress` |
+
+---
+
 ## Сводка по статусам
 
 | Статус | Количество | ADR |

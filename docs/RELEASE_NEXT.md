@@ -30,6 +30,7 @@
 
 ## Новое
 
+- `--with istio-ingress` (ADR-061): Istio `Gateway` + `VirtualService` (`networking.istio.io/v1`) из каждого Ingress — хосты, пути (`Exact`/`Prefix` с семантикой Ingress, `ImplementationSpecific` как префикс), backend'ы с разрешением именованных портов по Service, TLS (`credentialName`) и HTTP→HTTPS redirect (`tls.httpsRedirect`). Ingress остаётся, `istioIngress.replaceIngress` его выключает. `--detect-ingress` при обнаружении Istio (теперь и по `spec.ingressClassName`/аннотации `istio`) больше не молчит: печатает `Note:` — Istio обслуживает Ingress сам, но документация Istio не описывает поддержку аннотаций контроллеров вроде ingress-nginx (redirect, rewrite), а TLS-секрет должен лежать в namespace gateway.
 - Генерация без манифестов (ADR-058 – ADR-060, [SPEC_SYNTHESIS.md](SPEC_SYNTHESIS.md)): `-s image` (конфигурация образа из registry; учётные данные — из docker `config.json`, включая credential helpers `credHelpers`/`credsStore`), `-s compose` (docker-compose), `-s source` (Dockerfile или, с `--image-config`, config образа; Spring Boot, Quarkus, Micronaut; профили фреймворка → `values-profile-<profile>.yaml`). Невыводимое перечисляется в `SYNTHESIS.md`.
 
 - Источники `cluster` (client-cert, token/`tokenFile`, exec-плагины ExecCredential v1/v1beta1 — kubelogin для OIDC/Dex; `--cluster-secrets skip|mask|include`) и `gitops` (`--git-path`); `--selector` для файлов.

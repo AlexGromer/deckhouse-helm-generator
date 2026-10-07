@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
@@ -34,7 +36,9 @@ const (
 // ingress controller in use by applying the following priority order:
 //
 //  1. IngressClass spec.controller field
-//  2. kubernetes.io/ingress.class annotation on Ingress resources
+//  2. kubernetes.io/ingress.class annotation, else spec.ingressClassName, of
+//     Ingress resources (the class name of an IngressClass that is not in
+//     the input usually names its controller)
 //  3. Deployment container image names
 //  4. ControllerUnknown
 func DetectIngressController(resources []*types.ProcessedResource) IngressController {
@@ -71,7 +75,7 @@ func DetectIngressController(resources []*types.ProcessedResource) IngressContro
 		}
 	}
 
-	// Priority 2: kubernetes.io/ingress.class annotation on Ingress resources
+	// Priority 2: class of Ingress resources
 	for _, r := range resources {
 		if r == nil || r.Original == nil {
 			continue
@@ -79,9 +83,11 @@ func DetectIngressController(resources []*types.ProcessedResource) IngressContro
 		if r.Original.GVK.Kind != "Ingress" {
 			continue
 		}
-		annotations := r.Original.Object.GetAnnotations()
-		class, ok := annotations["kubernetes.io/ingress.class"]
-		if !ok || class == "" {
+		class := r.Original.Object.GetAnnotations()["kubernetes.io/ingress.class"]
+		if class == "" {
+			class, _, _ = unstructured.NestedString(r.Original.Object.Object, "spec", "ingressClassName")
+		}
+		if class == "" {
 			continue
 		}
 		class = strings.ToLower(class)
@@ -92,6 +98,8 @@ func DetectIngressController(resources []*types.ProcessedResource) IngressContro
 			return ControllerTraefik
 		case strings.Contains(class, "haproxy"):
 			return ControllerHAProxy
+		case class == "istio":
+			return ControllerIstio
 		}
 	}
 
@@ -144,6 +152,13 @@ func DetectIngressController(resources []*types.ProcessedResource) IngressContro
 
 	return ControllerUnknown
 }
+
+// IstioIngressNote explains why `--detect-ingress` adds nothing for Istio.
+const IstioIngressNote = "ingress controller is Istio: it serves Kubernetes Ingress natively " +
+	"(ingressClassName: istio) but does not interpret Ingress annotations, so none were added " +
+	"(no ssl-redirect: Istio does not redirect HTTP to HTTPS for an Ingress, and its TLS secret must be " +
+	"in the ingress gateway namespace, usually istio-system). Use --with istio-ingress to generate an " +
+	"Istio Gateway and VirtualService (with httpsRedirect) from each Ingress"
 
 // GenerateIngressAnnotations returns a map of controller-specific Kubernetes
 // annotations that enable the requested ingress features.
@@ -213,9 +228,11 @@ func GenerateIngressAnnotations(controller IngressController, features []Ingress
 		}
 
 	case ControllerIstio:
-		// Istio uses VirtualService/Gateway CRDs, not Ingress annotations.
-		// Annotation-based configuration is not applicable for Istio.
-		// TODO: Generate VirtualService templates from Ingress resources.
+		// No annotations: Istio serves a plain Ingress (ingressClassName:
+		// istio) from its spec only and does not interpret controller
+		// annotations; the equivalent features (HTTPS redirect, rewrites)
+		// are configured on an Istio Gateway/VirtualService instead, which
+		// `--with istio-ingress` generates. Callers report IstioIngressNote.
 
 	default:
 		// Unknown controller: return only the generic class annotation.
