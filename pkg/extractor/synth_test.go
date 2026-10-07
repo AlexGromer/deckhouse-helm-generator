@@ -9,6 +9,7 @@ import (
 
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/synth/registry/registrytest"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // drain collects the resources of an extraction and its first error.
@@ -211,5 +212,78 @@ func TestComposeAndSourceExtractors(t *testing.T) {
 	}
 	if _, err := drain(NewSourceExtractor().Extract(context.Background(), Options{Paths: []string{dir}})); err == nil {
 		t.Error("a directory without Dockerfile or Spring Boot must fail")
+	}
+}
+
+func TestSourceExtractorImageConfigAndProfiles(t *testing.T) {
+	fake := registrytest.New()
+	defer fake.Close()
+	fake.Push("team/orders", "2", map[string]interface{}{"config": map[string]interface{}{
+		"User":         "10001",
+		"ExposedPorts": map[string]interface{}{"8080/tcp": map[string]interface{}{}},
+	}})
+	t.Setenv("DOCKER_CONFIG", t.TempDir())
+
+	project := t.TempDir()
+	for name, content := range map[string]string{
+		"pom.xml": `<project><artifactId>orders</artifactId><version>2</version><dependencies>` +
+			`<dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId></dependency></dependencies></project>`,
+		"src/main/resources/application.properties":      "spring.kafka.bootstrap-servers=kafka:9092\n",
+		"src/main/resources/application-prod.properties": "spring.kafka.bootstrap-servers=kafka-prod:9092\n",
+	} {
+		path := filepath.Join(project, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := NewSourceExtractor()
+	if err := s.Validate(context.Background(), Options{Paths: []string{project}, ImageConfig: true}); err == nil || !strings.Contains(err.Error(), "--image") {
+		t.Errorf("--image-config without --image: %v", err)
+	}
+	opts := Options{Paths: []string{project}, Images: []string{fake.Host() + "/team/orders:2"}, ImageConfig: true, InsecureRegistry: true}
+	rs, err := drain(s.Extract(context.Background(), opts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dep *types.ExtractedResource
+	for _, r := range rs {
+		if r.Object.GetKind() == "Deployment" {
+			dep = r
+		}
+	}
+	if uid, _, _ := unstructured.NestedInt64(dep.Object.Object, "spec", "template", "spec", "securityContext", "runAsUser"); uid != 10001 {
+		t.Errorf("runAsUser from the image config = %d", uid)
+	}
+	if inputs := strings.Join(s.Inputs(), "\n"); !strings.Contains(inputs, "(Spring Boot)") || !strings.Contains(inputs, "manifest sha256:") {
+		t.Errorf("inputs = %s", inputs)
+	}
+	variants := s.Variants()
+	if len(variants) != 1 || len(variants["prod"]) != len(rs) {
+		t.Fatalf("variants = %v", variants)
+	}
+	for _, r := range variants["prod"] {
+		if r.Object.GetKind() == "ConfigMap" {
+			if v, _, _ := unstructured.NestedString(r.Object.Object, "data", "SPRING_KAFKA_BOOTSTRAP_SERVERS"); v != "kafka-prod:9092" {
+				t.Errorf("prod kafka = %q", v)
+			}
+		}
+	}
+	if !strings.Contains(strings.Join(s.Notes(), "\n"), "configuration profiles prod") {
+		t.Error("profiles not reported")
+	}
+
+	missing := opts
+	missing.Images = []string{fake.Host() + "/team/none:1"}
+	if _, err := drain(NewSourceExtractor().Extract(context.Background(), missing)); err == nil {
+		t.Error("a missing image must fail")
+	}
+	bad := opts
+	bad.Images = []string{"Bad Ref"}
+	if _, err := drain(NewSourceExtractor().Extract(context.Background(), bad)); err == nil {
+		t.Error("an invalid reference must fail")
 	}
 }

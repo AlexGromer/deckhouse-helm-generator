@@ -79,7 +79,7 @@ dhg generate -f ./manifests -o ./charts --chart-name myapp \
 | `gitops` | `--git-repo`, `--git-branch`, `--git-path`, `--ssh-key` | `git clone --depth 1` во временный каталог, далее как `file` |
 | `image` | `--image` (можно несколько), `--platform`, `--insecure-registry` | Строит манифесты из конфигурации образа в registry (см. ниже) |
 | `compose` | `-f docker-compose.yml` (можно несколько) | Строит манифесты из сервисов docker-compose |
-| `source` | `-f <каталог проекта>`, `--image` | Строит манифесты из Dockerfile и проекта Spring Boot |
+| `source` | `-f <каталог проекта>`, `--image`, `--image-config` | Строит манифесты из Dockerfile (или config образа) и проекта Spring Boot, Quarkus или Micronaut |
 
 Общие фильтры: `-n/--namespace`, `--namespaces`, `-l/--selector` (синтаксис kubectl), `--include-kinds`, `--exclude-kinds`. Одинаковый объект в нескольких файлах берётся один раз (первое определение), с предупреждением.
 
@@ -112,9 +112,9 @@ dhg generate -s source  -f ./orders-service --image registry.example.com/orders:
 |---|---|
 | `image` | Из конфигурации образа (манифест и config-блоб, слои не скачиваются): `ExposedPorts`, `User` (→ `runAsUser`/`runAsNonRoot`), `Volumes`, `Healthcheck` (→ exec-probes), имя из `org.opencontainers.image.title`. Мультиплатформенные образы — по `--platform`. Учётные данные — из `~/.docker/config.json`: `auths` и credential helpers (`credHelpers`, `credsStore`; бинарь `docker-credential-<имя>` из `PATH`). |
 | `compose` | `image`, `ports`/`expose`, `environment`/`env_file` (секретные имена → Secret), `command`/`entrypoint`, `user`, `volumes` (именованные → PVC, файлы ≤ 1 MiB → ConfigMap, остальное → emptyDir), `healthcheck`, `deploy.replicas`/`resources`, подстановка `${VAR:-default}` с `.env`. Service называется как сервис compose, поэтому адреса вида `db:5432` продолжают работать. |
-| `source` | Dockerfile (последняя стадия): `EXPOSE`, `USER`, `HEALTHCHECK`, `VOLUME`. Spring Boot (`pom.xml`/`build.gradle`): имя, версия, `server.port`, actuator → HTTP-probes `/actuator/health/liveness` и `/readiness` (с учётом `base-path`, `management.server.port`, `context-path`), datasource/Kafka/OAuth2 issuer (Keycloak) → env. Пароль datasource — пустым значением в Secret. |
+| `source` | Dockerfile (последняя стадия): `EXPOSE`, `USER`, `HEALTHCHECK`, `VOLUME`; с `--image-config` — те же факты из config образа в registry (включая то, что задаёт базовый образ). Spring Boot, Quarkus, Micronaut (`pom.xml`/`build.gradle`): имя, версия, HTTP-порт, health-зависимость → HTTP-probes (Actuator `/actuator/health/*`, SmallRye Health `/q/health/*`, Micronaut Management `/health/*` с учётом root/context/base-path и отдельного management-порта), datasource/Kafka/OIDC issuer (Keycloak) → env, пароли и client secrets — пустыми ключами в Secret. Профили фреймворка → `values-profile-<profile>.yaml` с тем, что профиль меняет в chart. |
 
-Порт получает имя `http` только там, где протокол известен (Spring Boot); остальные — `tcp-<порт>`, потому что имя порта влияет на определение протокола в mesh. Подробности и границы — в [docs/SPEC_SYNTHESIS.md](docs/SPEC_SYNTHESIS.md).
+Порт получает имя `http` только там, где протокол известен (Spring Boot, Quarkus, Micronaut); остальные — `tcp-<порт>`, потому что имя порта влияет на определение протокола в mesh. Подробности и границы — в [docs/SPEC_SYNTHESIS.md](docs/SPEC_SYNTHESIS.md).
 
 ---
 
@@ -257,7 +257,7 @@ template-dir: ./chart-overrides
    Service, PDB и NetworkPolicy, выбиравшие pod'ы, продолжают их выбирать.
 5. **Точность (fidelity).** В режимах universal/separate/library/umbrella рендер со значениями по умолчанию содержит каждое поле входных манифестов с тем же значением: метки, данные ConfigMap байт в байт, нулевые значения (`replicas: 0`, `enabled: false`), image digest, весь `spec` custom resources.
 6. `helm unittest` для сгенерированных тестов (если установлен плагин), запуск post-renderer'а через `helm template --post-renderer` и `kustomize build` каждого overlay `--kustomize` (если есть kustomize или kubectl).
-7. **Источники.** Генерация из fake API-сервера с «шумом» живого кластера и из локального git-репозитория; синтез из docker-compose, проекта Spring Boot и образа из fake registry (Bearer-аутентификация, мультиплатформенный index) — с проверкой, что выведенные порты, probes, securityContext и переменные дошли до рендера.
+7. **Источники.** Генерация из fake API-сервера с «шумом» живого кластера и из локального git-репозитория; синтез из docker-compose, проектов Spring Boot (с рендером профиля через `values-profile-*.yaml`), Quarkus и Micronaut и образа из fake registry (Bearer-аутентификация, мультиплатформенный index) — с проверкой, что выведенные порты, probes, securityContext и переменные дошли до рендера.
 
 ```bash
 DHG_REQUIRE_HELM=1 go test ./tests/golden/   # без helm набор пропускается; с DHG_REQUIRE_HELM=1 — падает

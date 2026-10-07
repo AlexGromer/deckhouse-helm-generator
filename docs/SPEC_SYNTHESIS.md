@@ -25,7 +25,7 @@
 
 До этой спецификации dhg принимал на вход только манифесты Kubernetes: файлы, живой кластер или git-репозиторий. Он переупаковывал уже описанный деплой в Helm, но не мог описать деплой сам.
 
-Типичная ситуация: у сервиса есть образ в registry, `docker-compose.yml` для локального запуска или исходники (Spring Boot), но манифестов нет. Их пишут руками, и ошибки повторяются: не тот порт, нет probes, контейнер работает от root.
+Типичная ситуация: у сервиса есть образ в registry, `docker-compose.yml` для локального запуска или исходники (Spring Boot, Quarkus, Micronaut), но манифестов нет. Их пишут руками, и ошибки повторяются: не тот порт, нет probes, контейнер работает от root.
 
 ## 2. Цели и не-цели
 
@@ -34,21 +34,21 @@
 - **Новые источники:** `image`, `compose`, `source`. Каждый строит *синтетические манифесты* из фактов, которые есть во входных данных.
 - **Тот же конвейер.** Синтетические манифесты проходят processors → analyzer → generator → features без изменений. Все режимы (`universal`/`separate`/`library`/`umbrella`), флаги и `--with` работают как для манифестов из файлов.
 - **Только факты.** Каждое значение chart'а берётся из входа. Чего во входе нет (requests/limits, реплики, хосты Ingress, пароли), то не выдумывается: попадает в отчёт `SYNTHESIS.md` как «заполнить».
-- **Без новых зависимостей**, как в ADR-051: registry API через `net/http`, compose и Spring-конфиги через уже подключённый `sigs.k8s.io/yaml`. Compose читается его подпакетом `sigs.k8s.io/yaml/goyaml.v3` (YAML 1.2, как Docker Compose v2: сервис `off` или значение `yes` остаются строками), `application.yml` — основным пакетом (YAML 1.1, как SnakeYAML в Spring Boot).
+- **Без новых зависимостей**, как в ADR-051: registry API через `net/http`, compose и конфиги фреймворков через уже подключённый `sigs.k8s.io/yaml`. Compose читается его подпакетом `sigs.k8s.io/yaml/goyaml.v3` (YAML 1.2, как Docker Compose v2: сервис `off` или значение `yes` остаются строками), `application.yml` — основным пакетом (YAML 1.1, как SnakeYAML в Spring Boot). Ограничение: расширение `quarkus-config-yaml` читает YAML через SnakeYAML Engine, то есть по YAML 1.2, поэтому значения `on`/`off`/`yes`/`no` в `application.yaml` проекта Quarkus dhg может прочитать иначе, чем Quarkus.
 
 **Не-цели:**
 
 - Анализ слоёв образа (скачивание и распаковка файловой системы): дорого, хрупко, мало пользы по сравнению с исходниками.
 - Сборка образов (`build:` в compose, Dockerfile): dhg описывает деплой, а не CI.
 - Полная семантика compose: `networks`, `secrets`/`configs` верхнего уровня, `profiles`, `extends`, `deploy.placement`. Неподдержанные ключи попадают в отчёт.
-- Языки и фреймворки, кроме Spring Boot. Остальные проекты обрабатываются через Dockerfile.
+- Языки и фреймворки, кроме Spring Boot, Quarkus и Micronaut. Остальные проекты обрабатываются через Dockerfile.
 
 ## 3. Архитектура
 
 ```
  image ref ──► registry v2 API ──► OCI config ─┐
  compose.yml ──► compose parser ───────────────┼──► AppModel[] ──► manifests ──► ExtractedResource ──► (существующий конвейер)
- dir ──► Dockerfile + Spring Boot detector ────┘        │
+ dir ──► Dockerfile / image config + framework ─┘        │
                                                          └──► notes ──► SYNTHESIS.md
 ```
 
@@ -68,7 +68,7 @@
 | `Image` | ссылка на образ |
 | `Command`, `Args` | только если вход их явно переопределяет (compose `entrypoint`/`command`) |
 | `WorkingDir` | только если переопределён во входе |
-| `Ports[]` | `{Name, Port, Protocol}` — порт контейнера; Service публикует тот же номер. Имя `http` — только при известном протоколе (Spring Boot), `management` — порт actuator, иначе `tcp-<порт>`/`udp-<порт>` |
+| `Ports[]` | `{Name, Port, Protocol}` — порт контейнера; Service публикует тот же номер. Имя `http` — только при известном протоколе (Spring Boot, Quarkus, Micronaut), `management` — отдельный порт health-эндпоинтов, иначе `tcp-<порт>`/`udp-<порт>` |
 | `Env[]` | `{Name, Value}` → ConfigMap `<name>-env` |
 | `SecretEnv[]` | `{Name, Value}` → Secret `<name>-env`; значение пустое, если во входе его нет |
 | `User` | `uid[:gid]` из образа, Dockerfile или compose |
@@ -143,32 +143,46 @@
 
 ## 7. Источник `source`
 
-**Вход:** `-f <каталог проекта>`, `--image` (необязательно: ссылка на образ приложения).
+**Вход:** `-f <каталог проекта>` (можно несколько), `--image` (по одному на каталог, необязательно), `--image-config` (необязательно).
 
-**Dockerfile** (последняя стадия multi-stage):
+**Факты контейнера.** Их даёт Dockerfile (последняя стадия multi-stage) или, с `--image-config`, конфигурация образа из registry:
 
-| Инструкция | Результат |
+| Dockerfile / config образа | Результат |
 |---|---|
-| `EXPOSE` | порты |
-| `USER` | `securityContext` |
-| `HEALTHCHECK` | exec probes |
-| `VOLUME` | `emptyDir` + заметка |
+| `EXPOSE` / `ExposedPorts` | порты `tcp-<порт>` (`udp-<порт>`) |
+| `USER` / `User` | `securityContext` |
+| `HEALTHCHECK` / `Healthcheck` | exec probes |
+| `VOLUME` / `Volumes` | `emptyDir` + заметка |
 
-**Spring Boot** определяется по `spring-boot` в `pom.xml` или `build.gradle(.kts)`.
+С `--image-config` dhg читает config каждого `--image` тем же клиентом, что и источник `image`, и берёт факты из него, а не из Dockerfile. Причина: config — результат сборки. В нём есть то, чего Dockerfile не показывает, — `USER` и `EXPOSE` базового образа. Если порты или пользователь расходятся с Dockerfile, это попадает в заметку. Без флага сеть не используется: chart можно собрать до push образа.
 
-| Свойство (`application.yml`, `.yaml`, `.properties` в `src/main/resources`) | Результат |
+`EXPOSE` только документирует порт, а где слушает приложение, говорит конфигурация фреймворка. Порт из `EXPOSE`, которого конфигурация не использует, остаётся в chart с заметкой.
+
+**Фреймворк** определяется по `pom.xml` или `build.gradle(.kts)`. Порядок проверки: Quarkus (`io.quarkus`) → Micronaut (`io.micronaut`) → Spring Boot (`org.springframework.boot`, `spring-boot`). Quarkus и Micronaut проверяются первыми, потому что их сборки могут подключать Spring-совместимые артефакты. Конфигурация читается из `src/main/resources`.
+
+| | Spring Boot | Quarkus | Micronaut |
+|---|---|---|---|
+| Имя | `spring.application.name` | `quarkus.application.name` | `micronaut.application.name` |
+| Порт `http` (по умолчанию 8080) | `server.port` | `quarkus.http.port` | `micronaut.server.port` |
+| Зависимость health | `spring-boot-starter-actuator` | `quarkus-smallrye-health` | `micronaut-management` |
+| Liveness / readiness | `<ctx><base>/health/liveness`, `/readiness`; `base` = `management.endpoints.web.base-path` (по умолчанию `/actuator`); `ctx` = `server.servlet.context-path` только при общем порту | `<root>/<q>/health/live`, `/ready`. Относительный `quarkus.http.non-application-root-path` (по умолчанию `q`) вложен в `quarkus.http.root-path`, абсолютный — от корня сервера. Пути `quarkus.smallrye-health.*` разрешаются так же | `<context-path><endpoints.all.path>/health/liveness`, `/readiness` |
+| Отдельный порт `management` | `management.server.port` | `quarkus.management.enabled=true`: `quarkus.management.port` (по умолчанию 9000), корень `quarkus.management.root-path` (по умолчанию `q`) | `endpoints.all.port` + заметка: проверить путь на этом порту |
+| Подключения → env | `spring.datasource.url`, `.username`, `spring.kafka.bootstrap-servers` | `quarkus.datasource.jdbc.url`, `.reactive.url`, `.username`, `kafka.bootstrap.servers` | `datasources.default.url`, `.username`, `kafka.bootstrap.servers` |
+| Секреты → пустой ключ Secret + заметка | `spring.datasource.password` | `quarkus.datasource.password`, `quarkus.oidc.credentials.secret` | `datasources.default.password`, `micronaut.security.oauth2.clients.*.client-secret` |
+| OIDC issuer (Keycloak) → env + заметка | `spring.security.oauth2.resourceserver.jwt.issuer-uri` | `quarkus.oidc.auth-server-url` | `micronaut.security.oauth2.clients.*.openid.issuer` |
+| Приоритет файлов | `.properties` перекрывает `.yml` | `application.yaml` (ordinal 255) перекрывает `application.properties` (250) | порядок не задан: разные значения одного ключа → заметка |
+
+Имя env-переменной: свойство в верхнем регистре, все символы, кроме букв и цифр, заменены на `_` (`spring.kafka.bootstrap-servers` → `SPRING_KAFKA_BOOTSTRAP_SERVERS`). Эту форму связывают все три фреймворка: Spring Boot (legacy-форма relaxed binding), MicroProfile Config у Quarkus и Micronaut. Значение по умолчанию совпадает с тем, что уже лежит в jar. В chart оно выносится, чтобы его можно было менять для каждого окружения через values. Плейсхолдер `${NAME:default}` (синтаксис общий у всех трёх) заменяется значением по умолчанию; без значения по умолчанию — заметка. Порт `0` или `-1` (случайный) не может быть целью Service: используется порт по умолчанию + заметка.
+
+**Профили** (Spring profiles, Quarkus profiles, Micronaut environments):
+
+| Фреймворк | Что считается профилем |
 |---|---|
-| `spring.application.name` → `artifactId` → `rootProject.name` → имя каталога | имя приложения |
-| `server.port` (с поддержкой `${PORT:8080}`), иначе 8080 | порт `http` |
-| `spring-boot-starter-actuator` в зависимостях | HTTP liveness `…/health/liveness` и readiness `…/health/readiness`. Пути учитывают `management.endpoints.web.base-path`, `management.server.port` и `server.servlet.context-path` (контекстный путь применяется, только когда management-порт совпадает с основным) |
-| `spring.datasource.url`, `.username` | env `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME` |
-| `spring.datasource.password` | `SecretEnv` `SPRING_DATASOURCE_PASSWORD`, пустое значение + заметка |
-| `spring.kafka.bootstrap-servers` | env `SPRING_KAFKA_BOOTSTRAP_SERVERS` |
-| `spring.security.oauth2.resourceserver.jwt.issuer-uri` | env `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` (Keycloak) |
+| Spring Boot | документы с `spring.config.activate.on-profile` или устаревшим `spring.profiles` в `application.yml`/`.properties` (документы `.properties` разделяются `#---`), файлы `application-<profile>.*`. Выражения (`prod & eu`) не отображаются → заметка |
+| Quarkus | ключи `%<profile>.` (в том числе `%a,b.`), файлы `application-<profile>.*`. Вне dev mode и тестов активен `prod`, поэтому `%prod` применяется к контейнеру как основа; `%dev` и `%test` не отображаются → заметка |
+| Micronaut | файлы `application-<environment>.*` |
 
-Переменные передаются через relaxed binding Spring Boot: env-переменная перекрывает свойство с тем же смыслом. Значение по умолчанию совпадает с тем, что уже лежит в jar; в chart оно выносится, чтобы его можно было менять per-environment через values.
-
-Профили (`spring.config.activate.on-profile`, `spring.profiles`) не читаются: используется документ без профиля, остальное → заметка.
+Для каждого профиля dhg строит приложение с наложенными свойствами профиля и env активации (`SPRING_PROFILES_ACTIVE`, `QUARKUS_PROFILE`, `MICRONAUT_ENVIRONMENTS`). Затем прогоняет обычный конвейер без фич `--with` и пишет рядом с `values.yaml` файл `values-profile-<profile>.yaml` с разницей: изменённые и новые ключи; удалённые — `null`; списки — целиком, как их сливает Helm. Установка: `helm install <release> <chart> -f values-profile-<profile>.yaml`. Профиль, который не меняет ничего из отображаемого, файла не получает. Имена не пересекаются с `values-dev/staging/prod.yaml` из `--env-values`: те задают выдуманные профили окружений, а эти — факты конфигурации.
 
 Образ: `--image`, иначе `<name>:<version|latest>` + заметка.
 
@@ -255,7 +269,4 @@ dhg generate -s source  -f ./orders-service --image registry.example.com/orders:
 - **Порт Service = порт контейнера.** Модель адресации внутри кластера остаётся той же, что в compose (`db:5432`). Host-порты compose в кластере не нужны.
 - **Не задаются requests/limits.** Это сознательное решение: выдуманные числа хуже их отсутствия, потому что ломают планирование и капасити. Отчёт требует их заполнить.
 
-**Возможное развитие:**
-- `-s source` с `--image`, читающий config образа, — объединение фактов Dockerfile и образа;
-- Quarkus и Micronaut;
-- профили Spring как values-оверлеи `values-<profile>.yaml`.
+**Развитие.** Реализовано после первой версии: `--image-config` (config образа вместо Dockerfile), Quarkus и Micronaut, профили фреймворков как `values-profile-<profile>.yaml`. Дальнейшие направления — связи между сервисами, Kafka и группировка в PBC — описаны в [docs/roadmap/](roadmap/BACKLOG.md).

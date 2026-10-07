@@ -99,6 +99,7 @@ func newGenerateCmd() *cobra.Command {
 		images             []string
 		platform           string
 		insecureRegistry   bool
+		imageConfig        bool
 		includeTests       bool
 		includeREADME      bool
 		includeSchema      bool
@@ -172,6 +173,7 @@ Examples:
 				images:             images,
 				platform:           platform,
 				insecureRegistry:   insecureRegistry,
+				imageConfig:        imageConfig,
 				includeTests:       includeTests,
 				includeREADME:      includeREADME,
 				includeSchema:      includeSchema,
@@ -214,7 +216,8 @@ Examples:
 		"or synthesized from: image (registry image config), compose (docker-compose files), source (project directory: Dockerfile, Spring Boot)")
 	cmd.Flags().StringSliceVar(&images, "image", nil, "Image reference: the images to read for --source image, the application image for --source source")
 	cmd.Flags().StringVar(&platform, "platform", "linux/amd64", "Platform of multi-platform images for --source image (os/arch[/variant])")
-	cmd.Flags().BoolVar(&insecureRegistry, "insecure-registry", false, "Talk plain HTTP to the registry (--source image)")
+	cmd.Flags().BoolVar(&insecureRegistry, "insecure-registry", false, "Talk plain HTTP to the registry (--source image, --image-config)")
+	cmd.Flags().BoolVar(&imageConfig, "image-config", false, "With --source source, read each --image's config from the registry and prefer it to the Dockerfile (ports, user, volumes, health check)")
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
 	cmd.Flags().StringSliceVar(&namespaces, "namespaces", []string{}, "Filter by multiple namespaces")
 	cmd.Flags().StringVarP(&labelSelector, "selector", "l", "", "Label selector filter")
@@ -296,6 +299,7 @@ type generateOptions struct {
 	images             []string
 	platform           string
 	insecureRegistry   bool
+	imageConfig        bool
 	includeTests       bool
 	includeREADME      bool
 	includeSchema      bool
@@ -410,19 +414,21 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		Images:           opts.images,
 		Platform:         opts.platform,
 		InsecureRegistry: opts.insecureRegistry,
+		ImageConfig:      opts.imageConfig,
 	}
 	if opts.sshKey != "" {
 		extractOpts.GitAuth = &extractor.GitAuthOptions{SSHKeyPath: opts.sshKey}
 	}
 
-	pipeline, err := runPipeline(ctx, pipelineOptions{
+	pipelineOpts := pipelineOptions{
 		source:     sourceType,
 		extract:    extractOpts,
 		chartName:  opts.chartName,
 		outputMode: outputMode,
 		plugins:    opts.plugins,
 		verbose:    opts.verbose,
-	})
+	}
+	pipeline, err := runPipeline(ctx, pipelineOpts)
 	if err != nil {
 		return err
 	}
@@ -842,6 +848,13 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	}
 
 	if pipeline.synthesis != nil {
+		written, err := writeProfileValues(ctx, pipeline, pipelineOpts, gen, genOpts, opts.outputDir)
+		if err != nil {
+			return fmt.Errorf("profile values: %w", err)
+		}
+		for _, path := range written {
+			fmt.Printf("  Written: %s\n", path)
+		}
 		if err := writeSynthesisReport(opts.outputDir, pipeline); err != nil {
 			return err
 		}

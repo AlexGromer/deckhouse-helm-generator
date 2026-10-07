@@ -40,14 +40,7 @@ func (e *ImageExtractor) Validate(_ context.Context, opts Options) error {
 
 // Extract implements Extractor.
 func (e *ImageExtractor) Extract(ctx context.Context, opts Options) (<-chan *types.ExtractedResource, <-chan error) {
-	var creds *registry.DockerCredentials
-	client := e.client
-	if client == nil {
-		creds = registry.DockerConfigCredentials()
-		client = &registry.Client{Credentials: creds.Lookup}
-	}
-	client.PlainHTTP = opts.InsecureRegistry
-	client.Platform = opts.Platform
+	client, creds := registryClient(e.client, opts)
 
 	var apps []synth.App
 	for _, img := range opts.Images {
@@ -55,12 +48,8 @@ func (e *ImageExtractor) Extract(ctx context.Context, opts Options) (<-chan *typ
 		if err != nil {
 			return failed(err)
 		}
-		cfg, digest, err := client.Config(ctx, ref)
+		cfg, digest, err := fetchConfig(ctx, client, creds, ref)
 		if err != nil {
-			// A helper that failed is the likely cause of an auth error.
-			if w := creds.Warnings(); len(w) > 0 {
-				err = fmt.Errorf("%w (%s)", err, strings.Join(w, "; "))
-			}
 			return failed(err)
 		}
 		e.inputs = append(e.inputs, fmt.Sprintf("image `%s` (%s/%s, manifest %s)", ref.Name(), cfg.OS, cfg.Architecture, digest))
@@ -70,4 +59,31 @@ func (e *ImageExtractor) Extract(ctx context.Context, opts Options) (<-chan *typ
 		e.notes.Addf("%s", w)
 	}
 	return emitApps(ctx, types.SourceImage, strings.Join(opts.Images, ","), apps, opts)
+}
+
+// registryClient returns the injected client or one with the docker
+// config credentials, set up from opts.
+func registryClient(injected *registry.Client, opts Options) (*registry.Client, *registry.DockerCredentials) {
+	var creds *registry.DockerCredentials
+	client := injected
+	if client == nil {
+		creds = registry.DockerConfigCredentials()
+		client = &registry.Client{Credentials: creds.Lookup}
+	}
+	client.PlainHTTP = opts.InsecureRegistry
+	client.Platform = opts.Platform
+	return client, creds
+}
+
+// fetchConfig reads an image configuration; a credential helper that
+// failed is the likely cause of an auth error, so its warnings join the error.
+func fetchConfig(ctx context.Context, client *registry.Client, creds *registry.DockerCredentials, ref registry.Reference) (*registry.ImageConfig, string, error) {
+	cfg, digest, err := client.Config(ctx, ref)
+	if err != nil {
+		if w := creds.Warnings(); len(w) > 0 {
+			err = fmt.Errorf("%w (%s)", err, strings.Join(w, "; "))
+		}
+		return nil, "", err
+	}
+	return cfg, digest, nil
 }

@@ -27,6 +27,8 @@ type pipelineOptions struct {
 	// lenient skips resources a processor fails on instead of failing.
 	lenient bool
 	verbose bool
+	// quiet drops the notes of the process stage, for repeated runs.
+	quiet bool
 }
 
 // pipelineResult is the analyzed input of a command.
@@ -45,7 +47,17 @@ func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, er
 	if err != nil {
 		return nil, err
 	}
+	result, err := processResources(ctx, opts, extracted)
+	if err != nil {
+		return nil, err
+	}
+	result.synthesis = synthesis
+	return result, nil
+}
 
+// processResources runs the process and analyze stages on extracted
+// resources.
+func processResources(ctx context.Context, opts pipelineOptions, extracted []*types.ExtractedResource) (*pipelineResult, error) {
 	registry := processor.NewRegistry()
 	k8s.RegisterAll(registry)
 	for _, spec := range opts.plugins {
@@ -102,7 +114,9 @@ func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, er
 	}
 
 	for _, note := range processor.ResolveCollisions(processed) {
-		fmt.Fprintf(os.Stderr, "Note: %s\n", note)
+		if !opts.quiet {
+			fmt.Fprintf(os.Stderr, "Note: %s\n", note)
+		}
 	}
 
 	if opts.verbose {
@@ -118,7 +132,7 @@ func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, er
 		fmt.Printf("  Detected relationships: %d\n  Service groups: %d\n", len(graph.Relationships), len(graph.Groups))
 	}
 
-	return &pipelineResult{extracted: extracted, processed: processed, graph: graph, externalFiles: externalFiles, synthesis: synthesis}, nil
+	return &pipelineResult{extracted: extracted, processed: processed, graph: graph, externalFiles: externalFiles}, nil
 }
 
 // extractResources runs the extractor for opts.source, drops duplicate

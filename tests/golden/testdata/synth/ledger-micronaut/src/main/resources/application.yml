@@ -1,0 +1,12 @@
+micronaut:
+  application:
+    name: ledger
+  server:
+    port: 8090
+endpoints:
+  all:
+    path: /mgmt
+datasources:
+  default:
+    url: jdbc:postgresql://postgres:5432/ledger
+    username: ledger
