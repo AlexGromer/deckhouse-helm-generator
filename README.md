@@ -110,7 +110,7 @@ dhg generate -s source  -f ./orders-service --image registry.example.com/orders:
 
 | Источник | Что берётся |
 |---|---|
-| `image` | Из конфигурации образа (манифест и config-блоб, слои не скачиваются): `ExposedPorts`, `User` (→ `runAsUser`/`runAsNonRoot`), `Volumes`, `Healthcheck` (→ exec-probes), имя из `org.opencontainers.image.title`. Мультиплатформенные образы — по `--platform`. Учётные данные — из `~/.docker/config.json` (`auths`; credential helpers не поддерживаются). |
+| `image` | Из конфигурации образа (манифест и config-блоб, слои не скачиваются): `ExposedPorts`, `User` (→ `runAsUser`/`runAsNonRoot`), `Volumes`, `Healthcheck` (→ exec-probes), имя из `org.opencontainers.image.title`. Мультиплатформенные образы — по `--platform`. Учётные данные — из `~/.docker/config.json`: `auths` и credential helpers (`credHelpers`, `credsStore`; бинарь `docker-credential-<имя>` из `PATH`). |
 | `compose` | `image`, `ports`/`expose`, `environment`/`env_file` (секретные имена → Secret), `command`/`entrypoint`, `user`, `volumes` (именованные → PVC, файлы ≤ 1 MiB → ConfigMap, остальное → emptyDir), `healthcheck`, `deploy.replicas`/`resources`, подстановка `${VAR:-default}` с `.env`. Service называется как сервис compose, поэтому адреса вида `db:5432` продолжают работать. |
 | `source` | Dockerfile (последняя стадия): `EXPOSE`, `USER`, `HEALTHCHECK`, `VOLUME`. Spring Boot (`pom.xml`/`build.gradle`): имя, версия, `server.port`, actuator → HTTP-probes `/actuator/health/liveness` и `/readiness` (с учётом `base-path`, `management.server.port`, `context-path`), datasource/Kafka/OAuth2 issuer (Keycloak) → env. Пароль datasource — пустым значением в Secret. |
 

@@ -107,22 +107,25 @@ func TestClientDigestReference(t *testing.T) {
 func TestDockerConfigCredentials(t *testing.T) {
 	dir := t.TempDir()
 	auth := base64.StdEncoding.EncodeToString([]byte("robot:s3cret"))
-	cfg := `{"auths":{"registry.example.com":{"auth":"` + auth + `"},"https://index.docker.io/v1/":{"username":"hub","password":"pw"}},"credsStore":"desktop"}`
+	cfg := `{"auths":{"registry.example.com":{"auth":"` + auth + `"},"https://index.docker.io/v1/":{"username":"hub","password":"pw"}}}`
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("DOCKER_CONFIG", dir)
-	creds, helpers := registry.DockerConfigCredentials()
-	if creds == nil || !helpers {
-		t.Fatalf("creds=%v helpers=%v", creds != nil, helpers)
+	creds := registry.DockerConfigCredentials()
+	if creds == nil {
+		t.Fatal("no credentials read")
 	}
-	if u, p, ok := creds("registry.example.com"); !ok || u != "robot" || p != "s3cret" {
+	if u, p, ok := creds.Lookup("registry.example.com"); !ok || u != "robot" || p != "s3cret" {
 		t.Errorf("registry.example.com: %s %s %v", u, p, ok)
 	}
-	if u, _, ok := creds("docker.io"); !ok || u != "hub" {
+	if u, _, ok := creds.Lookup("docker.io"); !ok || u != "hub" {
 		t.Errorf("docker.io: %s %v", u, ok)
 	}
-	if _, _, ok := creds("other.example.com"); ok {
+	if _, _, ok := creds.Lookup("other.example.com"); ok {
 		t.Error("unexpected credentials for an unknown host")
+	}
+	if w := creds.Warnings(); len(w) != 0 {
+		t.Errorf("warnings = %v", w)
 	}
 }

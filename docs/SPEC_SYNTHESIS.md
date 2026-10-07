@@ -101,7 +101,9 @@
 
 - на `401` с `WWW-Authenticate: Bearer realm,service,scope` запрашивается токен (анонимно или с учётными данными);
 - на `Basic` используются сами учётные данные;
-- учётные данные берутся из `$DOCKER_CONFIG/config.json` или `~/.docker/config.json` (`auths.<host>.auth`). Credential helpers (`credsStore`, `credHelpers`) не поддерживаются — это отмечается в отчёте.
+- учётные данные берутся из `$DOCKER_CONFIG/config.json` или `~/.docker/config.json` в порядке: `credHelpers.<host>` → `auths.<host>` → `credsStore`. Credential helper запускается по протоколу docker-credential-helpers: `docker-credential-<имя> get` из `PATH`, без shell, с таймаутом 30 с; на stdin — хост registry (для Docker Hub — `https://index.docker.io/v1/`), на stdout — JSON `{"ServerURL","Username","Secret"}`. Пустое значение `credHelpers.<host>` означает «только `auths`», как в Docker CLI. Отличие от Docker CLI: при заданном `credsStore` Docker не читает секреты из `auths` (сам он оставляет там пустые записи), dhg использует непустую запись `auths` раньше `credsStore` и не запускает helper;
+- результат запоминается для хоста на время запуска; helper вызывается не больше одного раза на хост;
+- helper не найден, завершился с ошибкой, ответил «credentials not found», вернул некорректный JSON или identity token (`Username: "<token>"`, OAuth2 refresh token — не поддерживается) — учётных данных нет, запрос идёт анонимно, причина пишется в отчёт, а при ошибке запроса — в текст ошибки.
 
 **Правила вывода** (поля спецификации OCI image config):
 
@@ -215,6 +217,7 @@ dhg generate -s source  -f ./orders-service --image registry.example.com/orders:
 - Пароли и токены никогда не копируются в values из Spring-конфигов: в `SecretEnv` попадает пустое значение.
 - Из compose значение копируется как есть: это то, что пользователь сам записал в файл. В отчёте предупреждение: заменить перед коммитом chart'а.
 - Учётные данные registry используются только для запросов к этому же registry. Токен не записывается никуда.
+- Credential helper запускается без shell (`exec`, бинарь `docker-credential-<имя>` ищется в `PATH`, имя с разделителем пути отклоняется) с таймаутом 30 с. Ни его вывод, ни секреты не попадают в ошибки и отчёт: при ошибке helper'а приводится только первая строка его сообщения (не длиннее 200 символов), при некорректном JSON — только факт.
 - Ответы registry ограничены по размеру: манифест ≤ 4 MiB, config ≤ 4 MiB. Digest config-блоба сверяется с полученными байтами.
 - Bind-файлы из compose читаются только в пределах размера 1 MiB.
 
@@ -248,7 +251,7 @@ dhg generate -s source  -f ./orders-service --image registry.example.com/orders:
 
 ## 14. Trade-offs и развитие
 
-- **Без `go-containerregistry`.** Минус зависимость и контроль над размером ответов. Цена — нет credential helpers и нет схем аутентификации, кроме Basic/Bearer. Для Docker Hub, Harbor, GitLab, Nexus и Deckhouse registry этого достаточно.
+- **Без `go-containerregistry`.** Минус зависимость и контроль над размером ответов. Цена — нет схем аутентификации, кроме Basic/Bearer, и identity token'ов credential helper'ов (OAuth2 refresh token). Для Docker Hub, Harbor, GitLab, Nexus и Deckhouse registry этого достаточно; credential helpers (`credsStore`, `credHelpers`) поддержаны без библиотеки — по их протоколу stdin/stdout.
 - **Порт Service = порт контейнера.** Модель адресации внутри кластера остаётся той же, что в compose (`db:5432`). Host-порты compose в кластере не нужны.
 - **Не задаются requests/limits.** Это сознательное решение: выдуманные числа хуже их отсутствия, потому что ломают планирование и капасити. Отчёт требует их заполнить.
 

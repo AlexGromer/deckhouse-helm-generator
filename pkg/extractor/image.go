@@ -40,13 +40,11 @@ func (e *ImageExtractor) Validate(_ context.Context, opts Options) error {
 
 // Extract implements Extractor.
 func (e *ImageExtractor) Extract(ctx context.Context, opts Options) (<-chan *types.ExtractedResource, <-chan error) {
+	var creds *registry.DockerCredentials
 	client := e.client
 	if client == nil {
-		creds, helpers := registry.DockerConfigCredentials()
-		if helpers {
-			e.notes.Addf("docker config.json uses credential helpers, which dhg does not run; only its \"auths\" entries were used")
-		}
-		client = &registry.Client{Credentials: creds}
+		creds = registry.DockerConfigCredentials()
+		client = &registry.Client{Credentials: creds.Lookup}
 	}
 	client.PlainHTTP = opts.InsecureRegistry
 	client.Platform = opts.Platform
@@ -59,10 +57,17 @@ func (e *ImageExtractor) Extract(ctx context.Context, opts Options) (<-chan *typ
 		}
 		cfg, digest, err := client.Config(ctx, ref)
 		if err != nil {
+			// A helper that failed is the likely cause of an auth error.
+			if w := creds.Warnings(); len(w) > 0 {
+				err = fmt.Errorf("%w (%s)", err, strings.Join(w, "; "))
+			}
 			return failed(err)
 		}
 		e.inputs = append(e.inputs, fmt.Sprintf("image `%s` (%s/%s, manifest %s)", ref.Name(), cfg.OS, cfg.Architecture, digest))
 		apps = append(apps, synth.FromImage(ref, cfg, &e.notes))
+	}
+	for _, w := range creds.Warnings() {
+		e.notes.Addf("%s", w)
 	}
 	return emitApps(ctx, types.SourceImage, strings.Join(opts.Images, ","), apps, opts)
 }

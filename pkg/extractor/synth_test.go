@@ -101,6 +101,64 @@ func TestImageExtractor(t *testing.T) {
 	}
 }
 
+// TestImageExtractorCredentialHelpers runs docker credential helpers named
+// by a docker config.json against a registry requiring a token.
+func TestImageExtractorCredentialHelpers(t *testing.T) {
+	private := registrytest.New()
+	defer private.Close()
+	private.Token, private.User, private.Password = "tok", "robot", "pw"
+	private.Push("team/api", "1", map[string]interface{}{})
+	public := registrytest.New() // tokens for anyone
+	defer public.Close()
+	public.Token = "tok"
+	public.Push("team/api", "1", map[string]interface{}{})
+
+	bin := t.TempDir()
+	for name, body := range map[string]string{
+		"robot": `cat >/dev/null; echo '{"Username":"robot","Secret":"pw"}'`,
+		"empty": `echo "credentials not found in native keychain"; exit 1`,
+	} {
+		if err := os.WriteFile(filepath.Join(bin, "docker-credential-"+name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil { //nolint:gosec // an executable test helper
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	dir := t.TempDir()
+	t.Setenv("DOCKER_CONFIG", dir)
+	extract := func(config, host string) (*ImageExtractor, error) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(config), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		e := NewImageExtractor()
+		_, err := drain(e.Extract(context.Background(), Options{Images: []string{host + "/team/api:1"}, InsecureRegistry: true}))
+		return e, err
+	}
+	hasNote := func(e *ImageExtractor, s string) bool {
+		for _, n := range e.Notes() {
+			if strings.Contains(n, s) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// A per-registry helper wins over credsStore.
+	e, err := extract(`{"credHelpers":{"`+private.Host()+`":"robot"},"credsStore":"absent"}`, private.Host())
+	if err != nil || hasNote(e, "no registry credentials") {
+		t.Errorf("credHelpers: %v, notes %v", err, e.Notes())
+	}
+	// A missing helper leaves the registry without credentials; the error says why.
+	if _, err := extract(`{"credsStore":"absent"}`, private.Host()); err == nil || !strings.Contains(err.Error(), "docker-credential-absent: not found in PATH") {
+		t.Errorf("missing helper: %v", err)
+	}
+	// Anonymous access succeeds; the report says the helper had nothing.
+	e, err = extract(`{"credsStore":"empty"}`, public.Host())
+	if err != nil || !hasNote(e, "no registry credentials for "+public.Host()+": docker-credential-empty: no credentials stored") {
+		t.Errorf("anonymous: %v, notes %v", err, e.Notes())
+	}
+}
+
 func TestComposeAndSourceExtractors(t *testing.T) {
 	dir := t.TempDir()
 	compose := filepath.Join(dir, "docker-compose.yml")
