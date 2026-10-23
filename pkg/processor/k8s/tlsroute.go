@@ -22,6 +22,7 @@ func NewTLSRouteProcessor() *TLSRouteProcessor {
 		BaseProcessor: processor.NewBaseProcessor(
 			"tlsroute",
 			70,
+			schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "TLSRoute"},
 			schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1alpha2", Kind: "TLSRoute"},
 		),
 	}
@@ -40,6 +41,7 @@ func (p *TLSRouteProcessor) Process(ctx processor.Context, obj *unstructured.Uns
 
 	name := obj.GetName()
 	namespace := obj.GetNamespace()
+
 
 	values, deps := p.extractValues(obj)
 	template := p.generateTemplate(ctx, serviceName, obj.GetName())
@@ -105,7 +107,7 @@ func (p *TLSRouteProcessor) generateTemplate(ctx processor.Context, serviceName,
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
 {{- with $svc.tlsRoute }}
-apiVersion: gateway.networking.k8s.io/v1alpha2
+apiVersion: gateway.networking.k8s.io/v1
 kind: TLSRoute
 metadata:
   name: %s
