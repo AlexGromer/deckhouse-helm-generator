@@ -108,6 +108,10 @@ type ResourceGraph struct {
 	// Groups is a list of resource groups (services).
 	Groups []*ResourceGroup
 
+	Connections []DetectedConnection `json:",omitempty"`
+	Nodes       []ServiceNode        `json:",omitempty"`
+	Topology    *ServiceTopology     `json:",omitempty"`
+
 	// orphans contains resources that couldn't be grouped.
 	Orphans []*ProcessedResource
 
@@ -187,4 +191,52 @@ func (g *ResourceGraph) AddGroup(group *ResourceGroup) {
 // AddOrphan adds an orphan resource to the graph.
 func (g *ResourceGraph) AddOrphan(r *ProcessedResource) {
 	g.Orphans = append(g.Orphans, r)
+}
+
+// AddConnection adds a connection to the graph, deduplicating by ID.
+func (g *ResourceGraph) AddConnection(c DetectedConnection) {
+	if g.Connections == nil {
+		g.Connections = make([]DetectedConnection, 0)
+	}
+	id := c.ID()
+	for i, existing := range g.Connections {
+		if existing.ID() == id {
+			// Deduplicate: merge evidence if not already present
+			for _, newEv := range c.Evidence {
+				found := false
+				for _, exEv := range existing.Evidence {
+					if exEv.Source == newEv.Source && exEv.Key == newEv.Key && exEv.Value == newEv.Value {
+						found = true
+						break
+					}
+				}
+				if !found {
+					g.Connections[i].Evidence = append(g.Connections[i].Evidence, newEv)
+				}
+			}
+
+			// Merge endpoints
+			for _, newEp := range c.Endpoints {
+				found := false
+				for _, exEp := range existing.Endpoints {
+					if exEp.Host == newEp.Host && exEp.Port == newEp.Port && exEp.Protocol == newEp.Protocol && exEp.Path == newEp.Path {
+						found = true
+						break
+					}
+				}
+				if !found {
+					g.Connections[i].Endpoints = append(g.Connections[i].Endpoints, newEp)
+				}
+			}
+
+			// Upgrade confidence if applicable
+			if existing.Confidence == ConfidenceLow && (c.Confidence == ConfidenceMedium || c.Confidence == ConfidenceHigh) {
+				g.Connections[i].Confidence = c.Confidence
+			} else if existing.Confidence == ConfidenceMedium && c.Confidence == ConfidenceHigh {
+				g.Connections[i].Confidence = c.Confidence
+			}
+			return
+		}
+	}
+	g.Connections = append(g.Connections, c)
 }
