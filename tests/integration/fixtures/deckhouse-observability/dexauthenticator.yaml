@@ -1,0 +1,13 @@
+apiVersion: deckhouse.io/v1
+kind: DexAuthenticator
+metadata:
+  name: orders
+  namespace: shop
+spec:
+  applicationDomain: orders.example.com
+  applicationIngressClassName: nginx
+  applicationIngressCertificateSecretName: orders-tls
+  sendAuthorizationHeader: false
+  keepUsersLoggedInFor: 24h
+  allowedGroups:
+  - shop-admins

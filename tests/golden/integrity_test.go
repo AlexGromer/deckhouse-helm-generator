@@ -106,8 +106,25 @@ func references(o object) []string {
 			add("Secret", get(s, "name"))
 		}
 	}
+
+	if labels := podLabelsOf(o); labels != nil {
+		for k, v := range labels {
+			if k == "security.deckhouse.io/security-policy-exception" || strings.HasPrefix(k, "security.deckhouse.io/security-policy-exception.container.") {
+				add("SecurityPolicyException", v)
+			}
+		}
+	}
+
 	m := map[string]interface{}(o)
 	switch o.kind() {
+	case "DexAuthenticator":
+		add("Secret", get(m, "spec", "applicationIngressCertificateSecretName"))
+		for _, app := range list(get(m, "spec", "applications")) {
+			add("Secret", get(app, "ingressSecretName"))
+		}
+		for _, app := range list(get(m, "spec", "additionalApplications")) {
+			add("Secret", get(app, "ingressSecretName"))
+		}
 	case "StatefulSet":
 		add("Service", get(m, "spec", "serviceName"))
 	case "Ingress":

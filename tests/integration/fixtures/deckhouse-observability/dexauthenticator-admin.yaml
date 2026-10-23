@@ -1,0 +1,10 @@
+apiVersion: deckhouse.io/v2alpha1
+kind: DexAuthenticator
+metadata:
+  name: admin
+  namespace: shop
+spec:
+  applications:
+  - domain: admin.example.com
+    ingressClassName: nginx
+    ingressSecretName: admin-tls

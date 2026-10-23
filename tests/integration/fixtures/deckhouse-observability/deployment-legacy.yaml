@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy
+  namespace: shop
+spec:
+  selector:
+    matchLabels:
+      app: legacy
+  template:
+    metadata:
+      labels:
+        app: legacy
+        security.deckhouse.io/security-policy-exception: legacy-hostpath
+    spec:
+      containers:
+      - name: main
+        image: nginx:latest

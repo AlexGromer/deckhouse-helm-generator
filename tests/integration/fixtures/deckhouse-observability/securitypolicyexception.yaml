@@ -1,0 +1,11 @@
+apiVersion: deckhouse.io/v1alpha1
+kind: SecurityPolicyException
+metadata:
+  name: legacy-hostpath
+  namespace: shop
+spec:
+  volumes:
+    hostPath:
+      allowedValues:
+        - path: /var/lib/legacy
+          readOnly: false
