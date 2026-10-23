@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +62,9 @@ func helperCalls(t *testing.T, calls string) []string {
 }
 
 func TestDockerCredentialHelpers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell credential helper test")
+	}
 	ab := base64.StdEncoding.EncodeToString([]byte("a:b"))
 	calls := installHelpers(t, `{
   "auths": {"auths.example": {"auth": "`+ab+`"}, "fileonly.example": {"auth": "`+ab+`"}, "placeholder.example": {}},
@@ -140,6 +144,9 @@ func TestDockerCredentialHelpers(t *testing.T) {
 }
 
 func TestDockerCredentialsHubHelperAndHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell credential helper test")
+	}
 	// A per-registry helper for Docker Hub is keyed by its index URL, as
 	// docker login writes it.
 	calls := installHelpers(t, `{"credHelpers":{"https://index.docker.io/v1/":"fake"}}`, map[string]string{"fake": fakeHelper})
