@@ -126,6 +126,15 @@ func (p BaseProcessor) Supports() []schema.GroupVersionKind {
 
 // Helper functions for common template generation patterns.
 
+// ServiceNameLabelKeys contains common label patterns used to extract a service name.
+var ServiceNameLabelKeys = []string{
+	"app.kubernetes.io/name",
+	"app.kubernetes.io/instance",
+	"app",
+	"name",
+	"component",
+}
+
 // ServiceNameFromLabels extracts a service name from common label patterns.
 func ServiceNameFromLabels(obj *unstructured.Unstructured) string {
 	labels := obj.GetLabels()
@@ -133,16 +142,7 @@ func ServiceNameFromLabels(obj *unstructured.Unstructured) string {
 		return ""
 	}
 
-	// Try common label patterns in order of preference
-	patterns := []string{
-		"app.kubernetes.io/name",
-		"app.kubernetes.io/instance",
-		"app",
-		"name",
-		"component",
-	}
-
-	for _, pattern := range patterns {
+	for _, pattern := range ServiceNameLabelKeys {
 		if v, ok := labels[pattern]; ok && v != "" {
 			return v
 		}
