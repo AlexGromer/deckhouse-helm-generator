@@ -1,0 +1,580 @@
+{
+  "properties": {
+    "spec": {
+      "properties": {
+        "accessLogging": {
+          "items": {
+            "properties": {
+              "disabled": {
+                "nullable": true,
+                "type": "boolean"
+              },
+              "filter": {
+                "properties": {
+                  "expression": {
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "match": {
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "CLIENT_AND_SERVER",
+                      "CLIENT",
+                      "SERVER"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "providers": {
+                "items": {
+                  "properties": {
+                    "name": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        },
+        "metrics": {
+          "items": {
+            "properties": {
+              "overrides": {
+                "items": {
+                  "properties": {
+                    "disabled": {
+                      "nullable": true,
+                      "type": "boolean"
+                    },
+                    "match": {
+                      "oneOf": [
+                        {
+                          "not": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "metric"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "customMetric"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "metric"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "customMetric"
+                          ]
+                        }
+                      ],
+                      "properties": {
+                        "customMetric": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "metric": {
+                          "enum": [
+                            "ALL_METRICS",
+                            "REQUEST_COUNT",
+                            "REQUEST_DURATION",
+                            "REQUEST_SIZE",
+                            "RESPONSE_SIZE",
+                            "TCP_OPENED_CONNECTIONS",
+                            "TCP_CLOSED_CONNECTIONS",
+                            "TCP_SENT_BYTES",
+                            "TCP_RECEIVED_BYTES",
+                            "GRPC_REQUEST_MESSAGES",
+                            "GRPC_RESPONSE_MESSAGES"
+                          ],
+                          "type": "string"
+                        },
+                        "mode": {
+                          "enum": [
+                            "CLIENT_AND_SERVER",
+                            "CLIENT",
+                            "SERVER"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "tagOverrides": {
+                      "additionalProperties": {
+                        "properties": {
+                          "operation": {
+                            "enum": [
+                              "UPSERT",
+                              "REMOVE"
+                            ],
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object",
+                        "x-kubernetes-validations": [
+                          {
+                            "message": "value must be set when operation is UPSERT",
+                            "rule": "((has(self.operation) ? self.operation : \"\") == \"UPSERT\") ? (self.value != \"\") : true"
+                          },
+                          {
+                            "message": "value must not be set when operation is REMOVE",
+                            "rule": "((has(self.operation) ? self.operation : \"\") == \"REMOVE\") ? !has(self.value) : true"
+                          }
+                        ],
+                        "additionalProperties": false
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              },
+              "providers": {
+                "items": {
+                  "properties": {
+                    "name": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              },
+              "reportingInterval": {
+                "type": "string",
+                "x-kubernetes-validations": [
+                  {
+                    "message": "must be a valid duration greater than 1ms",
+                    "rule": "duration(self) >= duration('1ms')"
+                  }
+                ]
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        },
+        "selector": {
+          "properties": {
+            "matchLabels": {
+              "additionalProperties": {
+                "maxLength": 63,
+                "type": "string",
+                "x-kubernetes-validations": [
+                  {
+                    "message": "wildcard not allowed in label value match",
+                    "rule": "!self.contains(\"*\")"
+                  }
+                ]
+              },
+              "maxProperties": 4096,
+              "type": "object",
+              "x-kubernetes-validations": [
+                {
+                  "message": "wildcard not allowed in label key match",
+                  "rule": "self.all(key, !key.contains(\"*\"))"
+                },
+                {
+                  "message": "key must not be empty",
+                  "rule": "self.all(key, key.size() != 0)"
+                }
+              ]
+            }
+          },
+          "type": "object",
+          "additionalProperties": false
+        },
+        "targetRef": {
+          "properties": {
+            "group": {
+              "maxLength": 253,
+              "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+              "type": "string"
+            },
+            "kind": {
+              "maxLength": 63,
+              "minLength": 1,
+              "pattern": "^[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?$",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 253,
+              "minLength": 1,
+              "type": "string"
+            },
+            "namespace": {
+              "type": "string",
+              "x-kubernetes-validations": [
+                {
+                  "message": "cross namespace referencing is not currently supported",
+                  "rule": "self.size() == 0"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object",
+          "additionalProperties": false
+        },
+        "targetRefs": {
+          "items": {
+            "properties": {
+              "group": {
+                "maxLength": 253,
+                "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                "type": "string"
+              },
+              "kind": {
+                "maxLength": 63,
+                "minLength": 1,
+                "pattern": "^[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?$",
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 253,
+                "minLength": 1,
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string",
+                "x-kubernetes-validations": [
+                  {
+                    "message": "cross namespace referencing is not currently supported",
+                    "rule": "self.size() == 0"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "name"
+            ],
+            "type": "object",
+            "additionalProperties": false
+          },
+          "maxItems": 16,
+          "type": "array"
+        },
+        "tracing": {
+          "items": {
+            "properties": {
+              "customTags": {
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "literal"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "environment"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "header"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "formatter"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "required": [
+                        "literal"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "environment"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "header"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "formatter"
+                      ]
+                    }
+                  ],
+                  "properties": {
+                    "environment": {
+                      "properties": {
+                        "defaultValue": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "formatter": {
+                      "properties": {
+                        "value": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "value"
+                      ],
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "header": {
+                      "properties": {
+                        "defaultValue": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "literal": {
+                      "properties": {
+                        "value": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "value"
+                      ],
+                      "type": "object",
+                      "additionalProperties": false
+                    }
+                  },
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "object"
+              },
+              "disableContextPropagation": {
+                "nullable": true,
+                "type": "boolean"
+              },
+              "disableSpanReporting": {
+                "nullable": true,
+                "type": "boolean"
+              },
+              "enableIstioTags": {
+                "nullable": true,
+                "type": "boolean"
+              },
+              "match": {
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "CLIENT_AND_SERVER",
+                      "CLIENT",
+                      "SERVER"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "providers": {
+                "items": {
+                  "properties": {
+                    "name": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              },
+              "randomSamplingPercentage": {
+                "format": "double",
+                "maximum": 100,
+                "minimum": 0,
+                "nullable": true,
+                "type": "number"
+              },
+              "useRequestIdForTraceSampling": {
+                "nullable": true,
+                "type": "boolean"
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "only one of targetRefs or selector can be set",
+          "rule": "(has(self.selector) ? 1 : 0) + (has(self.targetRef) ? 1 : 0) + (has(self.targetRefs) ? 1 : 0) <= 1"
+        }
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "properties": {
+        "conditions": {
+          "items": {
+            "properties": {
+              "lastProbeTime": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "lastTransitionTime": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "observedGeneration": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "x-kubernetes-int-or-string": true
+              },
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        },
+        "observedGeneration": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "x-kubernetes-int-or-string": true
+        },
+        "validationMessages": {
+          "items": {
+            "properties": {
+              "documentationUrl": {
+                "type": "string"
+              },
+              "level": {
+                "enum": [
+                  "UNKNOWN",
+                  "ERROR",
+                  "WARNING",
+                  "INFO"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "x-kubernetes-preserve-unknown-fields": true,
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "additionalProperties": false
+}

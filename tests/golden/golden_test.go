@@ -243,6 +243,11 @@ func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 			t.Errorf("helm template %s: %s", rel, problem)
 		}
 
+		// Run CRD validation
+		for _, problem := range checkCRSchemas(parseStreamForCRD(out)) {
+			t.Errorf("helm template %s CRD validation: %s", rel, problem)
+		}
+
 		// A generated post-renderer must run end to end when a kustomize
 		// implementation is available.
 		if script := filepath.Join(chart, "post-renderer", "kustomize.sh"); fileExists(script) && hasKustomize() {

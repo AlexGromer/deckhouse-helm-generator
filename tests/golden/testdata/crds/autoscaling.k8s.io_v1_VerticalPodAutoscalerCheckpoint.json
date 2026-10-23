@@ -1,0 +1,90 @@
+{
+  "properties": {
+    "apiVersion": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "spec": {
+      "properties": {
+        "containerName": {
+          "type": "string"
+        },
+        "vpaObjectName": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "additionalProperties": false
+    },
+    "status": {
+      "properties": {
+        "cpuHistogram": {
+          "properties": {
+            "bucketWeights": {
+              "type": "object",
+              "x-kubernetes-preserve-unknown-fields": true
+            },
+            "referenceTimestamp": {
+              "format": "date-time",
+              "nullable": true,
+              "type": "string"
+            },
+            "totalWeight": {
+              "type": "number"
+            }
+          },
+          "type": "object",
+          "additionalProperties": false
+        },
+        "firstSampleStart": {
+          "format": "date-time",
+          "nullable": true,
+          "type": "string"
+        },
+        "lastSampleStart": {
+          "format": "date-time",
+          "nullable": true,
+          "type": "string"
+        },
+        "lastUpdateTime": {
+          "format": "date-time",
+          "nullable": true,
+          "type": "string"
+        },
+        "memoryHistogram": {
+          "properties": {
+            "bucketWeights": {
+              "type": "object",
+              "x-kubernetes-preserve-unknown-fields": true
+            },
+            "referenceTimestamp": {
+              "format": "date-time",
+              "nullable": true,
+              "type": "string"
+            },
+            "totalWeight": {
+              "type": "number"
+            }
+          },
+          "type": "object",
+          "additionalProperties": false
+        },
+        "totalSamplesCount": {
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "additionalProperties": false
+}
