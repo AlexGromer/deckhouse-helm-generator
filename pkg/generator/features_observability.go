@@ -78,18 +78,6 @@ func init() {
 		Apply: applyOTelFeature,
 	})
 	RegisterFeature(Feature{
-		Name:        "prometheus-rules",
-		Description: "PrometheusRule with workload alerts (crash loops, OOM kills, restarts, not ready) and optional SLO burn-rate alerts",
-		Params: map[string]string{
-			"severity":            "warning",
-			"runbook-url":         "",
-			"slo-availability":    "",
-			"slo-requests-metric": "http_requests_total",
-			"slo-errors-selector": `code=~"5.."`,
-		},
-		Apply: applyPrometheusRulesFeature,
-	})
-	RegisterFeature(Feature{
 		Name:        "argo-rollouts",
 		Description: "Argo Rollouts: canary Rollout referencing each Deployment (workloadRef), steps configurable in values",
 		Params: map[string]string{

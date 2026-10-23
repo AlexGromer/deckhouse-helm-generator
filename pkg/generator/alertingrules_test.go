@@ -45,7 +45,7 @@ func TestPrometheusRulesFeature(t *testing.T) {
 
 	want := map[string]interface{}{
 		"enabled":    true,
-		"labels":     map[string]interface{}{},
+		"labels":     map[string]interface{}{"prometheus": "main", "component": "rules"},
 		"severity":   "warning",
 		"runbookUrl": "",
 		"slo": map[string]interface{}{

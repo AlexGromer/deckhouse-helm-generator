@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,6 +58,39 @@ func (fc FeatureContext) IntParam(key string) int {
 }
 
 // ListParam returns a comma-separated parameter as a slice (empty items dropped).
+
+// MapParam parses a semicolon-delimited key=value parameter into a map.
+func (fc FeatureContext) MapParam(key string) (map[string]string, error) {
+	val := fc.Param(key)
+	if val == "" {
+		return map[string]string{}, nil
+	}
+
+	out := map[string]string{}
+	for _, pair := range strings.Split(val, ";") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("parameter %s: %q is not key=value", key, pair)
+		}
+		k, v := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+		if _, exists := out[k]; exists {
+			return nil, fmt.Errorf("parameter %s: duplicate key %q", key, k)
+		}
+		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
+			return nil, fmt.Errorf("parameter %s: key %q is invalid: %s", key, k, strings.Join(errs, ", "))
+		}
+		if errs := validation.IsValidLabelValue(v); len(errs) > 0 {
+			return nil, fmt.Errorf("parameter %s: value %q is invalid: %s", key, v, strings.Join(errs, ", "))
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
 func (fc FeatureContext) ListParam(key string) []string {
 	var out []string
 	for _, item := range strings.Split(fc.Params[key], ",") {

@@ -34,11 +34,15 @@ func TestDexAuthenticatorProcessor_Name(t *testing.T) {
 func TestDexAuthenticatorProcessor_Supports(t *testing.T) {
 	proc := NewDexAuthenticatorProcessor()
 	gvks := proc.Supports()
-	if len(gvks) != 1 {
-		t.Fatalf("Expected 1 GVK, got %d", len(gvks))
+	if len(gvks) != 3 {
+		t.Fatalf("Expected 3 GVKs, got %d", len(gvks))
 	}
-	expected := schema.GroupVersionKind{Group: "deckhouse.io", Version: "v1", Kind: "DexAuthenticator"}
-	testutil.AssertEqual(t, expected, gvks[0], "supported GVK")
+	expectedV1 := schema.GroupVersionKind{Group: "deckhouse.io", Version: "v1", Kind: "DexAuthenticator"}
+	expectedV1a := schema.GroupVersionKind{Group: "deckhouse.io", Version: "v1alpha1", Kind: "DexAuthenticator"}
+	expectedV2 := schema.GroupVersionKind{Group: "deckhouse.io", Version: "v2alpha1", Kind: "DexAuthenticator"}
+	testutil.AssertEqual(t, expectedV1, gvks[0], "supported GVK v1")
+	testutil.AssertEqual(t, expectedV1a, gvks[1], "supported GVK v1alpha1")
+	testutil.AssertEqual(t, expectedV2, gvks[2], "supported GVK v2alpha1")
 }
 
 func TestDexAuthenticatorProcessor_ApplicationDomain(t *testing.T) {
@@ -131,4 +135,33 @@ func TestDexAuthenticatorProcessor_ServiceName(t *testing.T) {
 	result, err := proc.Process(ctx, obj)
 	testutil.AssertNoError(t, err)
 	testutil.AssertEqual(t, "grafana-dex", result.ServiceName, "ServiceName")
+}
+
+func TestDexAuthenticatorProcessor_V2Alpha1(t *testing.T) {
+	proc := NewDexAuthenticatorProcessor()
+	ctx := newTestProcessorContext()
+
+	obj := makeDexAuthenticatorObj("app-dex-v2", "default", map[string]interface{}{
+		"applications": []interface{}{
+			map[string]interface{}{
+				"domain": "v2.example.com",
+			},
+		},
+	})
+	obj.SetAPIVersion("deckhouse.io/v2alpha1")
+
+	result, err := proc.Process(ctx, obj)
+	testutil.AssertNoError(t, err)
+
+	tpl := result.TemplateContent
+	testutil.AssertContains(t, tpl, "apiVersion: deckhouse.io/v2alpha1", "apiVersion")
+	testutil.AssertContains(t, tpl, "applications", "applications ref")
+
+	apps, ok := result.Values["applications"].([]interface{})
+	if !ok {
+		t.Fatal("Expected applications as slice")
+	}
+	if len(apps) != 1 {
+		t.Fatalf("Expected 1 app, got %d", len(apps))
+	}
 }
