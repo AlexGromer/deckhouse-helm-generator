@@ -232,12 +232,12 @@ func TestPodTemplate_SchedulingAndContainersForEveryWorkload(t *testing.T) {
 		}
 		tpl := res.TemplateContent
 		for _, field := range []string{"nodeSelector", "tolerations", "affinity", "topologySpreadConstraints", "volumes", "initContainers"} {
-			if !strings.Contains(tpl, "{{- with ."+field+" }}\n") {
+			if !strings.Contains(tpl, "{{- with ."+field+" }}\n") && !strings.Contains(tpl, "{{- with concat (."+field+" | default list) ($dhgInjVolumes | default list) }}\n") && !strings.Contains(tpl, "{{- with concat (."+field+" | default list) $dhgInjVolumes }}\n") && !strings.Contains(tpl, "{{- with concat (."+field+" | default list) ($dhgInj."+field+" | default list) }}\n") {
 				t.Errorf("%s: template does not render %s:\n%s", kind, field, tpl)
 			}
 		}
 		for _, field := range []string{"env", "envFrom", "args", "volumeMounts"} {
-			if !strings.Contains(tpl, "{{- with ."+field+" }}\n") {
+			if !strings.Contains(tpl, "{{- with ."+field+" }}\n") && !strings.Contains(tpl, "{{- with concat (."+field+" | default list) ($dhgInjVolumes | default list) }}\n") && !strings.Contains(tpl, "{{- with concat (."+field+" | default list) $dhgInjVolumes }}\n") && !strings.Contains(tpl, "{{- with concat (."+field+" | default list) ($dhgInj."+field+" | default list) }}\n") {
 				t.Errorf("%s: template does not render container %s", kind, field)
 			}
 		}
