@@ -111,6 +111,10 @@ type ResourceGraph struct {
 	// orphans contains resources that couldn't be grouped.
 	Orphans []*ProcessedResource
 
+	Connections []Connection
+	Nodes       map[NodeID]*LogicalNode
+	Topology    *Topology
+
 	// relFrom and relTo are adjacency indexes for O(1) relationship lookup.
 	relFrom map[ResourceKey][]Relationship
 	relTo   map[ResourceKey][]Relationship
@@ -187,4 +191,16 @@ func (g *ResourceGraph) AddGroup(group *ResourceGroup) {
 // AddOrphan adds an orphan resource to the graph.
 func (g *ResourceGraph) AddOrphan(r *ProcessedResource) {
 	g.Orphans = append(g.Orphans, r)
+}
+
+// ServiceTopology represents the grouping of services into PBCs (Packaged Business Capabilities).
+type ServiceTopology struct {
+	// ServicePBC maps a service group name to its assigned PBC.
+	ServicePBC map[string]string
+
+	// PBCToServices maps a PBC name to a list of service group names.
+	PBCToServices map[string][]string
+
+	// PlatformServices is a list of services assigned to the "platform" PBC (e.g., shared databases).
+	PlatformServices []string
 }
