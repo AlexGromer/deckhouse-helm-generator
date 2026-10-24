@@ -95,6 +95,9 @@ type ProcessedResource struct {
 
 	// Dependencies lists resource keys this resource depends on.
 	Dependencies []ResourceKey
+
+	// Notes holds user-facing observations recorded while processing this resource.
+	Notes []string
 }
 
 // ResourceGroup represents a group of related resources (typically a service).

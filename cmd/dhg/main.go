@@ -665,6 +665,7 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	}
 
 	// Apply optional features (--with)
+	var featureNotes []string
 	if len(opts.withFeatures) > 0 {
 		if opts.verbose {
 			fmt.Printf("\n[4k/5] Applying features: %s\n", strings.Join(opts.withFeatures, ", "))
@@ -673,9 +674,12 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		if err != nil {
 			return err
 		}
-		charts, err = generator.ApplyFeatures(charts, opts.withFeatures, featureOptions, graph)
+		charts, featureNotes, err = generator.ApplyFeaturesWithNotes(charts, opts.withFeatures, featureOptions, graph)
 		if err != nil {
 			return err
+		}
+		for _, n := range featureNotes {
+			fmt.Fprintf(os.Stderr, "Note: %s\n", n)
 		}
 	} else if len(opts.featureOpts) > 0 {
 		return fmt.Errorf("--feature-opt requires the feature to be enabled with --with")
@@ -860,7 +864,7 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		for _, path := range written {
 			fmt.Printf("  Written: %s\n", path)
 		}
-		if err := writeSynthesisReport(opts.outputDir, pipeline); err != nil {
+		if err := writeSynthesisReport(opts.outputDir, pipeline, append(pipeline.notes, featureNotes...)); err != nil {
 			return err
 		}
 	}
@@ -1690,9 +1694,9 @@ func writeKustomizeDir(dir string, kd *generator.KustomizeDir) error {
 
 // writeSynthesisReport prints the notes of a synthesizing source and writes
 // them to SYNTHESIS.md in the output directory.
-func writeSynthesisReport(outputDir string, p *pipelineResult) error {
-	notes := p.synthesis.Notes()
-	for _, n := range notes {
+func writeSynthesisReport(outputDir string, p *pipelineResult, extra []string) error {
+	notes := append(p.synthesis.Notes(), extra...)
+	for _, n := range p.synthesis.Notes() {
 		fmt.Fprintf(os.Stderr, "Note: %s\n", n)
 	}
 	objects := make([]*unstructured.Unstructured, 0, len(p.extracted))

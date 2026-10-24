@@ -40,6 +40,7 @@ type pipelineResult struct {
 	// synthesis is set when the source built the manifests (image, compose,
 	// source) instead of reading them.
 	synthesis extractor.Reporter
+	notes     []string
 }
 
 func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, error) {
@@ -78,6 +79,9 @@ func processResources(ctx context.Context, opts pipelineOptions, extracted []*ty
 		all[r.ResourceKey()] = r
 	}
 
+	var allNotes []string
+	seenNotes := map[string]bool{}
+
 	processed := make([]*types.ProcessedResource, 0, len(extracted))
 	for _, r := range extracted {
 		if err := ctx.Err(); err != nil {
@@ -107,7 +111,16 @@ func processResources(ctx context.Context, opts pipelineOptions, extracted []*ty
 			ValuesPath:      result.ValuesPath,
 			Values:          result.Values,
 			Dependencies:    result.Dependencies,
+			Notes:           result.Notes,
 		})
+
+		for _, note := range result.Notes {
+			if !seenNotes[note] {
+				seenNotes[note] = true
+				allNotes = append(allNotes, note)
+			}
+		}
+
 		if opts.verbose {
 			fmt.Printf("  Processed: %s -> service: %s\n", r.ResourceKey(), result.ServiceName)
 		}
@@ -115,6 +128,12 @@ func processResources(ctx context.Context, opts pipelineOptions, extracted []*ty
 
 	for _, note := range processor.ResolveCollisions(processed) {
 		if !opts.quiet {
+			fmt.Fprintf(os.Stderr, "Note: %s\n", note)
+		}
+	}
+
+	if !opts.quiet {
+		for _, note := range allNotes {
 			fmt.Fprintf(os.Stderr, "Note: %s\n", note)
 		}
 	}
@@ -132,7 +151,7 @@ func processResources(ctx context.Context, opts pipelineOptions, extracted []*ty
 		fmt.Printf("  Detected relationships: %d\n  Service groups: %d\n", len(graph.Relationships), len(graph.Groups))
 	}
 
-	return &pipelineResult{extracted: extracted, processed: processed, graph: graph, externalFiles: externalFiles}, nil
+	return &pipelineResult{extracted: extracted, processed: processed, graph: graph, externalFiles: externalFiles, notes: allNotes}, nil
 }
 
 // extractResources runs the extractor for opts.source, drops duplicate

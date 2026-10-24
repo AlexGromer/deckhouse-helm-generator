@@ -767,3 +767,42 @@ func TestGraphCmd(t *testing.T) {
 		t.Error("expected error for an unknown format")
 	}
 }
+
+// ── TestWriteSynthesisReport ──────────────────────────────────────────
+
+type dummyReporter struct {
+	notes  []string
+	inputs []string
+}
+
+func (r dummyReporter) Notes() []string  { return r.notes }
+func (r dummyReporter) Inputs() []string { return r.inputs }
+
+func TestWriteSynthesisReport(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := &pipelineResult{
+		synthesis: dummyReporter{
+			notes:  []string{"a"},
+			inputs: []string{"in"},
+		},
+	}
+	extra := []string{"b"}
+
+	err := writeSynthesisReport(tmpDir, p, extra)
+	if err != nil {
+		t.Fatalf("writeSynthesisReport failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, "SYNTHESIS.md"))
+	if err != nil {
+		t.Fatalf("could not read SYNTHESIS.md: %v", err)
+	}
+
+	strContent := string(content)
+	if !strings.Contains(strContent, "- a\n") {
+		t.Errorf("expected string '- a\\n' in SYNTHESIS.md, got:\n%s", strContent)
+	}
+	if !strings.Contains(strContent, "- b\n") {
+		t.Errorf("expected string '- b\\n' in SYNTHESIS.md, got:\n%s", strContent)
+	}
+}

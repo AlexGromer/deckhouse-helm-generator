@@ -35,6 +35,7 @@
 - Генерация без манифестов (ADR-058 – ADR-060, [SPEC_SYNTHESIS.md](SPEC_SYNTHESIS.md)): `-s image` (конфигурация образа из registry; учётные данные — из docker `config.json`, включая credential helpers `credHelpers`/`credsStore`), `-s compose` (docker-compose), `-s source` (Dockerfile или, с `--image-config`, config образа; Spring Boot, Quarkus, Micronaut; профили фреймворка → `values-profile-<profile>.yaml`). Невыводимое перечисляется в `SYNTHESIS.md`.
 
 - Источники `cluster` (client-cert, token/`tokenFile`, exec-плагины ExecCredential v1/v1beta1 — kubelogin для OIDC/Dex; `--cluster-secrets skip|mask|include`) и `gitops` (`--git-path`); `--selector` для файлов.
+- Процессоры и `--with`-возможности сообщают невыводимое через `Note:`.
 - `dhg validate` с разбором шаблонов и матрицей версий Kubernetes API, `dhg graph`, `dhg features`.
 - Плагины процессоров (`--plugin`), `.dhg.yaml` (`--config`), `--template-dir`.
 - Golden-набор `tests/golden`: lint/template, сохранность объектов, ссылки и селекторы, fidelity, `helm unittest`, post-renderer, `kustomize build`; CI-job с Helm 3.19.

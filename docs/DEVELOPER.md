@@ -450,6 +450,20 @@ docker run --rm ghcr.io/alexgromer/dhg:v0.8.0 version
 
 ## Справочник: интерфейс Processor
 
+### 3.1 Notes: `Result.Notes` для невыводимого (ADR-059)
+
+Процессоры и `--with`-возможности сообщают невыводимое через `Note:` (например, при отбрасывании несовместимых аннотаций). Процессор заполняет `Result.Notes`, а feature вызывает `fc.Note(...)`. Заметки дедуплицируются и попадают в `SYNTHESIS.md` и в `stderr`. Пример:
+
+```go
+func (p *MyKindProcessor) Process(ctx processor.Context, obj *unstructured.Unstructured) (*processor.Result, error) {
+    res := &processor.Result{/* ... */}
+    if obj.GetAnnotations()["obsolete"] != "" {
+        res.Notes = append(res.Notes, "obsolete annotation ignored")
+    }
+    return res, nil
+}
+```
+
 ```go
 // pkg/processor/processor.go
 type Processor interface {
@@ -464,4 +478,4 @@ type Processor interface {
 }
 ```
 
-`Result`: `Processed`, `ServiceName`, `TemplatePath`, `TemplateContent`, `ValuesPath`, `Values`, `Dependencies`, `ExternalFiles`, `Metadata`.
+`Result`: `Processed`, `ServiceName`, `TemplatePath`, `TemplateContent`, `ValuesPath`, `Values`, `Dependencies`, `ExternalFiles`, `Metadata`, `Notes`.
