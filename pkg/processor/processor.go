@@ -72,6 +72,9 @@ type Result struct {
 	// ExternalFiles lists external files created by this processor.
 	ExternalFiles []*value.ExternalFile
 
+	// Notes contains synthesis notes for the user.
+	Notes []string
+
 	// Metadata contains additional processor-specific metadata.
 	Metadata map[string]interface{}
 }

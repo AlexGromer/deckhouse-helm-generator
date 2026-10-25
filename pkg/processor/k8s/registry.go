@@ -68,6 +68,10 @@ func RegisterAll(r *processor.Registry) {
 	// Flagger
 	r.Register(NewFlaggerCanaryProcessor())
 
+	// Strimzi
+	r.Register(NewKafkaTopicProcessor())
+	r.Register(NewKafkaUserProcessor())
+
 	// Monitoring (Prometheus Operator + Grafana)
 	r.Register(NewServiceMonitorProcessor())
 	r.Register(NewPodMonitorProcessor())
