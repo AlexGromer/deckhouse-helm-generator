@@ -76,6 +76,8 @@ func RegisterAll(r *processor.Registry) {
 
 	// Deckhouse CRDs
 	r.Register(NewModuleConfigProcessor())
+	r.Register(NewPodLoggingConfigProcessor())
+	r.Register(NewClusterLoggingConfigProcessor())
 	r.Register(NewIngressNginxControllerProcessor())
 	r.Register(NewClusterAuthorizationRuleProcessor())
 	r.Register(NewNodeGroupProcessor())
