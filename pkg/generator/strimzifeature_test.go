@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestStrimziFeature(t *testing.T) {
