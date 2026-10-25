@@ -186,3 +186,18 @@ func RenderOutputSet(charts []*types.GeneratedChart, mode types.OutputMode, char
 	}
 	return set, nil
 }
+
+// Get returns a file by relative path.
+func (s *OutputSet) Get(relPath string) (*OutputFile, bool) {
+	for i := range s.Files {
+		if s.Files[i].RelPath == relPath {
+			return &s.Files[i], true
+		}
+	}
+	return nil, false
+}
+
+// Len returns the number of files in the set.
+func (s *OutputSet) Len() int {
+	return len(s.Files)
+}

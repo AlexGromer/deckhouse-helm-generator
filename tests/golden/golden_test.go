@@ -445,6 +445,9 @@ func findCharts(t *testing.T, dir string) []string {
 		if info.IsDir() && info.Name() == "charts" {
 			return filepath.SkipDir
 		}
+		if info.IsDir() && info.Name() == ".dhg" {
+			return filepath.SkipDir
+		}
 		if !info.IsDir() && info.Name() == "Chart.yaml" {
 			charts = append(charts, filepath.Dir(path))
 		}
