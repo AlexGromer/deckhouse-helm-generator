@@ -17,38 +17,38 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 
 	b = append(b, "{{- if and $.Values.gatewayApi $.Values.gatewayApi.enabled }}")
 
-    // Gateway
-    if t.Gateway != nil {
-        gw := t.Gateway
-        b = append(b, "apiVersion: gateway.networking.k8s.io/v1")
-        b = append(b, "kind: Gateway")
-        b = append(b, "metadata:")
-        b = append(b, fmt.Sprintf("  name: %s", gw["name"]))
-        b = append(b, "  namespace: {{ $.Release.Namespace }}")
-        b = append(b, "spec:")
-        if spec, ok := gw["spec"].(map[string]interface{}); ok {
-            if class, ok := spec["gatewayClassName"]; ok {
-                b = append(b, fmt.Sprintf("  gatewayClassName: %s", class))
-            }
-            if listeners, ok := spec["listeners"].([]interface{}); ok {
-                b = append(b, "  listeners:")
-                for _, l := range listeners {
-                    lm := l.(map[string]interface{})
-                    b = append(b, fmt.Sprintf("    - name: %s", lm["name"]))
-                    b = append(b, fmt.Sprintf("      port: %v", lm["port"]))
-                    b = append(b, fmt.Sprintf("      protocol: %s", lm["protocol"]))
-                    if allowed, ok := lm["allowedRoutes"].(map[string]interface{}); ok {
-                        b = append(b, "      allowedRoutes:")
-                        if ns, ok := allowed["namespaces"].(map[string]interface{}); ok {
-                            b = append(b, "        namespaces:")
-                            b = append(b, fmt.Sprintf("          from: %s", ns["from"]))
-                        }
-                    }
-                }
-            }
-        }
-        b = append(b, "---")
-    }
+	// Gateway
+	if t.Gateway != nil {
+		gw := t.Gateway
+		b = append(b, "apiVersion: gateway.networking.k8s.io/v1")
+		b = append(b, "kind: Gateway")
+		b = append(b, "metadata:")
+		b = append(b, fmt.Sprintf("  name: %s", gw["name"]))
+		b = append(b, "  namespace: {{ $.Release.Namespace }}")
+		b = append(b, "spec:")
+		if spec, ok := gw["spec"].(map[string]interface{}); ok {
+			if class, ok := spec["gatewayClassName"]; ok {
+				b = append(b, fmt.Sprintf("  gatewayClassName: %s", class))
+			}
+			if listeners, ok := spec["listeners"].([]interface{}); ok {
+				b = append(b, "  listeners:")
+				for _, l := range listeners {
+					lm := l.(map[string]interface{})
+					b = append(b, fmt.Sprintf("    - name: %s", lm["name"]))
+					b = append(b, fmt.Sprintf("      port: %v", lm["port"]))
+					b = append(b, fmt.Sprintf("      protocol: %s", lm["protocol"]))
+					if allowed, ok := lm["allowedRoutes"].(map[string]interface{}); ok {
+						b = append(b, "      allowedRoutes:")
+						if ns, ok := allowed["namespaces"].(map[string]interface{}); ok {
+							b = append(b, "        namespaces:")
+							b = append(b, fmt.Sprintf("          from: %s", ns["from"]))
+						}
+					}
+				}
+			}
+		}
+		b = append(b, "---")
+	}
 
 	// ListenerSet
 	if len(t.ListenerSets) > 0 {
@@ -211,36 +211,36 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 		b = append(b, "---")
 	}
 
-    // ReferenceGrant
-    for _, rg := range t.ReferenceGrants {
-        b = append(b, "apiVersion: gateway.networking.k8s.io/v1beta1")
-        b = append(b, "kind: ReferenceGrant")
-        b = append(b, "metadata:")
-        b = append(b, fmt.Sprintf("  name: %s", rg["name"]))
-        b = append(b, "  namespace: {{ $.Release.Namespace }}")
-        b = append(b, "spec:")
-        if spec, ok := rg["spec"].(map[string]interface{}); ok {
-            if from, ok := spec["from"].([]interface{}); ok {
-                b = append(b, "  from:")
-                for _, fRaw := range from {
-                    f := fRaw.(map[string]interface{})
-                    b = append(b, fmt.Sprintf("    - group: %s", f["group"]))
-                    b = append(b, fmt.Sprintf("      kind: %s", f["kind"]))
-                    b = append(b, fmt.Sprintf("      namespace: %s", f["namespace"]))
-                }
-            }
-            if to, ok := spec["to"].([]interface{}); ok {
-                b = append(b, "  to:")
-                for _, tRaw := range to {
-                    tg := tRaw.(map[string]interface{})
-                    b = append(b, fmt.Sprintf("    - group: \"%s\"", tg["group"]))
-                    b = append(b, fmt.Sprintf("      kind: %s", tg["kind"]))
-                    b = append(b, fmt.Sprintf("      name: %s", tg["name"]))
-                }
-            }
-        }
-        b = append(b, "---")
-    }
+	// ReferenceGrant
+	for _, rg := range t.ReferenceGrants {
+		b = append(b, "apiVersion: gateway.networking.k8s.io/v1beta1")
+		b = append(b, "kind: ReferenceGrant")
+		b = append(b, "metadata:")
+		b = append(b, fmt.Sprintf("  name: %s", rg["name"]))
+		b = append(b, "  namespace: {{ $.Release.Namespace }}")
+		b = append(b, "spec:")
+		if spec, ok := rg["spec"].(map[string]interface{}); ok {
+			if from, ok := spec["from"].([]interface{}); ok {
+				b = append(b, "  from:")
+				for _, fRaw := range from {
+					f := fRaw.(map[string]interface{})
+					b = append(b, fmt.Sprintf("    - group: %s", f["group"]))
+					b = append(b, fmt.Sprintf("      kind: %s", f["kind"]))
+					b = append(b, fmt.Sprintf("      namespace: %s", f["namespace"]))
+				}
+			}
+			if to, ok := spec["to"].([]interface{}); ok {
+				b = append(b, "  to:")
+				for _, tRaw := range to {
+					tg := tRaw.(map[string]interface{})
+					b = append(b, fmt.Sprintf("    - group: \"%s\"", tg["group"]))
+					b = append(b, fmt.Sprintf("      kind: %s", tg["kind"]))
+					b = append(b, fmt.Sprintf("      name: %s", tg["name"]))
+				}
+			}
+		}
+		b = append(b, "---")
+	}
 
 	b = append(b, "{{- end }}")
 

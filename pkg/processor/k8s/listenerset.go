@@ -42,7 +42,6 @@ func (p *ListenerSetProcessor) Process(ctx processor.Context, obj *unstructured.
 	name := obj.GetName()
 	namespace := obj.GetNamespace()
 
-
 	values, deps := p.extractValues(serviceName, obj)
 	template := p.generateTemplate(ctx, serviceName, name)
 

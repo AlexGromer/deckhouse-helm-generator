@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -105,6 +106,9 @@ func TestImageExtractor(t *testing.T) {
 // TestImageExtractorCredentialHelpers runs docker credential helpers named
 // by a docker config.json against a registry requiring a token.
 func TestImageExtractorCredentialHelpers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell credential helper test is not supported on Windows")
+	}
 	private := registrytest.New()
 	defer private.Close()
 	private.Token, private.User, private.Password = "tok", "robot", "pw"

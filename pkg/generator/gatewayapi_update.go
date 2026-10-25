@@ -44,7 +44,7 @@ func finishApplyGatewayAPIFeature(chart *types.GeneratedChart, fc FeatureContext
 	}
 
 	values := map[string]interface{}{
-		"enabled": true,
+		"enabled":        true,
 		"disableIngress": !opts.KeepIngress,
 		"listenerSet": map[string]interface{}{
 			"enabled": opts.ListenerSet,
@@ -55,8 +55,8 @@ func finishApplyGatewayAPIFeature(chart *types.GeneratedChart, fc FeatureContext
 		return nil, err
 	}
 
-    // Add Gateway API v1.5 section to SYNTHESIS.md
-    out.Notes += "\n## Gateway API v1.5\nGateway API resources were generated via `--with gateway-api`.\n"
+	// Add Gateway API v1.5 section to SYNTHESIS.md
+	out.Notes += "\n## Gateway API v1.5\nGateway API resources were generated via `--with gateway-api`.\n"
 
 	return out, nil
 }

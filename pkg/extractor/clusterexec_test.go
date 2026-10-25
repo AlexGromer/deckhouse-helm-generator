@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,9 @@ import (
 // script body) as a credential plugin, next to the kubeconfig.
 func writeExecKubeconfig(t *testing.T, server, plugin, user string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell credential plugin test is not supported on Windows")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "plugin.sh"), []byte("#!/bin/sh\n"+plugin), 0o755); err != nil {
 		t.Fatal(err)

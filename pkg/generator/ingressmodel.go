@@ -111,8 +111,6 @@ type IngressModel struct {
 	Warnings []string
 }
 
-
-
 // ExtractIngressModel extracts common facts about Ingresses from the graph.
 func ExtractIngressModel(graph *types.ResourceGraph) *IngressModel {
 	model := &IngressModel{}

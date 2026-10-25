@@ -55,9 +55,10 @@ func TestApplyConfigFile_Errors(t *testing.T) {
 }
 
 func TestApplyConfigFile_DefaultIsOptional(t *testing.T) {
+	dir := t.TempDir()
 	wd, _ := os.Getwd()
 	t.Cleanup(func() { _ = os.Chdir(wd) })
-	if err := os.Chdir(t.TempDir()); err != nil {
+	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := applyConfigFile(newGenerateCmd(), ""); err != nil {

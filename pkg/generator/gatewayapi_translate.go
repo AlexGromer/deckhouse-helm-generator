@@ -20,8 +20,8 @@ type IngressFacts struct {
 	ClassName      string            // spec.ingressClassName, else annotation kubernetes.io/ingress.class
 	Controller     IngressController // per Ingress, based on priority list
 	Annotations    map[string]string
-	TemplatePath   string          // ProcessedResource.TemplatePath of the Ingress
-	Hosts          []IngressHost   // grouped by host, first-appearance order
+	TemplatePath   string        // ProcessedResource.TemplatePath of the Ingress
+	Hosts          []IngressHost // grouped by host, first-appearance order
 	TLS            []IngressTLS
 	DefaultBackend *IngressBackend
 }
@@ -40,8 +40,8 @@ type IngressPath struct {
 
 type IngressBackend struct {
 	ServiceName string
-	PortNumber  int32  // from spec, or resolved from PortName; 0 when unresolved
-	PortName    string // as written in the Ingress
+	PortNumber  int32                    // from spec, or resolved from PortName; 0 when unresolved
+	PortName    string                   // as written in the Ingress
 	Service     *types.ProcessedResource // input Service, nil if absent
 	Resource    map[string]interface{}   // non-Service backend, verbatim
 }
@@ -356,12 +356,12 @@ func parseGatewayAPIOptions(fc FeatureContext) (GatewayAPIOptions, error) {
 }
 
 type ingressTranslation struct {
-	HTTPRoutes     []map[string]interface{}
-	TLSRoutes      []map[string]interface{}
-	ListenerSets   []map[string]interface{}
+	HTTPRoutes      []map[string]interface{}
+	TLSRoutes       []map[string]interface{}
+	ListenerSets    []map[string]interface{}
 	ReferenceGrants []map[string]interface{}
-	Gateway        map[string]interface{}
-	Notes          []string
+	Gateway         map[string]interface{}
+	Notes           []string
 }
 
 func translateIngress(f IngressFacts, opts GatewayAPIOptions, globalGatewayName, globalGatewayNamespace string) ingressTranslation {
@@ -381,30 +381,30 @@ func translateIngress(f IngressFacts, opts GatewayAPIOptions, globalGatewayName,
 		gatewayNamespace = globalGatewayNamespace
 	}
 
-    if opts.CreateGateway {
-        gw := map[string]interface{}{
-            "name": gatewayName,
-            "spec": map[string]interface{}{
-                "gatewayClassName": opts.ClassName,
-                "listeners": []interface{}{},
-            },
-        }
-        if opts.ListenerSet {
-            lsList := []interface{}{}
-            lsList = append(lsList, map[string]interface{}{
-                "name": "http",
-                "port": 80,
-                "protocol": "HTTP",
-                "allowedRoutes": map[string]interface{}{
-                    "namespaces": map[string]interface{}{
-                        "from": "Same",
-                    },
-                },
-            })
-            gw["spec"].(map[string]interface{})["listeners"] = lsList
-        }
-        t.Gateway = gw
-    }
+	if opts.CreateGateway {
+		gw := map[string]interface{}{
+			"name": gatewayName,
+			"spec": map[string]interface{}{
+				"gatewayClassName": opts.ClassName,
+				"listeners":        []interface{}{},
+			},
+		}
+		if opts.ListenerSet {
+			lsList := []interface{}{}
+			lsList = append(lsList, map[string]interface{}{
+				"name":     "http",
+				"port":     80,
+				"protocol": "HTTP",
+				"allowedRoutes": map[string]interface{}{
+					"namespaces": map[string]interface{}{
+						"from": "Same",
+					},
+				},
+			})
+			gw["spec"].(map[string]interface{})["listeners"] = lsList
+		}
+		t.Gateway = gw
+	}
 
 	// 1. Group rules by host and process routes
 	for i, hostGrp := range f.Hosts {
@@ -630,31 +630,31 @@ func translateIngress(f IngressFacts, opts GatewayAPIOptions, globalGatewayName,
 	}
 
 	// 4. ReferenceGrant logic
-    // Add ReferenceGrant if we have TLS with separate namespace (mocked check for spec)
-    for _, tls := range f.TLS {
-        if tls.SecretName != "" {
-            // Simplified condition: Add ReferenceGrant if it has cross-ns ref or requested
-            t.ReferenceGrants = append(t.ReferenceGrants, map[string]interface{}{
-                "name": f.Name + "-gateway-secrets",
-                "spec": map[string]interface{}{
-                    "from": []interface{}{
-                        map[string]interface{}{
-                            "group": "gateway.networking.k8s.io",
-                            "kind": "Gateway",
-                            "namespace": gatewayNamespace,
-                        },
-                    },
-                    "to": []interface{}{
-                        map[string]interface{}{
-                            "group": "",
-                            "kind": "Secret",
-                            "name": tls.SecretName,
-                        },
-                    },
-                },
-            })
-        }
-    }
+	// Add ReferenceGrant if we have TLS with separate namespace (mocked check for spec)
+	for _, tls := range f.TLS {
+		if tls.SecretName != "" {
+			// Simplified condition: Add ReferenceGrant if it has cross-ns ref or requested
+			t.ReferenceGrants = append(t.ReferenceGrants, map[string]interface{}{
+				"name": f.Name + "-gateway-secrets",
+				"spec": map[string]interface{}{
+					"from": []interface{}{
+						map[string]interface{}{
+							"group":     "gateway.networking.k8s.io",
+							"kind":      "Gateway",
+							"namespace": gatewayNamespace,
+						},
+					},
+					"to": []interface{}{
+						map[string]interface{}{
+							"group": "",
+							"kind":  "Secret",
+							"name":  tls.SecretName,
+						},
+					},
+				},
+			})
+		}
+	}
 
 	t.Notes = notes
 	return t

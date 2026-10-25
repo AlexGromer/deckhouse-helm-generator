@@ -42,7 +42,6 @@ func (p *TLSRouteProcessor) Process(ctx processor.Context, obj *unstructured.Uns
 	name := obj.GetName()
 	namespace := obj.GetNamespace()
 
-
 	values, deps := p.extractValues(obj)
 	template := p.generateTemplate(ctx, serviceName, obj.GetName())
 

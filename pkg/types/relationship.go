@@ -108,12 +108,12 @@ type ResourceGraph struct {
 	// Groups is a list of resource groups (services).
 	Groups []*ResourceGroup
 
-	Connections []DetectedConnection `json:",omitempty"`
-	Nodes       []ServiceNode        `json:",omitempty"`
-	Topology    *ServiceTopology     `json:",omitempty"`
-
 	// orphans contains resources that couldn't be grouped.
 	Orphans []*ProcessedResource
+
+	Connections []Connection            `json:",omitempty"`
+	Nodes       map[NodeID]*LogicalNode `json:",omitempty"`
+	Topology    *Topology               `json:",omitempty"`
 
 	// relFrom and relTo are adjacency indexes for O(1) relationship lookup.
 	relFrom map[ResourceKey][]Relationship
