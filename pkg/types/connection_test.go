@@ -1,8 +1,9 @@
 package types
 
 import (
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestConnectionID(t *testing.T) {
@@ -72,5 +73,41 @@ func TestAddConnection(t *testing.T) {
 	}
 	if len(c.Evidence) != 2 {
 		t.Errorf("Expected 2 evidences after merge, got %d", len(c.Evidence))
+	}
+}
+
+func TestIsConnection(t *testing.T) {
+	if !RelationServiceCall.IsConnection() {
+		t.Error("RelationServiceCall should be a connection")
+	}
+	if RelationLabelSelector.IsConnection() {
+		t.Error("RelationLabelSelector should not be a connection")
+	}
+}
+
+func TestConnectionMethods(t *testing.T) {
+	if !ConfidenceHigh.AtLeast(ConfidenceMedium) {
+		t.Error("High should be at least Medium")
+	}
+	if ConfidenceUnknown.AtLeast(ConfidenceMedium) {
+		t.Error("Unknown should not be at least Medium")
+	}
+	ct := ConnectionTarget{Node: "external-host:example.com"}
+	if ct.String() != "external-host:example.com" {
+		t.Errorf("unexpected ConnectionTarget.String(): %q", ct.String())
+	}
+	var nilTopo *Topology
+	if nilTopo.PBCOf(ResourceKey{}) != "" {
+		t.Error("expected empty PBC for nil topology")
+	}
+	topo := &Topology{
+		PBCs:       []PBC{{Name: "orders", Services: []string{"order-api"}}},
+		ServicePBC: map[string]string{"order-api": "orders", "orphan": ""},
+	}
+	if _, ok := topo.PBC("orders"); !ok {
+		t.Error("expected to find orders PBC")
+	}
+	if len(topo.Unassigned()) != 1 || topo.Unassigned()[0] != "orphan" {
+		t.Errorf("unexpected Unassigned: %v", topo.Unassigned())
 	}
 }
