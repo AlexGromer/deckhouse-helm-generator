@@ -30,13 +30,13 @@ func TestNginxAnnotations(t *testing.T) {
 	facts := IngressFacts{
 		Controller: ControllerNginx,
 		Annotations: map[string]string{
-			"nginx.ingress.kubernetes.io/ssl-redirect":       "false",
-			"nginx.ingress.kubernetes.io/rewrite-target":     "/$2",
-			"nginx.ingress.kubernetes.io/use-regex":          "true",
-			"nginx.ingress.kubernetes.io/enable-cors":        "true",
-			"nginx.ingress.kubernetes.io/backend-protocol":   "GRPC",
-			"nginx.ingress.kubernetes.io/app-root":           "/home",
-			"nginx.ingress.kubernetes.io/temporal-redirect":  "https://example.com/redir",
+			"nginx.ingress.kubernetes.io/ssl-redirect":      "false",
+			"nginx.ingress.kubernetes.io/rewrite-target":    "/$2",
+			"nginx.ingress.kubernetes.io/use-regex":         "true",
+			"nginx.ingress.kubernetes.io/enable-cors":       "true",
+			"nginx.ingress.kubernetes.io/backend-protocol":  "GRPC",
+			"nginx.ingress.kubernetes.io/app-root":          "/home",
+			"nginx.ingress.kubernetes.io/temporal-redirect": "https://example.com/redir",
 		},
 	}
 	opts := GatewayAPIOptions{
@@ -71,9 +71,9 @@ func TestNginxAnnotationsRedirect(t *testing.T) {
 	facts := IngressFacts{
 		Controller: ControllerNginx,
 		Annotations: map[string]string{
-			"nginx.ingress.kubernetes.io/ssl-redirect": "true",
-			"nginx.ingress.kubernetes.io/canary":       "true",
-			"nginx.ingress.kubernetes.io/canary-weight": "50",
+			"nginx.ingress.kubernetes.io/ssl-redirect":     "true",
+			"nginx.ingress.kubernetes.io/canary":           "true",
+			"nginx.ingress.kubernetes.io/canary-weight":    "50",
 			"nginx.ingress.kubernetes.io/canary-by-header": "X-Canary",
 		},
 	}
@@ -90,8 +90,8 @@ func TestNginxAnnotationsRedirect(t *testing.T) {
 
 func TestGatewayAPICanaryAndRedirect(t *testing.T) {
 	fact := IngressFacts{
-		Name:      "test-ingress",
-		Namespace: "test-ns",
+		Name:       "test-ingress",
+		Namespace:  "test-ns",
 		Controller: ControllerNginx,
 		Hosts: []IngressHost{
 			{
@@ -102,9 +102,9 @@ func TestGatewayAPICanaryAndRedirect(t *testing.T) {
 			},
 		},
 		Annotations: map[string]string{
-			"nginx.ingress.kubernetes.io/ssl-redirect": "true",
-			"nginx.ingress.kubernetes.io/canary":       "true",
-			"nginx.ingress.kubernetes.io/canary-weight": "50",
+			"nginx.ingress.kubernetes.io/ssl-redirect":     "true",
+			"nginx.ingress.kubernetes.io/canary":           "true",
+			"nginx.ingress.kubernetes.io/canary-weight":    "50",
 			"nginx.ingress.kubernetes.io/canary-by-header": "X-Canary",
 		},
 		TLS: []IngressTLS{

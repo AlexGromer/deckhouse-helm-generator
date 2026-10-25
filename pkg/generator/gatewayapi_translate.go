@@ -3,6 +3,7 @@ package generator
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -341,6 +342,8 @@ type GatewayAPIOptions struct {
 	GatewayNamespace string
 	ListenerSet      bool
 	KeepIngress      bool
+	CORS             bool
+	Implementation   string
 }
 
 func parseGatewayAPIOptions(fc FeatureContext) (GatewayAPIOptions, error) {
@@ -351,12 +354,15 @@ func parseGatewayAPIOptions(fc FeatureContext) (GatewayAPIOptions, error) {
 		GatewayNamespace: fc.Param("gateway-namespace"),
 		ListenerSet:      fc.BoolParam("listener-set"),
 		KeepIngress:      fc.BoolParam("keep-ingress"),
+		CORS:             fc.BoolParam("cors"),
+		Implementation:   fc.Param("implementation"),
 	}
 	return opts, nil
 }
 
 type ingressTranslation struct {
 	HTTPRoutes      []map[string]interface{}
+	GRPCRoutes      []map[string]interface{}
 	TLSRoutes       []map[string]interface{}
 	ListenerSets    []map[string]interface{}
 	ReferenceGrants []map[string]interface{}
@@ -371,6 +377,8 @@ func translateIngress(f IngressFacts, opts GatewayAPIOptions, globalGatewayName,
 	note := func(format string, a ...interface{}) {
 		notes = append(notes, fmt.Sprintf("Ingress %s/%s: %s", f.Namespace, f.Name, fmt.Sprintf(format, a...)))
 	}
+
+	ann := nginxAnnotations(f, opts, note)
 
 	gatewayName := opts.GatewayName
 	if gatewayName == "" {
@@ -469,21 +477,79 @@ func translateIngress(f IngressFacts, opts GatewayAPIOptions, globalGatewayName,
 
 		// Process paths into matches and backendRefs
 		var rules []interface{}
+		var redirectMatches []interface{}
+		if !ann.GRPC {
+			for _, er := range ann.ExtraRules {
+				rules = append(rules, er)
+			}
+		}
+		isCanary := strings.EqualFold(strings.TrimSpace(f.Annotations["nginx.ingress.kubernetes.io/canary"]), "true")
+		canaryWeight := 0
+		if isCanary {
+			if w, err := strconv.Atoi(strings.TrimSpace(f.Annotations["nginx.ingress.kubernetes.io/canary-weight"])); err == nil && w > 0 {
+				canaryWeight = w
+			}
+		}
+		canaryHeader := strings.TrimSpace(f.Annotations["nginx.ingress.kubernetes.io/canary-by-header"])
+		canaryHeaderVal := strings.TrimSpace(f.Annotations["nginx.ingress.kubernetes.io/canary-by-header-value"])
+		if canaryHeader != "" && canaryHeaderVal == "" {
+			canaryHeaderVal = "always"
+		}
+
 		for _, p := range hostGrp.Paths {
-			match, ok := pathMatch(p, f, note)
+			var match map[string]interface{}
+			var pathFilters []map[string]interface{}
+			var ok bool
+			if ann.PathRewrite != nil {
+				match, pathFilters, ok = ann.PathRewrite(p)
+			}
 			if !ok {
-				continue
+				match, ok = pathMatch(p, f, note)
+				if !ok {
+					continue
+				}
+				if ann.ForceRegex {
+					if pm, ok := match["path"].(map[string]interface{}); ok {
+						pm["type"] = "RegularExpression"
+					}
+				}
+			}
+
+			if canaryHeader != "" {
+				match["headers"] = []interface{}{
+					map[string]interface{}{
+						"type":  "Exact",
+						"name":  canaryHeader,
+						"value": canaryHeaderVal,
+					},
+				}
 			}
 
 			bRef, ok := backendRef(p.Backend, f, note)
 			if !ok {
 				continue
 			}
+			if canaryWeight > 0 {
+				bRef["weight"] = canaryWeight
+			}
 
-			rules = append(rules, map[string]interface{}{
+			redirectMatches = append(redirectMatches, match)
+
+			rule := map[string]interface{}{
 				"matches":     []interface{}{match},
 				"backendRefs": []interface{}{bRef},
-			})
+			}
+			var allFilters []interface{}
+			for _, flt := range pathFilters {
+				allFilters = append(allFilters, flt)
+			}
+			for _, flt := range ann.RuleFilters {
+				allFilters = append(allFilters, flt)
+			}
+			if len(allFilters) > 0 {
+				rule["filters"] = allFilters
+			}
+			rules = append(rules, rule)
 		}
 
 		if len(rules) > 0 {
@@ -494,17 +560,53 @@ func translateIngress(f IngressFacts, opts GatewayAPIOptions, globalGatewayName,
 					"rules":      rules,
 				},
 			}
+			if len(ann.RouteAnnotations) > 0 {
+				route["annotations"] = ann.RouteAnnotations
+			}
 			if host != "" {
 				route["spec"].(map[string]interface{})["hostnames"] = []string{host}
 			}
-			t.HTTPRoutes = append(t.HTTPRoutes, route)
+			if ann.GRPC {
+				t.GRPCRoutes = append(t.GRPCRoutes, route)
+			} else {
+				t.HTTPRoutes = append(t.HTTPRoutes, route)
+			}
+		}
+
+		if hasTLS && !ann.GRPC && f.Controller == ControllerNginx && (ann.SSLRedirect == nil || *ann.SSLRedirect) && len(redirectMatches) > 0 {
+			var redirRules []interface{}
+			for _, m := range redirectMatches {
+				redirRules = append(redirRules, map[string]interface{}{
+					"matches": []interface{}{m},
+					"filters": []interface{}{
+						map[string]interface{}{
+							"type": "RequestRedirect",
+							"requestRedirect": map[string]interface{}{
+								"scheme":     "https",
+								"statusCode": 308,
+							},
+						},
+					},
+				})
+			}
+			redirRoute := map[string]interface{}{
+				"name": boundedName(routeName, "-redirect"),
+				"spec": map[string]interface{}{
+					"parentRefs": parentRefs,
+					"rules":      redirRules,
+				},
+			}
+			if host != "" {
+				redirRoute["spec"].(map[string]interface{})["hostnames"] = []string{host}
+			}
+			t.HTTPRoutes = append(t.HTTPRoutes, redirRoute)
 		}
 
 		if hasTLS {
 			// In ALB, SSL passthrough creates a TLSRoute
 			if val, ok := f.Annotations["nginx.ingress.kubernetes.io/ssl-passthrough"]; ok && val == "true" {
 				tlsRoute := map[string]interface{}{
-					"name": routeName + "-tls",
+					"name":       routeName + "-tls",
 					"apiVersion": "gateway.networking.k8s.io/v1alpha2",
 					"spec": map[string]interface{}{
 						"parentRefs": parentRefs,

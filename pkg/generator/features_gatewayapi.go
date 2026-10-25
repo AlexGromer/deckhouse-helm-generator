@@ -17,6 +17,8 @@ func init() {
 			"gateway-namespace": "",
 			"listener-set":      "false",
 			"keep-ingress":      "true",
+			"cors":              "true",
+			"implementation":    "standard",
 		},
 		Apply: applyGatewayAPIFeature,
 	})
