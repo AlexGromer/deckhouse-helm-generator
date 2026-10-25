@@ -380,6 +380,9 @@ func translateIngress(f IngressFacts, opts GatewayAPIOptions, globalGatewayName,
 	if gatewayNamespace == "" {
 		gatewayNamespace = globalGatewayNamespace
 	}
+	if gatewayName == "" {
+		gatewayName = f.Name + "-gateway"
+	}
 
 	if opts.CreateGateway {
 		gw := map[string]interface{}{
@@ -502,6 +505,7 @@ func translateIngress(f IngressFacts, opts GatewayAPIOptions, globalGatewayName,
 			if val, ok := f.Annotations["nginx.ingress.kubernetes.io/ssl-passthrough"]; ok && val == "true" {
 				tlsRoute := map[string]interface{}{
 					"name": routeName + "-tls",
+					"apiVersion": "gateway.networking.k8s.io/v1alpha2",
 					"spec": map[string]interface{}{
 						"parentRefs": parentRefs,
 						"rules": []interface{}{

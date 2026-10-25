@@ -102,7 +102,7 @@ func TestTLSRoute_Extraction(t *testing.T) {
 
 			// Check template
 			tpl := result.TemplateContent
-			testutil.AssertContains(t, tpl, "apiVersion: gateway.networking.k8s.io/v1\n", "api version")
+			testutil.AssertContains(t, tpl, "apiVersion: gateway.networking.k8s.io/" + strings.Split(obj.GetAPIVersion(), "/")[1] + "\n", "api version")
 			testutil.AssertContains(t, tpl, "kind: TLSRoute", "kind")
 			if !strings.Contains(tpl, "parentRefs") {
 				t.Error("Template should reference parentRefs")
