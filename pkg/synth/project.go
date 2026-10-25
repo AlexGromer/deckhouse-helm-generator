@@ -137,7 +137,7 @@ func DetectProject(dir string, notes *Notes) (*Project, error) {
 	}
 
 	if v := p.Properties[p.fw.nameKey]; v != "" {
-		if resolved, missing := resolvePlaceholders(v); missing == "" {
+		if resolved, missing := ResolvePlaceholders(v); missing == "" {
 			p.Name = resolved
 		}
 	}

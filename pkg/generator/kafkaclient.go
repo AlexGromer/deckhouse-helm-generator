@@ -8,7 +8,7 @@ import (
 )
 
 func ApplyKafkaClient(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {
-	facts := kafkaclient.Extract(fc.Graph)
+	facts := kafkaclient.ExtractFromGraph(fc.Graph)
 
 	if len(facts.Clients) == 0 {
 		return chart, nil

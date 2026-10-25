@@ -46,7 +46,7 @@ func TestExtract(t *testing.T) {
 	}
 	graph.AddResource(processedRes)
 
-	facts := Extract(graph)
+	facts := ExtractFromGraph(graph)
 
 	if facts.Mode != KafkaModeExternal {
 		t.Errorf("Expected External mode, got %v", facts.Mode)
