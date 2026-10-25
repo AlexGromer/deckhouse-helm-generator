@@ -216,5 +216,5 @@ spec:
 %s{{- end }}
 {{- end }}
 `, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName, annotationsPart,
-		podTemplate(ctx.ChartName, 2, "Never"))
+		podTemplate(ctx.ChartName, 2, "Never", "Job/"+name))
 }
