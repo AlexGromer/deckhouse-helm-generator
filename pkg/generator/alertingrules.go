@@ -188,6 +188,22 @@ func applyPrometheusRulesFeature(chart *types.GeneratedChart, fc FeatureContext)
 		return nil, fmt.Errorf("slo-requests-metric must not be empty")
 	}
 
+	labelsMap, err := fc.MapParam("labels")
+	if err != nil {
+		return nil, fmt.Errorf("prometheus-rules: %w", err)
+	}
+
+	// Backwards compatibility with 'prometheus' param
+	prom := fc.Param("prometheus")
+	if prom != "main" || labelsMap["prometheus"] == "main" {
+		labelsMap["prometheus"] = prom
+	}
+
+	labelsIface := map[string]interface{}{}
+	for k, v := range labelsMap {
+		labelsIface[k] = v
+	}
+
 	workloads := resourceTemplates(chart, isKind("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"))
 	names := nameExpressions(workloads)
 	prefix := chartHelperPrefix(chart)
@@ -200,9 +216,9 @@ func applyPrometheusRulesFeature(chart *types.GeneratedChart, fc FeatureContext)
 	if err := addTemplate(out, "templates/prometheus-rules.yaml", content); err != nil {
 		return nil, err
 	}
-	err := addFeatureValues(out, "prometheusRules", map[string]interface{}{
+	err = addFeatureValues(out, "prometheusRules", map[string]interface{}{
 		"enabled":    true,
-		"labels":     map[string]interface{}{},
+		"labels":     labelsIface,
 		"severity":   fc.Param("severity"),
 		"runbookUrl": fc.Param("runbook-url"),
 		"slo":        slo,

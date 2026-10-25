@@ -22,6 +22,8 @@ func NewDexAuthenticatorProcessor() *DexAuthenticatorProcessor {
 			"dexauthenticator",
 			50,
 			schema.GroupVersionKind{Group: "deckhouse.io", Version: "v1", Kind: "DexAuthenticator"},
+			schema.GroupVersionKind{Group: "deckhouse.io", Version: "v1alpha1", Kind: "DexAuthenticator"},
+			schema.GroupVersionKind{Group: "deckhouse.io", Version: "v2alpha1", Kind: "DexAuthenticator"},
 		),
 	}
 }
@@ -34,7 +36,7 @@ func (p *DexAuthenticatorProcessor) Process(ctx processor.Context, obj *unstruct
 
 	name := obj.GetName()
 	values := p.extractValues(obj)
-	template := p.generateTemplate(ctx, name)
+	template := p.generateTemplate(ctx, name, obj.GetAPIVersion())
 
 	return &processor.Result{
 		Processed:       true,
@@ -54,31 +56,21 @@ func (p *DexAuthenticatorProcessor) extractValues(obj *unstructured.Unstructured
 		values["spec"] = spec
 	}
 
-	if domain, ok, _ := unstructured.NestedString(obj.Object, "spec", "applicationDomain"); ok {
-		values["applicationDomain"] = domain
-	}
-
-	if sendAuth, ok, _ := unstructured.NestedBool(obj.Object, "spec", "sendAuthorizationHeader"); ok {
-		values["sendAuthorizationHeader"] = sendAuth
-	}
-
-	if className, ok, _ := unstructured.NestedString(obj.Object, "spec", "applicationIngressClassName"); ok {
-		values["applicationIngressClassName"] = className
-	}
-
-	if groups, ok, _ := unstructured.NestedSlice(obj.Object, "spec", "allowedGroups"); ok {
-		values["allowedGroups"] = groups
+	for _, key := range []string{"applicationDomain", "sendAuthorizationHeader", "applicationIngressClassName", "applicationIngressCertificateSecretName", "keepUsersLoggedInFor", "allowedGroups", "whitelistSourceRanges", "nodeSelector", "tolerations", "applications"} {
+		if val, ok, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec", key); ok {
+			values[key] = val
+		}
 	}
 
 	return values
 }
 
-func (p *DexAuthenticatorProcessor) generateTemplate(ctx processor.Context, name string) string {
+func (p *DexAuthenticatorProcessor) generateTemplate(ctx processor.Context, name, apiVersion string) string {
 	sanitized := processor.SanitizeServiceName(name)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- with $svc.dexAuthenticator }}
-apiVersion: deckhouse.io/v1
+apiVersion: %s
 kind: DexAuthenticator
 metadata:
   name: %s
@@ -86,6 +78,6 @@ metadata:
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName,
-		processor.SpecOverlay(".", "applicationDomain", "sendAuthorizationHeader", "applicationIngressClassName", "allowedGroups"))
+`, sanitized, apiVersion, processor.ObjectName(name), ctx.ChartName,
+		processor.SpecOverlay(".", "applicationDomain", "sendAuthorizationHeader", "applicationIngressClassName", "applicationIngressCertificateSecretName", "keepUsersLoggedInFor", "allowedGroups", "whitelistSourceRanges", "nodeSelector", "tolerations", "applications"))
 }

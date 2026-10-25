@@ -64,6 +64,8 @@ func RegisterAll(r *processor.Registry) {
 	r.Register(NewGatewayProcessor())
 	r.Register(NewGRPCRouteProcessor())
 	r.Register(NewTLSRouteProcessor())
+	r.Register(NewListenerSetProcessor())
+	r.Register(NewReferenceGrantProcessor())
 
 	// Flagger
 	r.Register(NewFlaggerCanaryProcessor())
