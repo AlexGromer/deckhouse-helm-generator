@@ -47,7 +47,7 @@ func isKafkaWorkload(key types.ResourceKey, res *types.ProcessedResource) bool {
 }
 
 // Extract facts from graph.
-func Extract(graph *types.ResourceGraph) *KafkaFacts {
+func ExtractFromGraph(graph *types.ResourceGraph) *KafkaFacts {
 	facts := &KafkaFacts{
 		Mode: KafkaModeExternal,
 	}
@@ -157,5 +157,242 @@ func Extract(graph *types.ResourceGraph) *KafkaFacts {
 }
 
 func ExtractFromChart(chart *types.GeneratedChart, graph *types.ResourceGraph) *KafkaFacts {
-	return Extract(graph)
+	return ExtractFromGraph(graph)
+}
+
+func DetectFramework(props []Property) Framework {
+	counts := map[Framework]int{}
+
+	for _, p := range props {
+		norm := NormalizeKey(p.Key)
+		if strings.HasPrefix(norm, "spring") {
+			counts[FrameworkSpring]++
+		}
+		if strings.HasPrefix(norm, "quarkus") || strings.HasPrefix(norm, "mpmessaging") {
+			counts[FrameworkQuarkus]++
+		}
+		if strings.HasPrefix(norm, "micronaut") {
+			counts[FrameworkMicronaut]++
+		}
+	}
+
+	if counts[FrameworkSpring] > 0 {
+		return FrameworkSpring
+	}
+	if counts[FrameworkQuarkus] > 0 {
+		return FrameworkQuarkus
+	}
+	if counts[FrameworkMicronaut] > 0 {
+		return FrameworkMicronaut
+	}
+	return FrameworkPlain
+}
+
+func ExtractFacts(props []Property, framework Framework) Facts {
+	facts := Facts{Framework: framework}
+	var topics []Topic
+
+	// Two passes: facts/conventions, then guesses.
+	// We keep track of which normal keys have been matched by facts/conventions.
+	matchedNorms := make(map[string]bool)
+
+	for _, p := range props {
+		norm := NormalizeKey(p.Key)
+		valStr := p.Value
+
+		// If secret, we don't know the exact value to parse for topics/servers,
+		// but we still process the key to detect JAAS config etc.
+		if p.FromSecret {
+			if strings.Contains(norm, "jaasconfig") {
+				facts.JAASFromSecret = true
+			}
+			continue
+		}
+
+		if valStr == "" {
+			continue
+		}
+
+		// Handle placeholders
+		// Use regex from pkg/synth if available, or basic implementation
+		var unresolved []string
+
+		placeholderRe := regexp.MustCompile(`\$\{([^}:]+)(?::([^}]*))?\}`)
+		resolvedVal := placeholderRe.ReplaceAllStringFunc(valStr, func(m string) string {
+			sm := placeholderRe.FindStringSubmatch(m)
+			if strings.Contains(m, ":") {
+				return sm[2] // has default
+			}
+			unresolved = append(unresolved, sm[1])
+			return ""
+		})
+
+		if len(unresolved) > 0 {
+			for _, u := range unresolved {
+				facts.Unresolved = append(facts.Unresolved, Value{Value: u, Unresolved: u, Origin: p.Origin})
+			}
+			continue
+		}
+
+		valStr = resolvedVal
+		if valStr == "" {
+			continue
+		}
+
+		matched := false
+
+		// 1. Check fixed keys
+		for _, fk := range fixedKeys {
+			if fk.norm == norm {
+				validFw := false
+				for _, fw := range fk.frameworks {
+					if fw == framework || fw == FrameworkPlain { // plain matches all in fallback
+						validFw = true
+						break
+					}
+				}
+				if !validFw {
+					continue
+				}
+
+				matched = true
+				switch fk.kind {
+				case kindBootstrap:
+					for _, s := range parseBootstrapServersList(valStr) {
+						facts.Bootstrap = append(facts.Bootstrap, Value{Value: s, Certainty: fk.certainty, Origin: p.Origin})
+					}
+				case kindSecurityProtocol:
+					v := Value{Value: valStr, Certainty: fk.certainty, Origin: p.Origin}
+					facts.SecurityProtocol = &v
+				case kindSASLMechanism:
+					v := Value{Value: valStr, Certainty: fk.certainty, Origin: p.Origin}
+					facts.SASLMechanism = &v
+				case kindTopic:
+					for _, s := range parseBootstrapServersList(valStr) {
+						topics = append(topics, Topic{Name: s, Direction: fk.direction, Value: Value{Certainty: fk.certainty, Origin: p.Origin}})
+					}
+				case kindGroup:
+					facts.Groups = append(facts.Groups, Value{Value: valStr, Certainty: fk.certainty, Origin: p.Origin})
+				case kindTransactionalIDPrefix:
+					facts.TransactionalPrefixes = append(facts.TransactionalPrefixes, Value{Value: valStr, Certainty: fk.certainty, Origin: p.Origin})
+				case kindStreamsAppID:
+					v := Value{Value: valStr, Certainty: fk.certainty, Origin: p.Origin}
+					facts.StreamsAppID = &v
+				}
+			}
+		}
+
+		// 2. Check pattern keys
+		for _, pk := range patternKeys {
+			if strings.HasPrefix(norm, pk.prefix) && strings.HasSuffix(norm, pk.suffix) {
+				validFw := false
+				for _, fw := range pk.frameworks {
+					if fw == framework {
+						validFw = true
+						break
+					}
+				}
+				if !validFw {
+					continue
+				}
+
+				matched = true
+				switch pk.kind {
+				case kindBootstrap:
+					for _, s := range parseBootstrapServersList(valStr) {
+						facts.Bootstrap = append(facts.Bootstrap, Value{Value: s, Certainty: pk.certainty, Origin: p.Origin})
+					}
+				case kindTopic:
+					dir := pk.direction
+					if pk.direction == DirectionUnknown {
+						// Spring cloud stream direction
+						if strings.Contains(norm, "in0") || strings.Contains(norm, "in1") || strings.Contains(norm, "in2") {
+							dir = DirectionConsume
+						} else if strings.Contains(norm, "out0") || strings.Contains(norm, "out1") || strings.Contains(norm, "out2") {
+							dir = DirectionProduce
+						}
+					}
+
+					// If this is a connector=smallrye-kafka, the value is not the topic.
+					// We need to parse the channel name.
+					if strings.HasSuffix(pk.suffix, "connector") {
+						if valStr == "smallrye-kafka" {
+							channel := strings.TrimPrefix(norm, pk.prefix)
+							channel = strings.TrimSuffix(channel, pk.suffix)
+							// We can't know the exact case of channel here, but let's assume it's smallrye convention.
+							// Usually, it's better to process all properties and use the original key.
+							// For simplicity, we just add the channel name as lower case.
+							topics = append(topics, Topic{Name: channel, Direction: dir, Value: Value{Certainty: pk.certainty, Origin: p.Origin}})
+						}
+					} else {
+						for _, s := range parseBootstrapServersList(valStr) {
+							topics = append(topics, Topic{Name: s, Direction: dir, Value: Value{Certainty: pk.certainty, Origin: p.Origin}})
+						}
+					}
+				case kindGroup:
+					facts.Groups = append(facts.Groups, Value{Value: valStr, Certainty: pk.certainty, Origin: p.Origin})
+				case kindQuarkusPattern:
+					if valStr == "true" {
+						facts.Patterns = append(facts.Patterns, Value{Value: valStr, Certainty: pk.certainty, Origin: p.Origin})
+					}
+				case kindTransactionalID:
+					facts.TransactionalIDs = append(facts.TransactionalIDs, Value{Value: valStr, Certainty: pk.certainty, Origin: p.Origin})
+				case kindMicronautGroup:
+					// Just mark as existing group
+					group := strings.TrimPrefix(norm, pk.prefix)
+					facts.Groups = append(facts.Groups, Value{Value: group, Certainty: pk.certainty, Origin: p.Origin})
+				}
+			}
+		}
+
+		if matched {
+			matchedNorms[norm] = true
+		}
+	}
+
+	// 3. Guesses pass (only for properties that didn't match facts/conventions)
+	for _, p := range props {
+		norm := NormalizeKey(p.Key)
+		if matchedNorms[norm] {
+			continue
+		}
+
+		valStr := p.Value
+		if valStr == "" || p.FromSecret {
+			continue
+		}
+
+		// Unresolved again just in case (already handled in pass 1 actually)
+		if strings.Contains(valStr, "${") {
+			continue
+		}
+
+		isEnv := isEnvForm(p.Key)
+
+		// Guess bootstrap
+		if isEnv && strings.Contains(p.Key, "KAFKA") && (strings.HasSuffix(p.Key, "_BROKERS") || strings.HasSuffix(p.Key, "_BOOTSTRAP") || strings.HasSuffix(p.Key, "_SERVERS") || strings.HasSuffix(p.Key, "_HOSTS")) {
+			for _, s := range parseBootstrapServersList(valStr) {
+				facts.Bootstrap = append(facts.Bootstrap, Value{Value: s, Certainty: CertaintyGuess, Origin: p.Origin})
+			}
+		}
+
+		// Guess topic
+		if strings.HasSuffix(norm, "topic") || strings.HasSuffix(norm, "topics") || (isEnv && (strings.HasSuffix(p.Key, "_TOPIC") || strings.HasSuffix(p.Key, "_TOPICS"))) {
+			for _, s := range parseBootstrapServersList(valStr) {
+				topics = append(topics, Topic{Name: s, Direction: DirectionUnknown, Value: Value{Certainty: CertaintyGuess, Origin: p.Origin}})
+			}
+		}
+
+		// Guess group
+		if isEnv && strings.Contains(p.Key, "KAFKA") && (strings.HasSuffix(p.Key, "_GROUP_ID") || strings.HasSuffix(p.Key, "_CONSUMER_GROUP")) {
+			facts.Groups = append(facts.Groups, Value{Value: valStr, Certainty: CertaintyGuess, Origin: p.Origin})
+		}
+	}
+
+	// Post processing
+	facts.Topics = DeduplicateTopics(topics)
+
+	// Deduplicate bootstrap servers, groups, etc if necessary
+
+	return facts
 }

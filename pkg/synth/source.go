@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -110,9 +109,19 @@ func (s *SourceProject) App(image, profile string, notes *Notes) App {
 		case Micronaut:
 			applyMicronaut(c, p)
 		}
+
 		if profile != "" {
 			app.SetEnv(p.fw.profileEnv, profile)
 		}
+
+		kafkaFacts, kafkaNotes := ExtractKafkaFacts(c.props, "file ")
+		for _, note := range kafkaNotes {
+			notes.Addf("%s", note)
+		}
+		// In a full implementation we would store kafkaFacts somewhere,
+		// but per requirements here we just call it and generate notes for now
+		_ = kafkaFacts
+
 		// EXPOSE only documents a port; the framework says where the app listens.
 		var exposed []string
 		for _, port := range app.Ports {
@@ -131,22 +140,4 @@ func (s *SourceProject) App(image, profile string, notes *Notes) App {
 		notes.Addf("%s: no port found, so no Service was created", app.Name)
 	}
 	return app
-}
-
-var placeholder = regexp.MustCompile(`\$\{([^}:]+)(?::([^}]*))?\}`)
-
-// resolvePlaceholders replaces ${NAME:default} by its default; it returns
-// the names of placeholders without a default. Spring, Quarkus (SmallRye
-// Config) and Micronaut share this syntax.
-func resolvePlaceholders(v string) (string, string) {
-	var missing []string
-	out := placeholder.ReplaceAllStringFunc(v, func(m string) string {
-		sm := placeholder.FindStringSubmatch(m)
-		if strings.Contains(m, ":") {
-			return sm[2]
-		}
-		missing = append(missing, sm[1])
-		return ""
-	})
-	return out, strings.Join(missing, ", ")
 }

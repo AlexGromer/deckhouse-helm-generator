@@ -22,7 +22,7 @@ func (c *config) get(key string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	resolved, unresolved := resolvePlaceholders(v)
+	resolved, unresolved := ResolvePlaceholders(v)
 	if unresolved != "" {
 		c.notes.Addf("%s: %s = %s needs %s at runtime; set it in values", c.app.Name, key, v, unresolved)
 	}
