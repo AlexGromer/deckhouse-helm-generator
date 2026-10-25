@@ -74,6 +74,12 @@ type Result struct {
 
 	// Metadata contains additional processor-specific metadata.
 	Metadata map[string]interface{}
+
+	// Notes holds user-facing observations recorded while processing this
+	// resource (for example, deprecated API version notices or fields that
+	// require manual configuration). The generator deduplicates and prints
+	// them as "Note: <msg>" on stderr and in SYNTHESIS.md.
+	Notes []string
 }
 
 // Processor defines the interface for processing Kubernetes resources.

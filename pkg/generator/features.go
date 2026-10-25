@@ -36,6 +36,24 @@ type FeatureContext struct {
 	Graph *types.ResourceGraph
 	// Params holds the feature's parameters, defaults merged with user values.
 	Params map[string]string
+	// Notes is an optional sink for non-deducible observations.
+	Notes *[]string
+}
+
+// Note adds a user-facing observation to the feature's notes sink,
+// deduplicating exact matches and ignoring empty strings. It does nothing
+// if the context has no sink.
+func (fc FeatureContext) Note(msg string) {
+	msg = strings.TrimSpace(msg)
+	if msg == "" || fc.Notes == nil {
+		return
+	}
+	for _, existing := range *fc.Notes {
+		if existing == msg {
+			return
+		}
+	}
+	*fc.Notes = append(*fc.Notes, msg)
 }
 
 // Param returns a string parameter.
@@ -120,22 +138,31 @@ func ParseFeatureOptions(raw []string) (map[string]map[string]string, error) {
 
 // ApplyFeatures applies the named features, in the given order, to every
 // chart that can carry templates. Library charts (helpers only) are skipped.
+// It delegates to ApplyFeaturesWithNotes and discards the notes.
 func ApplyFeatures(charts []*types.GeneratedChart, names []string, options map[string]map[string]string, graph *types.ResourceGraph) ([]*types.GeneratedChart, error) {
+	out, _, err := ApplyFeaturesWithNotes(charts, names, options, graph)
+	return out, err
+}
+
+// ApplyFeaturesWithNotes applies the named features, in the given order, to
+// every chart that can carry templates, and returns the aggregated unique notes.
+func ApplyFeaturesWithNotes(charts []*types.GeneratedChart, names []string, options map[string]map[string]string, graph *types.ResourceGraph) ([]*types.GeneratedChart, []string, error) {
 	enabled := map[string]bool{}
 	for _, name := range names {
 		enabled[name] = true
 	}
 	for feature := range options {
 		if !enabled[feature] {
-			return nil, fmt.Errorf("--feature-opt given for %q, which is not enabled with --with", feature)
+			return nil, nil, fmt.Errorf("--feature-opt given for %q, which is not enabled with --with", feature)
 		}
 	}
 
+	var allNotes []string
 	result := append([]*types.GeneratedChart(nil), charts...)
 	for _, name := range names {
 		f, ok := LookupFeature(name)
 		if !ok {
-			return nil, fmt.Errorf("unknown feature %q (see `dhg features`)", name)
+			return nil, nil, fmt.Errorf("unknown feature %q (see `dhg features`)", name)
 		}
 		params := make(map[string]string, len(f.Params))
 		for k, v := range f.Params {
@@ -143,23 +170,23 @@ func ApplyFeatures(charts []*types.GeneratedChart, names []string, options map[s
 		}
 		for k, v := range options[name] {
 			if _, known := f.Params[k]; !known {
-				return nil, fmt.Errorf("feature %q has no parameter %q (see `dhg features`)", name, k)
+				return nil, nil, fmt.Errorf("feature %q has no parameter %q (see `dhg features`)", name, k)
 			}
 			params[k] = v
 		}
-		fc := FeatureContext{Graph: graph, Params: params}
+		fc := FeatureContext{Graph: graph, Params: params, Notes: &allNotes}
 		for i, chart := range result {
 			if isLibraryChart(chart) {
 				continue
 			}
 			out, err := f.Apply(chart, fc)
 			if err != nil {
-				return nil, fmt.Errorf("feature %s on chart %s: %w", name, chart.Name, err)
+				return nil, nil, fmt.Errorf("feature %s on chart %s: %w", name, chart.Name, err)
 			}
 			result[i] = out
 		}
 	}
-	return result, nil
+	return result, allNotes, nil
 }
 
 func isLibraryChart(chart *types.GeneratedChart) bool {
