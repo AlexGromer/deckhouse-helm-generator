@@ -1,6 +1,8 @@
 package types
 
-import "sort"
+import (
+	"sort"
+)
 
 // RelationshipType represents the type of relationship between resources.
 type RelationshipType string
@@ -111,6 +113,7 @@ type ResourceGraph struct {
 	// orphans contains resources that couldn't be grouped.
 	Orphans []*ProcessedResource
 
+	// Connections is a list of all detected connections.
 	Connections []Connection            `json:",omitempty"`
 	Nodes       map[NodeID]*LogicalNode `json:",omitempty"`
 	Topology    *Topology               `json:",omitempty"`
@@ -118,6 +121,10 @@ type ResourceGraph struct {
 	// relFrom and relTo are adjacency indexes for O(1) relationship lookup.
 	relFrom map[ResourceKey][]Relationship
 	relTo   map[ResourceKey][]Relationship
+
+	connFrom map[ResourceKey][]int
+	connTo   map[string][]int
+	connKey  map[string]int
 }
 
 // NewResourceGraph creates a new empty resource graph.
@@ -193,50 +200,151 @@ func (g *ResourceGraph) AddOrphan(r *ProcessedResource) {
 	g.Orphans = append(g.Orphans, r)
 }
 
-// AddConnection adds a connection to the graph, deduplicating by ID.
+// AddConnection appends c, or merges it into an existing connection with the
+// same ID: evidence and endpoints are unioned and the higher confidence kept.
 func (g *ResourceGraph) AddConnection(c DetectedConnection) {
-	if g.Connections == nil {
-		g.Connections = make([]DetectedConnection, 0)
+	if g.connKey == nil {
+		g.connKey = make(map[string]int)
+		g.connFrom = make(map[ResourceKey][]int)
+		g.connTo = make(map[string][]int)
+	}
+	if len(c.Attributes) > 0 {
+		attrCopy := make(map[string]string, len(c.Attributes))
+		for k, v := range c.Attributes {
+			attrCopy[k] = v
+		}
+		c.Attributes = attrCopy
 	}
 	id := c.ID()
-	for i, existing := range g.Connections {
-		if existing.ID() == id {
-			// Deduplicate: merge evidence if not already present
-			for _, newEv := range c.Evidence {
-				found := false
-				for _, exEv := range existing.Evidence {
-					if exEv.Source == newEv.Source && exEv.Key == newEv.Key && exEv.Value == newEv.Value {
-						found = true
-						break
-					}
-				}
-				if !found {
-					g.Connections[i].Evidence = append(g.Connections[i].Evidence, newEv)
+	if idx, exists := g.connKey[id]; exists {
+		existing := &g.Connections[idx]
+		// Deduplicate: merge evidence if not already present
+		for _, newEv := range c.Evidence {
+			found := false
+			for _, exEv := range existing.Evidence {
+				if exEv.Source == newEv.Source && exEv.Object == newEv.Object && exEv.Field == newEv.Field && exEv.Key == newEv.Key && exEv.Value == newEv.Value {
+					found = true
+					break
 				}
 			}
-
-			// Merge endpoints
-			for _, newEp := range c.Endpoints {
-				found := false
-				for _, exEp := range existing.Endpoints {
-					if exEp.Host == newEp.Host && exEp.Port == newEp.Port && exEp.Protocol == newEp.Protocol && exEp.Path == newEp.Path {
-						found = true
-						break
-					}
-				}
-				if !found {
-					g.Connections[i].Endpoints = append(g.Connections[i].Endpoints, newEp)
-				}
+			if !found {
+				existing.Evidence = append(existing.Evidence, newEv)
 			}
-
-			// Upgrade confidence if applicable
-			if existing.Confidence == ConfidenceLow && (c.Confidence == ConfidenceMedium || c.Confidence == ConfidenceHigh) {
-				g.Connections[i].Confidence = c.Confidence
-			} else if existing.Confidence == ConfidenceMedium && c.Confidence == ConfidenceHigh {
-				g.Connections[i].Confidence = c.Confidence
-			}
-			return
 		}
+		existing.Evidence = deduplicateEvidence(existing.Evidence)
+
+		// Merge endpoints
+		for _, newEp := range c.Endpoints {
+			found := false
+			for _, exEp := range existing.Endpoints {
+				if exEp.Host == newEp.Host && exEp.Port == newEp.Port && exEp.Protocol == newEp.Protocol && exEp.Path == newEp.Path {
+					found = true
+					break
+				}
+			}
+			if !found {
+				existing.Endpoints = append(existing.Endpoints, newEp)
+			}
+		}
+
+		// Upgrade confidence if applicable
+		if c.Confidence.AtLeast(existing.Confidence) {
+			existing.Confidence = c.Confidence
+		}
+		if c.TLS {
+			existing.TLS = true
+		}
+		if existing.TargetPort == "" {
+			existing.TargetPort = c.TargetPort
+		}
+		if len(c.Attributes) > 0 {
+			if existing.Attributes == nil {
+				existing.Attributes = make(map[string]string)
+			}
+			for k, v := range c.Attributes {
+				if _, ok := existing.Attributes[k]; !ok {
+					existing.Attributes[k] = v
+				}
+			}
+		}
+		return
 	}
+
+	c.Evidence = deduplicateEvidence(c.Evidence)
+	idx := len(g.Connections)
 	g.Connections = append(g.Connections, c)
+	g.connKey[id] = idx
+	fromKey := c.From
+	if fromKey.Name == "" && c.Source.Name != "" {
+		fromKey = c.Source
+	}
+	g.connFrom[fromKey] = append(g.connFrom[fromKey], idx)
+	g.connTo[c.To.String()] = append(g.connTo[c.To.String()], idx)
+}
+
+func deduplicateEvidence(ev []Evidence) []Evidence {
+	if len(ev) <= 1 {
+		return ev
+	}
+	sort.Slice(ev, func(i, j int) bool {
+		s1, s2 := ev[i].Object.String(), ev[j].Object.String()
+		if s1 != s2 {
+			return s1 < s2
+		}
+		if ev[i].Field != ev[j].Field {
+			return ev[i].Field < ev[j].Field
+		}
+		return ev[i].Key < ev[j].Key
+	})
+
+	res := make([]Evidence, 0, len(ev))
+	res = append(res, ev[0])
+	for i := 1; i < len(ev); i++ {
+		last := res[len(res)-1]
+		curr := ev[i]
+		if last.Source == curr.Source && last.Object == curr.Object && last.Field == curr.Field && last.Key == curr.Key && last.Value == curr.Value {
+			continue
+		}
+		res = append(res, curr)
+	}
+	return res
+}
+
+// AddNode stores n unless a node with the same ID exists; returns the stored node.
+func (g *ResourceGraph) AddNode(n LogicalNode) *LogicalNode {
+	if g.Nodes == nil {
+		g.Nodes = make(map[NodeID]*LogicalNode)
+	}
+	if existing, ok := g.Nodes[n.ID]; ok {
+		return existing
+	}
+	nCopy := n
+	g.Nodes[n.ID] = &nCopy
+	return &nCopy
+}
+
+func (g *ResourceGraph) Node(id NodeID) (*LogicalNode, bool) {
+	if g.Nodes == nil {
+		return nil, false
+	}
+	n, ok := g.Nodes[id]
+	return n, ok
+}
+
+// ConnectionsFrom returns a copy of connections from key in insertion order.
+func (g *ResourceGraph) ConnectionsFrom(key ResourceKey) []Connection {
+	var res []Connection
+	for _, idx := range g.connFrom[key] {
+		res = append(res, g.Connections[idx])
+	}
+	return res
+}
+
+// ConnectionsTo returns a copy of connections to t in insertion order.
+func (g *ResourceGraph) ConnectionsTo(t ConnectionTarget) []Connection {
+	var res []Connection
+	for _, idx := range g.connTo[t.String()] {
+		res = append(res, g.Connections[idx])
+	}
+	return res
 }

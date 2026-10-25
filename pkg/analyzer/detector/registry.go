@@ -13,4 +13,5 @@ func RegisterAll(a *analyzer.DefaultAnalyzer) {
 	a.AddDetector(NewDeckhouseDetector())
 	a.AddDetector(NewPodLoggingDetector())
 	a.AddDetector(NewDexAndSPEDetector())
+	a.AddPass(NewConnectionDetector())
 }

@@ -30,6 +30,7 @@ const (
 	RelationTopicUse     RelationshipType = "topic_use"
 )
 
+// IsConnection reports whether t is one of the runtime connection types above.
 func (t RelationshipType) IsConnection() bool {
 	switch t {
 	case RelationServiceCall, RelationExternalCall, RelationTopicProduce, RelationTopicConsume, RelationTopicUse:
