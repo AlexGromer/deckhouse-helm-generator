@@ -1,0 +1,116 @@
+{
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "class": {
+          "type": "string"
+        },
+        "tasksMax": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "autoRestart": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxRestarts": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "config": {
+          "x-kubernetes-preserve-unknown-fields": true,
+          "type": "object"
+        },
+        "pause": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "paused",
+            "stopped",
+            "running"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "lastTransitionTime": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "observedGeneration": {
+          "type": "integer"
+        },
+        "autoRestart": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer"
+            },
+            "connectorName": {
+              "type": "string"
+            },
+            "lastRestartTimestamp": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "connectorStatus": {
+          "x-kubernetes-preserve-unknown-fields": true,
+          "type": "object"
+        },
+        "tasksMax": {
+          "type": "integer"
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

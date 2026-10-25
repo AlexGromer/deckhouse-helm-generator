@@ -1,0 +1,112 @@
+{
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "full",
+            "add-brokers",
+            "remove-brokers"
+          ]
+        },
+        "brokers": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "goals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skipHardGoalCheck": {
+          "type": "boolean"
+        },
+        "rebalanceDisk": {
+          "type": "boolean"
+        },
+        "excludedTopics": {
+          "type": "string"
+        },
+        "concurrentPartitionMovementsPerBroker": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "concurrentIntraBrokerPartitionMovements": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "concurrentLeaderMovements": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replicationThrottle": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replicaMovementStrategies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "lastTransitionTime": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "observedGeneration": {
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "optimizationResult": {
+          "x-kubernetes-preserve-unknown-fields": true,
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

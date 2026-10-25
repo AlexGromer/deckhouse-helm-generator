@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "labelSelector": {
+          "type": "object",
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "destination": {
+          "type": "string"
+        },
+        "multiTenant": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "destination"
+      ]
+    }
+  }
+}

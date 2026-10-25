@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "properties": {
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "applicationDomain": {
+          "type": "string"
+        },
+        "sendAuthorizationHeader": {
+          "type": "boolean"
+        },
+        "applicationIngressCertificateSecretName": {
+          "type": "string"
+        },
+        "keepUsersLoggedInFor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "applicationDomain"
+      ]
+    }
+  }
+}
