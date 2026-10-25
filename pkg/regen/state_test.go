@@ -12,7 +12,9 @@ func TestStateSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
 
 	outSet := generator.NewOutputSet()
-	outSet.Add("templates/test.yaml", []byte("test content"), 0644)
+	if err := outSet.Add("templates/test.yaml", []byte("test content"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	st := &State{
 		FormatVersion: 1,
@@ -50,7 +52,9 @@ func TestStateLoadInvalidHash(t *testing.T) {
 	dir := t.TempDir()
 
 	outSet := generator.NewOutputSet()
-	outSet.Add("templates/test.yaml", []byte("test content"), 0644)
+	if err := outSet.Add("templates/test.yaml", []byte("test content"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	st := &State{
 		FormatVersion: 1,
@@ -65,7 +69,9 @@ func TestStateLoadInvalidHash(t *testing.T) {
 
 	// Corrupt file
 	basePath := filepath.Join(dir, Dir, "mychart", "base", "templates", "test.yaml.base")
-	os.WriteFile(basePath, []byte("corrupted"), 0644)
+	if err := os.WriteFile(basePath, []byte("corrupted"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	_, _, err := Load(dir, "mychart")
 	if err == nil {
@@ -77,8 +83,12 @@ func TestDiscover(t *testing.T) {
 	dir := t.TempDir()
 
 	dhgDir := filepath.Join(dir, Dir)
-	os.MkdirAll(filepath.Join(dhgDir, "chart-a"), 0755)
-	os.MkdirAll(filepath.Join(dhgDir, "chart-b"), 0755)
+	if err := os.MkdirAll(filepath.Join(dhgDir, "chart-a"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dhgDir, "chart-b"), 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	charts, err := Discover(dir)
 	if err != nil {

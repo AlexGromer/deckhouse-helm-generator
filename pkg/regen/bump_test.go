@@ -53,9 +53,10 @@ func TestPlanBump(t *testing.T) {
 
 	var appChart, rootChart string
 	for _, fp := range p.Files {
-		if fp.Path == "charts/app/Chart.yaml" {
+		switch fp.Path {
+		case "charts/app/Chart.yaml":
 			appChart = string(fp.Content)
-		} else if fp.Path == "Chart.yaml" {
+		case "Chart.yaml":
 			rootChart = string(fp.Content)
 		}
 	}

@@ -112,7 +112,6 @@ func validateAgainstSchema(path string, val interface{}, schema map[string]inter
 
 	// Handle anyOf/oneOf
 	if anyOf, ok := schema["anyOf"].([]interface{}); ok && len(anyOf) > 0 {
-		var anyErrs []string
 		validOne := false
 		for _, s := range anyOf {
 			if sMap, ok := s.(map[string]interface{}); ok {
@@ -121,7 +120,6 @@ func validateAgainstSchema(path string, val interface{}, schema map[string]inter
 					validOne = true
 					break
 				}
-				anyErrs = append(anyErrs, errs...)
 			}
 		}
 		if !validOne {
@@ -131,7 +129,6 @@ func validateAgainstSchema(path string, val interface{}, schema map[string]inter
 		return nil
 	}
 	if oneOf, ok := schema["oneOf"].([]interface{}); ok && len(oneOf) > 0 {
-		var oneOfErrs []string
 		validOne := false
 		for _, s := range oneOf {
 			if sMap, ok := s.(map[string]interface{}); ok {
@@ -140,7 +137,6 @@ func validateAgainstSchema(path string, val interface{}, schema map[string]inter
 					validOne = true
 					break
 				}
-				oneOfErrs = append(oneOfErrs, errs...)
 			}
 		}
 		if !validOne {

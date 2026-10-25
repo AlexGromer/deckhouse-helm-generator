@@ -42,33 +42,33 @@ func TestGoldenSignals(t *testing.T) {
 	}
 
 	goldenSignals := goldenSignalsIface.(map[string]interface{})
-	if true != goldenSignals["enabled"] {
+	if goldenSignals["enabled"] != true {
 		t.Fatalf("expected true==goldenSignals[\"enabled\"]")
 	}
 	// sigs.k8s.io/yaml parses numbers as float64
-	if 1.0 != goldenSignals["latencyP99"] {
+	if goldenSignals["latencyP99"] != 1.0 {
 		t.Fatalf("expected 1.0==goldenSignals[\"latencyP99\"]")
 	}
-	if 0.05 != goldenSignals["errorRate"] {
+	if goldenSignals["errorRate"] != 0.05 {
 		t.Fatalf("expected 0.05==goldenSignals[\"errorRate\"]")
 	}
-	if 0.85 != goldenSignals["cpuSaturation"] {
+	if goldenSignals["cpuSaturation"] != 0.85 {
 		t.Fatalf("expected 0.85==goldenSignals[\"cpuSaturation\"]")
 	}
-	if 0.90 != goldenSignals["memorySaturation"] {
+	if goldenSignals["memorySaturation"] != 0.90 {
 		t.Fatalf("expected 0.90==goldenSignals[\"memorySaturation\"]")
 	}
 
 	dashboardVal := goldenSignals["dashboard"].(map[string]interface{})
-	if true != dashboardVal["enabled"] {
+	if dashboardVal["enabled"] != true {
 		t.Fatalf("expected true==dashboardVal[\"enabled\"]")
 	}
 
 	otelVal := goldenSignals["otelCollector"].(map[string]interface{})
-	if true != otelVal["enabled"] {
+	if otelVal["enabled"] != true {
 		t.Fatalf("expected true==otelVal[\"enabled\"]")
 	}
-	if "http://otel-collector:4317" != otelVal["endpoint"] {
+	if otelVal["endpoint"] != "http://otel-collector:4317" {
 		t.Fatalf("expected \"http://otel-collector:4317\"==otelVal[\"endpoint\"]")
 	}
 
@@ -128,7 +128,7 @@ func TestGoldenSignals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json: %v", err)
 	}
-	if "Golden Signals" != dash["title"] {
+	if dash["title"] != "Golden Signals" {
 		t.Fatalf("expected \"Golden Signals\"==dash[\"title\"]")
 	}
 

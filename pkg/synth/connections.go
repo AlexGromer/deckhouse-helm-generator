@@ -32,10 +32,15 @@ func ExtractSynthConnections(props map[string]string, fromKey types.ResourceKey,
 				Value:  redacted,
 			}
 
+			var port int32
+			if ep.Port > 0 && ep.Port <= 65535 {
+				port = int32(ep.Port)
+			}
+
 			conn := types.Connection{
 				From:     fromKey,
 				Evidence: []types.Evidence{evidence},
-				Port:     int32(ep.Port),
+				Port:     port,
 			}
 
 			if ep.Database != "" {

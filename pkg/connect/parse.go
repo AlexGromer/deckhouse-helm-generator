@@ -65,6 +65,14 @@ func cleanHost(host string) string {
 	return host
 }
 
+func parsePort(s string) int {
+	n, err := strconv.ParseUint(s, 10, 16)
+	if err != nil {
+		return 0
+	}
+	return int(n)
+}
+
 func ParseValue(raw string) []types.ConnectionEndpoint {
 	var endpoints []types.ConnectionEndpoint
 
@@ -82,7 +90,7 @@ func ParseValue(raw string) []types.ConnectionEndpoint {
 			hp := strings.Split(parts[0], ":")
 			port := 1521
 			if len(hp) > 1 {
-				port, _ = strconv.Atoi(hp[1])
+				port = parsePort(hp[1])
 			}
 			db := ""
 			if len(parts) > 1 {
@@ -97,7 +105,7 @@ func ParseValue(raw string) []types.ConnectionEndpoint {
 			// e.g. oracle:thin:@host:1521:sid
 			parts := strings.Split(strings.TrimPrefix(s, "oracle:thin:@"), ":")
 			if len(parts) >= 2 {
-				port, _ := strconv.Atoi(parts[1])
+				port := parsePort(parts[1])
 				db := ""
 				if len(parts) > 2 {
 					db = parts[2]
@@ -134,7 +142,7 @@ func ParseValue(raw string) []types.ConnectionEndpoint {
 				hp := strings.Split(h, ":")
 				port := 0
 				if len(hp) > 1 {
-					port, _ = strconv.Atoi(hp[1])
+					port = parsePort(hp[1])
 				}
 				endpoints = append(endpoints, types.ConnectionEndpoint{
 					Host: cleanHost(hp[0]), Port: port, Database: dbPart, Scheme: schemePart,
@@ -156,7 +164,7 @@ func ParseValue(raw string) []types.ConnectionEndpoint {
 				hp := strings.Split(h, ":")
 				port := 0
 				if len(hp) > 1 {
-					port, _ = strconv.Atoi(hp[1])
+					port = parsePort(hp[1])
 				}
 				endpoints = append(endpoints, types.ConnectionEndpoint{
 					Host: cleanHost(hp[0]), Port: port, Database: db, Scheme: u.Scheme, Path: u.Path,
@@ -172,7 +180,7 @@ func ParseValue(raw string) []types.ConnectionEndpoint {
 			hp := strings.Split(p, ":")
 			port := 0
 			if len(hp) > 1 {
-				port, _ = strconv.Atoi(hp[1])
+				port = parsePort(hp[1])
 			}
 			endpoints = append(endpoints, types.ConnectionEndpoint{
 				Host: cleanHost(hp[0]), Port: port,
@@ -185,7 +193,7 @@ func ParseValue(raw string) []types.ConnectionEndpoint {
 	hp := strings.Split(raw, ":")
 	port := 0
 	if len(hp) > 1 {
-		port, _ = strconv.Atoi(hp[1])
+		port = parsePort(hp[1])
 	}
 	endpoints = append(endpoints, types.ConnectionEndpoint{
 		Host: cleanHost(hp[0]), Port: port,

@@ -1574,46 +1574,6 @@ func printLines(content, prefix string, color bool) {
 	}
 }
 
-func printUnifiedDiff(content1, content2 string, color bool) {
-	lines1 := strings.Split(content1, "\n")
-	lines2 := strings.Split(content2, "\n")
-
-	// Simple line-by-line comparison
-	maxLines := len(lines1)
-	if len(lines2) > maxLines {
-		maxLines = len(lines2)
-	}
-
-	for i := 0; i < maxLines; i++ {
-		var l1, l2 string
-		if i < len(lines1) {
-			l1 = lines1[i]
-		}
-		if i < len(lines2) {
-			l2 = lines2[i]
-		}
-
-		if l1 == l2 {
-			fmt.Printf(" %s\n", l1)
-		} else {
-			if i < len(lines1) {
-				if color {
-					fmt.Printf("\033[31m-%s\033[0m\n", l1)
-				} else {
-					fmt.Printf("-%s\n", l1)
-				}
-			}
-			if i < len(lines2) {
-				if color {
-					fmt.Printf("\033[32m+%s\033[0m\n", l2)
-				} else {
-					fmt.Printf("+%s\n", l2)
-				}
-			}
-		}
-	}
-}
-
 func newFixCmd() *cobra.Command {
 	var (
 		paths        []string

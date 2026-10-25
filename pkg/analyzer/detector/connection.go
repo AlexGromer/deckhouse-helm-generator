@@ -64,7 +64,7 @@ func extractPodSpec(obj *unstructured.Unstructured) (map[string]interface{}, boo
 }
 
 // simple URL parse fallback for extracting hosts
-func simpleParseValue(val string) (protocol, host, path string, port int, tls bool) {
+func simpleParseValue(val string) (protocol, host, path string, port int32, tls bool) {
 	if strings.HasPrefix(strings.ToLower(val), "jdbc:") {
 		val = val[len("jdbc:"):]
 	}
@@ -75,7 +75,9 @@ func simpleParseValue(val string) (protocol, host, path string, port int, tls bo
 			host = u.Hostname()
 			p := u.Port()
 			if p != "" {
-				port, _ = strconv.Atoi(p)
+				if n, err := strconv.ParseUint(p, 10, 16); err == nil {
+					port = int32(n)
+				}
 			}
 			path = u.Path
 			tls = strings.HasSuffix(protocol, "s")
@@ -252,7 +254,9 @@ func (d *ConnectionDetector) extractValue(keyName, value, containerName, fieldPa
 			parts := strings.Split(value, ":")
 			if len(parts) == 2 {
 				host = parts[0]
-				port, _ = strconv.Atoi(parts[1])
+				if n, err := strconv.ParseUint(parts[1], 10, 16); err == nil {
+					port = int32(n)
+				}
 			}
 		} else {
 			if kafkaEnvRegexp.MatchString(keyName) {
@@ -355,7 +359,7 @@ func (d *ConnectionDetector) extractValue(keyName, value, containerName, fieldPa
 		To:         target,
 		Protocol:   proto,
 		TLS:        tls,
-		Port:       int32(port),
+		Port:       port,
 		Path:       path,
 		Confidence: conf,
 		Evidence: []types.Evidence{

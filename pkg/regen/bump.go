@@ -146,9 +146,10 @@ func (p *Plan) Bump(policy string, theirs *generator.OutputSet) error {
 								var name string
 								var versionNode *yaml.Node
 								for k := 0; k < len(dep.Content); k += 2 {
-									if dep.Content[k].Value == "name" {
+									switch dep.Content[k].Value {
+									case "name":
 										name = dep.Content[k+1].Value
-									} else if dep.Content[k].Value == "version" {
+									case "version":
 										versionNode = dep.Content[k+1]
 									}
 								}

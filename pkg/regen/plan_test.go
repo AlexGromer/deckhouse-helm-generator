@@ -14,38 +14,51 @@ func TestBuildPlanClassification(t *testing.T) {
 	base := generator.NewOutputSet()
 	theirs := generator.NewOutputSet()
 
+	mustAdd := func(oset *generator.OutputSet, p string, data []byte) {
+		t.Helper()
+		if err := oset.Add(p, data, 0644); err != nil {
+			t.Fatalf("Add(%s): %v", p, err)
+		}
+	}
+	mustWrite := func(p string, data []byte) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, p), data, 0644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", p, err)
+		}
+	}
+
 	// 1. Added: not in base, not on disk, is in theirs
-	theirs.Add("added.yaml", []byte("new"), 0644)
+	mustAdd(theirs, "added.yaml", []byte("new"))
 
 	// 2. Unchanged (added in base): not in base, is on disk (O=T), is in theirs
-	theirs.Add("unchanged.yaml", []byte("same"), 0644)
-	os.WriteFile(filepath.Join(dir, "unchanged.yaml"), []byte("same"), 0644)
+	mustAdd(theirs, "unchanged.yaml", []byte("same"))
+	mustWrite("unchanged.yaml", []byte("same"))
 
 	// 3. Merged/Conflict (O!=T without base): not in base, is on disk, is in theirs
-	theirs.Add("merged.yaml", []byte("new"), 0644)
-	os.WriteFile(filepath.Join(dir, "merged.yaml"), []byte("old"), 0644)
+	mustAdd(theirs, "merged.yaml", []byte("new"))
+	mustWrite("merged.yaml", []byte("old"))
 
 	// 4. Kept-Deleted (T=B): in base, not on disk, in theirs
-	base.Add("kept-deleted.yaml", []byte("same"), 0644)
-	theirs.Add("kept-deleted.yaml", []byte("same"), 0644)
+	mustAdd(base, "kept-deleted.yaml", []byte("same"))
+	mustAdd(theirs, "kept-deleted.yaml", []byte("same"))
 
 	// 5. Conflict (modify/delete): in base, not on disk, in theirs but T!=B
-	base.Add("modify-delete.yaml", []byte("old"), 0644)
-	theirs.Add("modify-delete.yaml", []byte("new"), 0644)
+	mustAdd(base, "modify-delete.yaml", []byte("old"))
+	mustAdd(theirs, "modify-delete.yaml", []byte("new"))
 
 	// 6. Updated (O=B, T!=O): in base, on disk, in theirs
-	base.Add("updated.yaml", []byte("old"), 0644)
-	os.WriteFile(filepath.Join(dir, "updated.yaml"), []byte("old"), 0644)
-	theirs.Add("updated.yaml", []byte("new"), 0644)
+	mustAdd(base, "updated.yaml", []byte("old"))
+	mustWrite("updated.yaml", []byte("old"))
+	mustAdd(theirs, "updated.yaml", []byte("new"))
 
 	// 7. Kept (T=B, O!=B): in base, on disk, in theirs
-	base.Add("kept.yaml", []byte("old"), 0644)
-	os.WriteFile(filepath.Join(dir, "kept.yaml"), []byte("new-o"), 0644)
-	theirs.Add("kept.yaml", []byte("old"), 0644)
+	mustAdd(base, "kept.yaml", []byte("old"))
+	mustWrite("kept.yaml", []byte("new-o"))
+	mustAdd(theirs, "kept.yaml", []byte("old"))
 
 	// 8. Removed (O=B): in base, on disk, not in theirs
-	base.Add("removed.yaml", []byte("same"), 0644)
-	os.WriteFile(filepath.Join(dir, "removed.yaml"), []byte("same"), 0644)
+	mustAdd(base, "removed.yaml", []byte("same"))
+	mustWrite("removed.yaml", []byte("same"))
 
 	plan, err := BuildPlan(dir, base, theirs, PlanOptions{})
 	if err != nil {
@@ -92,7 +105,9 @@ func TestApplyPlan(t *testing.T) {
 		},
 	}
 
-	os.WriteFile(filepath.Join(dir, "removed.yaml"), []byte("bye"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "removed.yaml"), []byte("bye"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := p.Apply(dir); err != nil {
 		t.Fatalf("Apply failed: %v", err)
