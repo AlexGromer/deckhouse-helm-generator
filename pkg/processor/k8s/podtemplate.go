@@ -245,7 +245,7 @@ func podTemplate(chartName string, indent int, restartPolicy string, workloadKey
 	w(`    {{- with .serviceAccountName }}`)
 	w(`    serviceAccountName: {{ . }}`)
 	w(`    {{- end }}`)
-	w(`    {{- with .podSecurityContext }}`)
+	w(`    {{- with merge (deepCopy (.podSecurityContext | default dict)) (deepCopy ((($.Values.global).securityContextDefaults).pod | default dict)) }}`)
 	w(`    securityContext:`)
 	w(`      {{- toYaml . | nindent %d }}`, n(6))
 	w(`    {{- end }}`)
@@ -299,6 +299,13 @@ func containerTemplate(indent int) string {
 		if field == "workingDir" {
 			w(`  {{- with .workingDir }}`)
 			w(`  workingDir: {{ . | quote }}`)
+			w(`  {{- end }}`)
+			continue
+		}
+		if field == "securityContext" {
+			w(`  {{- with merge (deepCopy (.securityContext | default dict)) (deepCopy ((($.Values.global).securityContextDefaults).container | default dict)) }}`)
+			w(`  securityContext:`)
+			w(fmt.Sprintf(`    {{- toYaml . | nindent %d }}`, indent+4))
 			w(`  {{- end }}`)
 			continue
 		}

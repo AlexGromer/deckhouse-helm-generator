@@ -20,6 +20,54 @@ func init() {
 		Params:      map[string]string{"pss-profile": "restricted"},
 		Apply:       applyDeckhouseFeature,
 	})
+	RegisterFeature(Feature{
+		Name:        "pss-restricted",
+		Description: "sets global.securityContextDefaults for restricted Pod Security Standards compliance",
+		Params:      map[string]string{},
+		Apply:       applyPSSRestrictedFeature,
+	})
+}
+
+func applyPSSRestrictedFeature(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {
+	hasWorkloads := false
+	workloads := opsChartResources(chart, fc.Graph)
+	for _, w := range workloads {
+		if _, _, _, ok := pss.PodSpec(w.Original.Object); ok {
+			hasWorkloads = true
+			break
+		}
+	}
+	if !hasWorkloads {
+		return chart, nil
+	}
+
+	podSC := map[string]interface{}{
+		"seccompProfile": map[string]interface{}{
+			"type": "RuntimeDefault",
+		},
+	}
+	containerSC := map[string]interface{}{
+		"allowPrivilegeEscalation": false,
+		"capabilities": map[string]interface{}{
+			"drop": []interface{}{"ALL"},
+		},
+	}
+	defaults := map[string]interface{}{
+		"pod":       podSC,
+		"container": containerSC,
+	}
+
+	newValuesYAML, err := setGlobalValue(chart.ValuesYAML, "securityContextDefaults", defaults)
+	if err != nil {
+		if strings.Contains(err.Error(), "already has global.securityContextDefaults") {
+			return nil, fmt.Errorf("pss-restricted: global.securityContextDefaults is already set")
+		}
+		return nil, err
+	}
+
+	out := cloneChart(chart)
+	out.ValuesYAML = newValuesYAML
+	return out, nil
 }
 
 func applyDeckhouseFeature(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {

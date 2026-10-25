@@ -40,6 +40,7 @@ func TestPodTemplateParses(t *testing.T) {
 				"kindIs":   func() string { return "" },
 				"get":      func() string { return "" },
 				"set":      func() string { return "" },
+				"deepCopy": func() string { return "" },
 			})
 
 			_, err := tmpl.Parse(got)
@@ -201,5 +202,17 @@ kafka:
 	renderedFalse := string(out)
 	if strings.Contains(renderedFalse, "KAFKA_ENABLED") {
 		t.Errorf("Output should not contain KAFKA_ENABLED when enabled=false")
+	}
+}
+
+func TestPodTemplateSecurityContextDefaults(t *testing.T) {
+	podTmpl := podTemplate("app", 2, "", "Deployment/web")
+	if !strings.Contains(podTmpl, "securityContextDefaults).pod") {
+		t.Errorf("podTemplate missing merge with global.securityContextDefaults.pod. Got:\n%s", podTmpl)
+	}
+
+	containerTmpl := containerTemplate(6)
+	if !strings.Contains(containerTmpl, "securityContextDefaults).container") {
+		t.Errorf("containerTemplate missing merge with global.securityContextDefaults.container. Got:\n%s", containerTmpl)
 	}
 }

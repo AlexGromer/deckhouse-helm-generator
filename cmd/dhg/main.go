@@ -1558,7 +1558,10 @@ func runFix(ctx context.Context, opts fixOptions) error {
 	// Step 5: Apply all fixes
 	wt := generator.WorkloadType(opts.workloadType)
 	for i, chart := range charts {
-		fixed, fixResult := generator.ApplyAllFixes(chart, wt)
+		fixed, fixResult, err := generator.ApplyAllFixes(chart, wt)
+		if err != nil {
+			return fmt.Errorf("autofix error for chart %s: %w", chart.Name, err)
+		}
 		charts[i] = fixed
 
 		if opts.verbose {

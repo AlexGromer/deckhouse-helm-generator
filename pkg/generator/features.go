@@ -1,12 +1,14 @@
 package generator
 
 import (
+	"bytes"
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"sort"
 	"strconv"
 	"strings"
 
+	yaml3 "gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/yaml"
 
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
@@ -258,4 +260,78 @@ func appendTopLevelValues(valuesYAML, key string, value interface{}) (string, er
 		valuesYAML += "\n"
 	}
 	return valuesYAML + "\n" + string(block), nil
+}
+
+// setGlobalValue uses yaml.v3 to parse valuesYAML into a yaml.Node, find or create
+// the top-level "global" map, and insert "key: value" into it without dropping comments.
+// It returns an error if "global" already contains "key".
+func setGlobalValue(valuesYAML, key string, value interface{}) (string, error) {
+	var doc yaml3.Node
+	if err := yaml3.Unmarshal([]byte(valuesYAML), &doc); err != nil {
+		return "", fmt.Errorf("parsing values.yaml: %w", err)
+	}
+
+	if doc.Kind == 0 {
+		// Empty document, create mapping
+		doc.Kind = yaml3.DocumentNode
+		doc.Content = []*yaml3.Node{{Kind: yaml3.MappingNode}}
+	} else if len(doc.Content) == 0 {
+		doc.Content = append(doc.Content, &yaml3.Node{Kind: yaml3.MappingNode})
+	}
+
+	root := doc.Content[0]
+	if root.Kind != yaml3.MappingNode {
+		return "", fmt.Errorf("expected values.yaml to be a mapping")
+	}
+
+	var globalNode *yaml3.Node
+	for i := 0; i < len(root.Content); i += 2 {
+		if root.Content[i].Value == "global" {
+			globalNode = root.Content[i+1]
+			break
+		}
+	}
+
+	if globalNode == nil {
+		// create "global" map at the end
+		keyNode := &yaml3.Node{Kind: yaml3.ScalarNode, Value: "global"}
+		globalNode = &yaml3.Node{Kind: yaml3.MappingNode}
+		root.Content = append(root.Content, keyNode, globalNode)
+	} else if globalNode.Kind != yaml3.MappingNode {
+		return "", fmt.Errorf("values.yaml global is not a mapping")
+	}
+
+	// Check if key already exists
+	for i := 0; i < len(globalNode.Content); i += 2 {
+		if globalNode.Content[i].Value == key {
+			return "", fmt.Errorf("values.yaml already has global.%s", key)
+		}
+	}
+
+	// Convert value to node
+	var valNode yaml3.Node
+	valBytes, err := yaml3.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf("marshaling value: %w", err)
+	}
+	if err := yaml3.Unmarshal(valBytes, &valNode); err != nil {
+		return "", fmt.Errorf("unmarshaling value to node: %w", err)
+	}
+	if len(valNode.Content) == 0 {
+		return "", fmt.Errorf("empty value node")
+	}
+
+	// append key and value to global
+	keyNode := &yaml3.Node{Kind: yaml3.ScalarNode, Value: key}
+	globalNode.Content = append(globalNode.Content, keyNode, valNode.Content[0])
+
+	var buf bytes.Buffer
+	enc := yaml3.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return "", fmt.Errorf("encoding values.yaml: %w", err)
+	}
+	_ = enc.Close()
+
+	return buf.String(), nil
 }

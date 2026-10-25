@@ -115,3 +115,80 @@ func TestAppendTopLevelValues(t *testing.T) {
 		t.Error("expected error on duplicate key")
 	}
 }
+
+func TestSetGlobalValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		key     string
+		val     interface{}
+		wantErr bool
+		checks  []string
+	}{
+		{
+			name: "create global and preserve comments",
+			input: `# header
+foo: bar
+`,
+			key: "securityContextDefaults",
+			val: map[string]interface{}{"pod": map[string]interface{}{"runAsNonRoot": true}},
+			checks: []string{
+				"# header",
+				"foo: bar",
+				"global:",
+				"  securityContextDefaults:",
+				"    pod:",
+				"      runAsNonRoot: true",
+			},
+		},
+		{
+			name: "add to existing global",
+			input: `global:
+  existing: true
+`,
+			key: "newKey",
+			val: "val",
+			checks: []string{
+				"global:",
+				"  existing: true",
+				"  newKey: val",
+			},
+		},
+		{
+			name: "error if key exists",
+			input: `global:
+  dup: true
+`,
+			key:     "dup",
+			val:     "new",
+			wantErr: true,
+		},
+		{
+			name:  "empty input creates global",
+			input: "",
+			key:   "test",
+			val:   "ok",
+			checks: []string{
+				"global:",
+				"  test: ok",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := setGlobalValue(tt.input, tt.key, tt.val)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("setGlobalValue error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			for _, check := range tt.checks {
+				if !strings.Contains(got, check) {
+					t.Errorf("expected output to contain %q\ngot:\n%s", check, got)
+				}
+			}
+		})
+	}
+}
