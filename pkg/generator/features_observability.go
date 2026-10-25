@@ -55,6 +55,17 @@ func init() {
 		Apply: applyIstioFeature,
 	})
 	RegisterFeature(Feature{
+		Name: "istio-ingress",
+		Description: "Istio Gateway + VirtualService per Ingress (hosts, paths, backends, TLS with HTTPS redirect); " +
+			"the Ingress can be switched off with istioIngress.replaceIngress",
+		Params: map[string]string{
+			"gateway-selector": "istio=ingressgateway",
+			"https-redirect":   "true",
+			"replace-ingress":  "false",
+		},
+		Apply: applyIstioIngressFeature,
+	})
+	RegisterFeature(Feature{
 		Name:        "otel",
 		Description: "OpenTelemetry Operator: Instrumentation resource plus auto-instrumentation annotations for workloads with a detected language",
 		Params: map[string]string{
@@ -65,18 +76,6 @@ func init() {
 			"propagators":    "tracecontext,baggage",
 		},
 		Apply: applyOTelFeature,
-	})
-	RegisterFeature(Feature{
-		Name:        "prometheus-rules",
-		Description: "PrometheusRule with workload alerts (crash loops, OOM kills, restarts, not ready) and optional SLO burn-rate alerts",
-		Params: map[string]string{
-			"severity":            "warning",
-			"runbook-url":         "",
-			"slo-availability":    "",
-			"slo-requests-metric": "http_requests_total",
-			"slo-errors-selector": `code=~"5.."`,
-		},
-		Apply: applyPrometheusRulesFeature,
 	})
 	RegisterFeature(Feature{
 		Name:        "argo-rollouts",

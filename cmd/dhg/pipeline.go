@@ -27,6 +27,8 @@ type pipelineOptions struct {
 	// lenient skips resources a processor fails on instead of failing.
 	lenient bool
 	verbose bool
+	// quiet drops the notes of the process stage, for repeated runs.
+	quiet bool
 }
 
 // pipelineResult is the analyzed input of a command.
@@ -38,6 +40,7 @@ type pipelineResult struct {
 	// synthesis is set when the source built the manifests (image, compose,
 	// source) instead of reading them.
 	synthesis extractor.Reporter
+	notes     []string
 }
 
 func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, error) {
@@ -45,7 +48,17 @@ func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, er
 	if err != nil {
 		return nil, err
 	}
+	result, err := processResources(ctx, opts, extracted)
+	if err != nil {
+		return nil, err
+	}
+	result.synthesis = synthesis
+	return result, nil
+}
 
+// processResources runs the process and analyze stages on extracted
+// resources.
+func processResources(ctx context.Context, opts pipelineOptions, extracted []*types.ExtractedResource) (*pipelineResult, error) {
 	registry := processor.NewRegistry()
 	k8s.RegisterAll(registry)
 	for _, spec := range opts.plugins {
@@ -65,6 +78,9 @@ func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, er
 	for _, r := range extracted {
 		all[r.ResourceKey()] = r
 	}
+
+	var allNotes []string
+	seenNotes := map[string]bool{}
 
 	processed := make([]*types.ProcessedResource, 0, len(extracted))
 	for _, r := range extracted {
@@ -95,14 +111,31 @@ func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, er
 			ValuesPath:      result.ValuesPath,
 			Values:          result.Values,
 			Dependencies:    result.Dependencies,
+			Notes:           result.Notes,
 		})
+
+		for _, note := range result.Notes {
+			if !seenNotes[note] {
+				seenNotes[note] = true
+				allNotes = append(allNotes, note)
+			}
+		}
+
 		if opts.verbose {
 			fmt.Printf("  Processed: %s -> service: %s\n", r.ResourceKey(), result.ServiceName)
 		}
 	}
 
 	for _, note := range processor.ResolveCollisions(processed) {
-		fmt.Fprintf(os.Stderr, "Note: %s\n", note)
+		if !opts.quiet {
+			fmt.Fprintf(os.Stderr, "Note: %s\n", note)
+		}
+	}
+
+	if !opts.quiet {
+		for _, note := range allNotes {
+			fmt.Fprintf(os.Stderr, "Note: %s\n", note)
+		}
 	}
 
 	if opts.verbose {
@@ -118,7 +151,7 @@ func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, er
 		fmt.Printf("  Detected relationships: %d\n  Service groups: %d\n", len(graph.Relationships), len(graph.Groups))
 	}
 
-	return &pipelineResult{extracted: extracted, processed: processed, graph: graph, externalFiles: externalFiles, synthesis: synthesis}, nil
+	return &pipelineResult{extracted: extracted, processed: processed, graph: graph, externalFiles: externalFiles, notes: allNotes}, nil
 }
 
 // extractResources runs the extractor for opts.source, drops duplicate

@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  namespace: shop
+  labels:
+    app.kubernetes.io/name: orders
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orders
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: orders
+    spec:
+      containers:
+        - name: orders
+          image: registry.example.com/shop/orders:1.4.2
+          env:
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: my-cluster-kafka-bootstrap.kafka:9093
+            - name: SPRING_KAFKA_SECURITY_PROTOCOL
+              value: SASL_SSL
+            - name: SPRING_KAFKA_PROPERTIES_SASL_MECHANISM
+              value: SCRAM-SHA-512
+            - name: SPRING_KAFKA_TEMPLATE_DEFAULT_TOPIC
+              value: orders-created
+            - name: SPRING_KAFKA_CONSUMER_GROUP_ID
+              value: orders
+            - name: SPRING_KAFKA_PROPERTIES_SASL_JAAS_CONFIG
+              valueFrom:
+                secretKeyRef:
+                  name: orders
+                  key: sasl.jaas.config
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: orders-created
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: my-cluster
+    app.kubernetes.io/name: orders
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payments-legacy
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: my-cluster
+spec:
+  topicName: Payments.Legacy
+  partitions: 3
+  replicas: 3
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: orders
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: my-cluster
+    app.kubernetes.io/name: orders
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: orders-created
+          patternType: literal
+        operations:
+          - Write
+          - Describe
+      - resource:
+          type: group
+          name: orders
+          patternType: literal
+        operations:
+          - Read
+  quotas:
+    producerByteRate: 1048576

@@ -130,6 +130,10 @@ func extractContainerValues(container map[string]interface{}, namespace string) 
 		"command", "args", "workingDir", "ports", "resources",
 		"volumeMounts", "livenessProbe", "readinessProbe", "startupProbe",
 		"lifecycle", "securityContext",
+		// restartPolicy: Always makes an init container a native sidecar
+		// (Kubernetes 1.29+); without it the pod waits for it forever.
+		"restartPolicy", "resizePolicy", "volumeDevices",
+		"terminationMessagePath", "terminationMessagePolicy", "stdin", "stdinOnce", "tty",
 	} {
 		if v, ok := container[field]; ok && v != nil {
 			cv[field] = v
@@ -196,7 +200,7 @@ const workloadSelectorTemplate = `  selector:
 // not set: the input's labels win, so every selector of the input (the
 // workload's own, Services, PodDisruptionBudgets, NetworkPolicies) keeps
 // selecting these pods.
-func podTemplate(chartName string, indent int, restartPolicy string) string {
+func podTemplate(chartName string, indent int, restartPolicy string, workloadKey string) string {
 	pad := strings.Repeat(" ", indent)
 	n := func(extra int) int { return indent + extra }
 
@@ -204,6 +208,23 @@ func podTemplate(chartName string, indent int, restartPolicy string) string {
 	w := func(format string, args ...interface{}) {
 		b.WriteString(pad + fmt.Sprintf(format, args...) + "\n")
 	}
+	w(`{{- $dhgInjVolumes := list }}`)
+	w(`{{- $dhgInjContainers := dict }}`)
+	w(`{{- range $dhgKey, $dhgBlock := $.Values }}`)
+	w(`{{- if and (kindIs "map" $dhgBlock) $dhgBlock.enabled (kindIs "map" $dhgBlock.inject) }}`)
+	w(`{{- with index $dhgBlock.inject %q }}`, workloadKey)
+	w(`{{- $dhgW := tpl (toYaml .) $ | fromYaml }}`)
+	w(`{{- $dhgInjVolumes = concat $dhgInjVolumes ($dhgW.volumes | default list) }}`)
+	w(`{{- range $dhgC, $dhgS := ($dhgW.containers | default dict) }}`)
+	w(`{{- $dhgP := get $dhgInjContainers $dhgC | default dict }}`)
+	w(`{{- $_ := set $dhgInjContainers $dhgC (dict`)
+	w(`      "env" (concat ($dhgP.env | default list) ($dhgS.env | default list))`)
+	w(`      "envFrom" (concat ($dhgP.envFrom | default list) ($dhgS.envFrom | default list))`)
+	w(`      "volumeMounts" (concat ($dhgP.volumeMounts | default list) ($dhgS.volumeMounts | default list))) }}`)
+	w(`{{- end }}`)
+	w(`{{- end }}`)
+	w(`{{- end }}`)
+	w(`{{- end }}`)
 	w(`template:`)
 	w(`  metadata:`)
 	w(`    {{- with .podAnnotations }}`)
@@ -224,7 +245,7 @@ func podTemplate(chartName string, indent int, restartPolicy string) string {
 	w(`    {{- with .serviceAccountName }}`)
 	w(`    serviceAccountName: {{ . }}`)
 	w(`    {{- end }}`)
-	w(`    {{- with .podSecurityContext }}`)
+	w(`    {{- with merge (deepCopy (.podSecurityContext | default dict)) (deepCopy ((($.Values.global).securityContextDefaults).pod | default dict)) }}`)
 	w(`    securityContext:`)
 	w(`      {{- toYaml . | nindent %d }}`, n(6))
 	w(`    {{- end }}`)
@@ -238,7 +259,11 @@ func podTemplate(chartName string, indent int, restartPolicy string) string {
 	w(`      {{- range .containers }}`)
 	b.WriteString(containerTemplate(indent + 6))
 	w(`      {{- end }}`)
-	for _, field := range []string{"volumes", "nodeSelector", "affinity", "tolerations", "topologySpreadConstraints"} {
+	w(`    {{- with concat (.volumes | default list) $dhgInjVolumes }}`)
+	w(`    volumes:`)
+	w(`      {{- toYaml . | nindent %d }}`, n(6))
+	w(`    {{- end }}`)
+	for _, field := range []string{"nodeSelector", "affinity", "tolerations", "topologySpreadConstraints"} {
 		w(`    {{- with .%s }}`, field)
 		w(`    %s:`, field)
 		w(`      {{- toYaml . | nindent %d }}`, n(6))
@@ -253,6 +278,7 @@ func containerTemplate(indent int) string {
 	pad := strings.Repeat(" ", indent)
 	var b strings.Builder
 	w := func(s string) { b.WriteString(pad + s + "\n") }
+	w(`{{- $dhgInj := get $dhgInjContainers .name | default dict }}`)
 	w(`- name: {{ .name }}`)
 	w(`  image: "{{ .image.repository }}{{ with .image.tag }}:{{ . }}{{ end }}{{ with .image.digest }}@{{ . }}{{ end }}"`)
 	w(`  {{- with .image.pullPolicy }}`)
@@ -261,17 +287,42 @@ func containerTemplate(indent int) string {
 	for _, field := range []string{
 		"command", "args", "workingDir", "ports", "env", "envFrom", "volumeMounts",
 		"resources", "livenessProbe", "readinessProbe", "startupProbe", "lifecycle",
-		"securityContext",
+		"securityContext", "volumeDevices", "resizePolicy",
 	} {
+		if field == "env" || field == "envFrom" || field == "volumeMounts" {
+			w(`  {{- with concat (.` + field + ` | default list) ($dhgInj.` + field + ` | default list) }}`)
+			w(`  ` + field + `:`)
+			w(fmt.Sprintf(`    {{- toYaml . | nindent %d }}`, indent+4))
+			w(`  {{- end }}`)
+			continue
+		}
 		if field == "workingDir" {
 			w(`  {{- with .workingDir }}`)
 			w(`  workingDir: {{ . | quote }}`)
 			w(`  {{- end }}`)
 			continue
 		}
+		if field == "securityContext" {
+			w(`  {{- with merge (deepCopy (.securityContext | default dict)) (deepCopy ((($.Values.global).securityContextDefaults).container | default dict)) }}`)
+			w(`  securityContext:`)
+			w(fmt.Sprintf(`    {{- toYaml . | nindent %d }}`, indent+4))
+			w(`  {{- end }}`)
+			continue
+		}
 		w(`  {{- with .` + field + ` }}`)
 		w(`  ` + field + `:`)
 		w(fmt.Sprintf(`    {{- toYaml . | nindent %d }}`, indent+4))
+		w(`  {{- end }}`)
+	}
+	// Scalars: false and "" are the API defaults, so with skips nothing.
+	for _, field := range []string{"restartPolicy", "terminationMessagePath", "terminationMessagePolicy"} {
+		w(`  {{- with .` + field + ` }}`)
+		w(`  ` + field + `: {{ . | quote }}`)
+		w(`  {{- end }}`)
+	}
+	for _, field := range []string{"stdin", "stdinOnce", "tty"} {
+		w(`  {{- with .` + field + ` }}`)
+		w(`  ` + field + `: {{ . }}`)
 		w(`  {{- end }}`)
 	}
 	return b.String()

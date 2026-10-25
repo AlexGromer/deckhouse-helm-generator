@@ -62,63 +62,6 @@ func newTestChart(templates map[string]string) *types.GeneratedChart {
 	}
 }
 
-func TestInjectSecurityContext(t *testing.T) {
-	chart := newTestChart(map[string]string{
-		"templates/deployment.yaml": testDeploymentTemplate,
-		"templates/service.yaml":    testServiceTemplate,
-	})
-
-	result, count := InjectSecurityContext(chart)
-
-	if count != 1 {
-		t.Errorf("expected 1 injection, got %d", count)
-	}
-
-	content := result.Templates["templates/deployment.yaml"]
-	for _, field := range []string{"runAsNonRoot: true", "readOnlyRootFilesystem: true", "allowPrivilegeEscalation: false", "drop:", "- ALL"} {
-		if !strings.Contains(content, field) {
-			t.Errorf("missing field %q in injected template", field)
-		}
-	}
-
-	// Service should be unchanged.
-	if result.Templates["templates/service.yaml"] != testServiceTemplate {
-		t.Error("service template should not be modified")
-	}
-}
-
-func TestInjectSecurityContext_Idempotent(t *testing.T) {
-	chart := newTestChart(map[string]string{
-		"templates/deployment.yaml": testDeploymentTemplate,
-	})
-
-	result, _ := InjectSecurityContext(chart)
-	result2, count := InjectSecurityContext(result)
-
-	if count != 0 {
-		t.Errorf("expected 0 injections on second pass, got %d", count)
-	}
-
-	if result.Templates["templates/deployment.yaml"] != result2.Templates["templates/deployment.yaml"] {
-		t.Error("second injection should not change the template")
-	}
-}
-
-func TestInjectSecurityContext_CopyOnWrite(t *testing.T) {
-	chart := newTestChart(map[string]string{
-		"templates/deployment.yaml": testDeploymentTemplate,
-	})
-
-	result, _ := InjectSecurityContext(chart)
-
-	if chart.Templates["templates/deployment.yaml"] != testDeploymentTemplate {
-		t.Error("original chart should not be mutated")
-	}
-	if result.Templates["templates/deployment.yaml"] == testDeploymentTemplate {
-		t.Error("result should differ from original")
-	}
-}
-
 func TestInjectResourceDefaults(t *testing.T) {
 	chart := newTestChart(map[string]string{
 		"templates/deployment.yaml": testDeploymentTemplate,
@@ -275,26 +218,6 @@ func TestInjectPDB_SkipNonWorkload(t *testing.T) {
 	}
 }
 
-func TestInjectPSSRestricted(t *testing.T) {
-	chart := newTestChart(map[string]string{
-		"templates/deployment.yaml": testDeploymentTemplate,
-	})
-
-	result, count := InjectPSSRestricted(chart)
-
-	if count != 1 {
-		t.Errorf("expected 1 PSS injection, got %d", count)
-	}
-
-	content := result.Templates["templates/deployment.yaml"]
-	if !strings.Contains(content, "seccompProfile") {
-		t.Error("missing seccompProfile in PSS restricted injection")
-	}
-	if !strings.Contains(content, "RuntimeDefault") {
-		t.Error("missing RuntimeDefault seccomp type")
-	}
-}
-
 func TestInjectGracefulShutdown(t *testing.T) {
 	chart := newTestChart(map[string]string{
 		"templates/deployment.yaml":  testDeploymentTemplate,
@@ -349,7 +272,10 @@ func TestApplyAllFixes(t *testing.T) {
 		"templates/service.yaml":     testServiceTemplate,
 	})
 
-	result, fixes := ApplyAllFixes(chart, WorkloadWeb)
+	result, fixes, err := ApplyAllFixes(chart, WorkloadWeb)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if fixes.SecurityContextInjected == 0 {
 		t.Error("expected security context injections")
@@ -359,6 +285,11 @@ func TestApplyAllFixes(t *testing.T) {
 	}
 	if fixes.PDBsGenerated == 0 {
 		t.Error("expected PDB generation")
+	}
+
+	// Result should have values yaml modified for SC
+	if !strings.Contains(result.ValuesYAML, "securityContextDefaults:") {
+		t.Error("missing securityContextDefaults in result ValuesYAML")
 	}
 
 	// Original should be untouched.
@@ -447,5 +378,31 @@ func TestInjectHealthProbes_Port3000_HTTP(t *testing.T) {
 
 	if !strings.Contains(content, "httpGet:") {
 		t.Error("expected HTTP probe for port 3000")
+	}
+}
+
+func TestSetSecurityContextDefaults(t *testing.T) {
+	chart := newTestChart(map[string]string{
+		"templates/deployment.yaml": testDeploymentTemplate,
+	})
+
+	podSC := map[string]interface{}{"runAsNonRoot": true}
+	containerSC := map[string]interface{}{"allowPrivilegeEscalation": false}
+	result, count, err := SetSecurityContextDefaults(chart, podSC, containerSC)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 workload count, got %d", count)
+	}
+	if !strings.Contains(result.ValuesYAML, "securityContextDefaults:") {
+		t.Error("missing securityContextDefaults in ValuesYAML")
+	}
+	if !strings.Contains(result.ValuesYAML, "runAsNonRoot: true") {
+		t.Error("missing pod settings in ValuesYAML")
+	}
+	if !strings.Contains(result.ValuesYAML, "allowPrivilegeEscalation: false") {
+		t.Error("missing container settings in ValuesYAML")
 	}
 }

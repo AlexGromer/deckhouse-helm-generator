@@ -15,8 +15,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -448,58 +446,4 @@ func verify(data []byte, digest string) error {
 		return fmt.Errorf("digest mismatch: got %s, want %s", got, digest)
 	}
 	return nil
-}
-
-// DockerConfigCredentials reads credentials from $DOCKER_CONFIG/config.json
-// or ~/.docker/config.json ("auths" entries). Credential helpers are not
-// supported; the second result reports whether the file names one.
-func DockerConfigCredentials() (Credentials, bool) {
-	dir := os.Getenv("DOCKER_CONFIG")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, false
-		}
-		dir = filepath.Join(home, ".docker")
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
-	if err != nil {
-		return nil, false
-	}
-	var cfg struct {
-		Auths map[string]struct {
-			Auth     string `json:"auth"`
-			Username string `json:"username"`
-			Password string `json:"password"`
-		} `json:"auths"`
-		CredsStore  string            `json:"credsStore"`
-		CredHelpers map[string]string `json:"credHelpers"`
-	}
-	if json.Unmarshal(data, &cfg) != nil {
-		return nil, false
-	}
-	usesHelpers := cfg.CredsStore != "" || len(cfg.CredHelpers) > 0
-	return func(host string) (string, string, bool) {
-		keys := []string{host, "https://" + host, "http://" + host}
-		if host == dockerHub {
-			keys = append(keys, dockerHubIndexAuth, dockerHubAPI)
-		}
-		for _, k := range keys {
-			a, ok := cfg.Auths[k]
-			if !ok {
-				continue
-			}
-			if a.Username != "" {
-				return a.Username, a.Password, true
-			}
-			raw, err := base64.StdEncoding.DecodeString(a.Auth)
-			if err != nil {
-				continue
-			}
-			if user, pass, ok := strings.Cut(string(raw), ":"); ok {
-				return user, pass, true
-			}
-		}
-		return "", "", false
-	}, usesHelpers
 }

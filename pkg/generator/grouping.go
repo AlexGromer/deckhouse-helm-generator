@@ -1,6 +1,9 @@
 package generator
 
 import (
+	"fmt"
+	"sort"
+
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
@@ -61,8 +64,13 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 	grouped := make(map[types.ResourceKey]bool)
 	groupsByName := make(map[string]*ServiceGroup)
 
+	// Walk resources in key order: group names and contents must not depend
+	// on map iteration order.
+	keys := graph.SortedKeys()
+
 	// Pass 1: Group by standard labels (highest priority).
-	for key, resource := range graph.Resources {
+	for _, key := range keys {
+		resource := graph.Resources[key]
 		appName := extractAppLabel(resource)
 		if appName == "" {
 			continue
@@ -81,10 +89,10 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 	}
 
 	// Pass 2: Group ungrouped resources by relationship connected components.
-	ungrouped := make(map[types.ResourceKey]*types.ProcessedResource)
-	for key, resource := range graph.Resources {
+	var ungrouped []types.ResourceKey
+	for _, key := range keys {
 		if !grouped[key] {
-			ungrouped[key] = resource
+			ungrouped = append(ungrouped, key)
 		}
 	}
 
@@ -95,10 +103,13 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 			adj[rel.From] = append(adj[rel.From], rel.To)
 			adj[rel.To] = append(adj[rel.To], rel.From)
 		}
+		for k := range adj {
+			sort.Slice(adj[k], func(i, j int) bool { return adj[k][i].Less(adj[k][j]) })
+		}
 
 		// BFS to find connected components among ALL resources connected by relationships.
 		visited := make(map[types.ResourceKey]bool)
-		for key := range ungrouped {
+		for _, key := range ungrouped {
 			if visited[key] {
 				continue
 			}
@@ -171,6 +182,7 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 						}
 					}
 				} else {
+					name = uniqueGroupName(groupsByName, name)
 					groupsByName[name] = &ServiceGroup{
 						Name:      name,
 						Resources: component,
@@ -184,7 +196,8 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 
 	// Pass 3: Group remaining ungrouped resources by namespace.
 	nsByNamespace := make(map[string][]*types.ProcessedResource)
-	for key, resource := range graph.Resources {
+	for _, key := range keys {
+		resource := graph.Resources[key]
 		if !grouped[key] {
 			ns := resource.Original.Object.GetNamespace()
 			nsByNamespace[ns] = append(nsByNamespace[ns], resource)
@@ -192,7 +205,13 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 		}
 	}
 
-	for ns, resources := range nsByNamespace {
+	namespaces := make([]string, 0, len(nsByNamespace))
+	for ns := range nsByNamespace {
+		namespaces = append(namespaces, ns)
+	}
+	sort.Strings(namespaces)
+	for _, ns := range namespaces {
+		resources := nsByNamespace[ns]
 		name := ns
 		if name == "" {
 			// Use first resource name if no namespace.
@@ -202,6 +221,7 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 		if name == resources[0].Original.Object.GetName() && ns == "" {
 			strategy = GroupByIndividual
 		}
+		name = uniqueGroupName(groupsByName, name)
 		groupsByName[name] = &ServiceGroup{
 			Name:      name,
 			Resources: resources,
@@ -217,8 +237,20 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 	for _, g := range groupsByName {
 		result.Groups = append(result.Groups, g)
 	}
+	sort.Slice(result.Groups, func(i, j int) bool { return result.Groups[i].Name < result.Groups[j].Name })
 
 	return result, nil
+}
+
+// uniqueGroupName returns name, or name-2, name-3, … when a group already
+// has it: a second group of the same name would replace the first and its
+// resources would be lost.
+func uniqueGroupName(groups map[string]*ServiceGroup, name string) string {
+	candidate := name
+	for i := 2; groups[candidate] != nil; i++ {
+		candidate = fmt.Sprintf("%s-%d", name, i)
+	}
+	return candidate
 }
 
 // extractAppLabel extracts the application name from standard Kubernetes labels.

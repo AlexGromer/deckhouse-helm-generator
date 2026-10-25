@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "destination": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "destination"
+      ]
+    }
+  }
+}

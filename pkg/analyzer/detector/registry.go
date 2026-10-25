@@ -11,4 +11,8 @@ func RegisterAll(a *analyzer.DefaultAnalyzer) {
 	a.AddDetector(NewVolumeMountDetector())
 	a.AddDetector(NewAnnotationDetector())
 	a.AddDetector(NewDeckhouseDetector())
+	a.AddDetector(NewPodLoggingDetector())
+	a.AddDetector(NewDexAndSPEDetector())
+	a.AddDetector(NewStrimziDetector())
+	a.AddPass(NewConnectionDetector())
 }

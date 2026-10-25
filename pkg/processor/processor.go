@@ -74,6 +74,12 @@ type Result struct {
 
 	// Metadata contains additional processor-specific metadata.
 	Metadata map[string]interface{}
+
+	// Notes holds user-facing observations recorded while processing this
+	// resource (for example, deprecated API version notices or fields that
+	// require manual configuration). The generator deduplicates and prints
+	// them as "Note: <msg>" on stderr and in SYNTHESIS.md.
+	Notes []string
 }
 
 // Processor defines the interface for processing Kubernetes resources.
@@ -126,6 +132,15 @@ func (p BaseProcessor) Supports() []schema.GroupVersionKind {
 
 // Helper functions for common template generation patterns.
 
+// ServiceNameLabelKeys contains common label patterns used to extract a service name.
+var ServiceNameLabelKeys = []string{
+	"app.kubernetes.io/name",
+	"app.kubernetes.io/instance",
+	"app",
+	"name",
+	"component",
+}
+
 // ServiceNameFromLabels extracts a service name from common label patterns.
 func ServiceNameFromLabels(obj *unstructured.Unstructured) string {
 	labels := obj.GetLabels()
@@ -133,16 +148,7 @@ func ServiceNameFromLabels(obj *unstructured.Unstructured) string {
 		return ""
 	}
 
-	// Try common label patterns in order of preference
-	patterns := []string{
-		"app.kubernetes.io/name",
-		"app.kubernetes.io/instance",
-		"app",
-		"name",
-		"component",
-	}
-
-	for _, pattern := range patterns {
+	for _, pattern := range ServiceNameLabelKeys {
 		if v, ok := labels[pattern]; ok && v != "" {
 			return v
 		}

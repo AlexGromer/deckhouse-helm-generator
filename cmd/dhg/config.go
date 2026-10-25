@@ -58,6 +58,7 @@ func applyConfigFile(cmd *cobra.Command, path string) error {
 		if err := setFlagFromConfig(flag, cfg[key]); err != nil {
 			return fmt.Errorf("config %s: %s: %w", path, key, err)
 		}
+		flag.Changed = true
 	}
 	return nil
 }

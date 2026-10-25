@@ -62,6 +62,10 @@ type Options struct {
 
 	// InsecureRegistry talks plain HTTP to the registry.
 	InsecureRegistry bool
+
+	// ImageConfig makes source extraction read the configuration of each
+	// project's --image from the registry and prefer it to the Dockerfile.
+	ImageConfig bool
 }
 
 // Reporter is implemented by extractors that synthesize manifests: Notes
@@ -70,6 +74,14 @@ type Reporter interface {
 	Notes() []string
 	// Inputs describes what the manifests were built from.
 	Inputs() []string
+}
+
+// Varianter is implemented by synthesizing extractors whose input has
+// configuration profiles (Spring profiles, Quarkus profiles, Micronaut
+// environments). Variants returns, per profile, the manifests Extract
+// would give with that profile active; call it after Extract.
+type Varianter interface {
+	Variants() map[string][]*types.ExtractedResource
 }
 
 // GitAuthOptions contains git authentication options.

@@ -203,13 +203,13 @@ func TestFromSourceDockerfileAndSpringDetails(t *testing.T) {
 		t.Errorf("liveness = %+v volumes = %+v", app.Liveness, app.Volumes)
 	}
 	all := strings.Join(notes.Items(), "\n")
-	for _, want := range []string{"EXPOSE ${APP_PORT}", "VOLUME /cache", "needs DB_HOST at runtime"} {
+	for _, want := range []string{"EXPOSE ${APP_PORT}", "volume /cache", "needs DB_HOST at runtime"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("notes lack %q:\n%s", want, all)
 		}
 	}
 
-	spring, err := DetectSpring(dir)
+	spring, err := DetectProject(dir, &Notes{})
 	if err != nil || spring.Version != "3.3.4" || spring.Name != "orders-service" || spring.Properties["app.hosts"] != "a,b" {
 		t.Errorf("spring = %+v err = %v (parent version, unresolved name, flattened list)", spring, err)
 	}
@@ -227,12 +227,12 @@ func TestFromSourceHealthcheckOnly(t *testing.T) {
 	}
 }
 
-func TestDetectSpringErrors(t *testing.T) {
+func TestDetectProjectErrors(t *testing.T) {
 	for name, files := range map[string]map[string]string{
 		"bad pom":  {"pom.xml": "<project>spring-boot<unclosed"},
 		"bad yaml": {"pom.xml": pom, "src/main/resources/application.yaml": "server: [\n"},
 	} {
-		if _, err := DetectSpring(writeFiles(t, files)); err == nil {
+		if _, err := DetectProject(writeFiles(t, files), &Notes{}); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
 		if _, err := FromSource(writeFiles(t, files), "x:1", &Notes{}); err == nil {
@@ -240,7 +240,7 @@ func TestDetectSpringErrors(t *testing.T) {
 		}
 	}
 	dir := writeFiles(t, map[string]string{"build.gradle": "plugins { id 'org.springframework.boot' }\nversion = '${revision}'\n"})
-	p, err := DetectSpring(dir)
+	p, err := DetectProject(dir, &Notes{})
 	if err != nil || p.Version != "" || p.Name != filepath.Base(dir) {
 		t.Errorf("gradle without settings: %+v %v", p, err)
 	}

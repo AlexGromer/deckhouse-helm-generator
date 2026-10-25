@@ -1,0 +1,1429 @@
+{
+  "properties": {
+    "spec": {
+      "properties": {
+        "exportTo": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "gateways": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hosts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "http": {
+          "items": {
+            "properties": {
+              "corsPolicy": {
+                "properties": {
+                  "allowCredentials": {
+                    "nullable": true,
+                    "type": "boolean"
+                  },
+                  "allowHeaders": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "allowMethods": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "allowOrigin": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "allowOrigins": {
+                    "items": {
+                      "oneOf": [
+                        {
+                          "not": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "exact"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "prefix"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "regex"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "exact"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "prefix"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "regex"
+                          ]
+                        }
+                      ],
+                      "properties": {
+                        "exact": {
+                          "type": "string"
+                        },
+                        "prefix": {
+                          "type": "string"
+                        },
+                        "regex": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "type": "array"
+                  },
+                  "exposeHeaders": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "maxAge": {
+                    "type": "string",
+                    "x-kubernetes-validations": [
+                      {
+                        "message": "must be a valid duration greater than 1ms",
+                        "rule": "duration(self) >= duration('1ms')"
+                      }
+                    ]
+                  },
+                  "unmatchedPreflights": {
+                    "enum": [
+                      "UNSPECIFIED",
+                      "FORWARD",
+                      "IGNORE"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "delegate": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "namespace": {
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "directResponse": {
+                "properties": {
+                  "body": {
+                    "oneOf": [
+                      {
+                        "not": {
+                          "anyOf": [
+                            {
+                              "required": [
+                                "string"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "bytes"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "required": [
+                          "string"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "bytes"
+                        ]
+                      }
+                    ],
+                    "properties": {
+                      "bytes": {
+                        "format": "byte",
+                        "type": "string"
+                      },
+                      "string": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "status": {
+                    "maximum": 4294967295,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "type": "object",
+                "additionalProperties": false
+              },
+              "fault": {
+                "properties": {
+                  "abort": {
+                    "oneOf": [
+                      {
+                        "not": {
+                          "anyOf": [
+                            {
+                              "required": [
+                                "httpStatus"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "grpcStatus"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "http2Error"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "required": [
+                          "httpStatus"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "grpcStatus"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "http2Error"
+                        ]
+                      }
+                    ],
+                    "properties": {
+                      "grpcStatus": {
+                        "type": "string"
+                      },
+                      "http2Error": {
+                        "type": "string"
+                      },
+                      "httpStatus": {
+                        "format": "int32",
+                        "type": "integer"
+                      },
+                      "percentage": {
+                        "properties": {
+                          "value": {
+                            "format": "double",
+                            "type": "number"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "delay": {
+                    "oneOf": [
+                      {
+                        "not": {
+                          "anyOf": [
+                            {
+                              "required": [
+                                "fixedDelay"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "exponentialDelay"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "required": [
+                          "fixedDelay"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "exponentialDelay"
+                        ]
+                      }
+                    ],
+                    "properties": {
+                      "exponentialDelay": {
+                        "type": "string",
+                        "x-kubernetes-validations": [
+                          {
+                            "message": "must be a valid duration greater than 1ms",
+                            "rule": "duration(self) >= duration('1ms')"
+                          }
+                        ]
+                      },
+                      "fixedDelay": {
+                        "type": "string",
+                        "x-kubernetes-validations": [
+                          {
+                            "message": "must be a valid duration greater than 1ms",
+                            "rule": "duration(self) >= duration('1ms')"
+                          }
+                        ]
+                      },
+                      "percent": {
+                        "format": "int32",
+                        "type": "integer"
+                      },
+                      "percentage": {
+                        "properties": {
+                          "value": {
+                            "format": "double",
+                            "type": "number"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "headers": {
+                "properties": {
+                  "request": {
+                    "properties": {
+                      "add": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "remove": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "set": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "response": {
+                    "properties": {
+                      "add": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "remove": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "set": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "match": {
+                "items": {
+                  "properties": {
+                    "authority": {
+                      "oneOf": [
+                        {
+                          "not": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "exact"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "prefix"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "regex"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "exact"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "prefix"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "regex"
+                          ]
+                        }
+                      ],
+                      "properties": {
+                        "exact": {
+                          "type": "string"
+                        },
+                        "prefix": {
+                          "type": "string"
+                        },
+                        "regex": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "gateways": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "headers": {
+                      "additionalProperties": {
+                        "oneOf": [
+                          {
+                            "not": {
+                              "anyOf": [
+                                {
+                                  "required": [
+                                    "exact"
+                                  ]
+                                },
+                                {
+                                  "required": [
+                                    "prefix"
+                                  ]
+                                },
+                                {
+                                  "required": [
+                                    "regex"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "required": [
+                              "exact"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "prefix"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "regex"
+                            ]
+                          }
+                        ],
+                        "properties": {
+                          "exact": {
+                            "type": "string"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          },
+                          "regex": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "type": "object"
+                    },
+                    "ignoreUriCase": {
+                      "type": "boolean"
+                    },
+                    "method": {
+                      "oneOf": [
+                        {
+                          "not": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "exact"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "prefix"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "regex"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "exact"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "prefix"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "regex"
+                          ]
+                        }
+                      ],
+                      "properties": {
+                        "exact": {
+                          "type": "string"
+                        },
+                        "prefix": {
+                          "type": "string"
+                        },
+                        "regex": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "queryParams": {
+                      "additionalProperties": {
+                        "oneOf": [
+                          {
+                            "not": {
+                              "anyOf": [
+                                {
+                                  "required": [
+                                    "exact"
+                                  ]
+                                },
+                                {
+                                  "required": [
+                                    "prefix"
+                                  ]
+                                },
+                                {
+                                  "required": [
+                                    "regex"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "required": [
+                              "exact"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "prefix"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "regex"
+                            ]
+                          }
+                        ],
+                        "properties": {
+                          "exact": {
+                            "type": "string"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          },
+                          "regex": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "type": "object"
+                    },
+                    "scheme": {
+                      "oneOf": [
+                        {
+                          "not": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "exact"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "prefix"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "regex"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "exact"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "prefix"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "regex"
+                          ]
+                        }
+                      ],
+                      "properties": {
+                        "exact": {
+                          "type": "string"
+                        },
+                        "prefix": {
+                          "type": "string"
+                        },
+                        "regex": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "sourceLabels": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "sourceNamespace": {
+                      "type": "string"
+                    },
+                    "statPrefix": {
+                      "type": "string"
+                    },
+                    "uri": {
+                      "oneOf": [
+                        {
+                          "not": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "exact"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "prefix"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "regex"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "exact"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "prefix"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "regex"
+                          ]
+                        }
+                      ],
+                      "properties": {
+                        "exact": {
+                          "type": "string"
+                        },
+                        "prefix": {
+                          "type": "string"
+                        },
+                        "regex": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "withoutHeaders": {
+                      "additionalProperties": {
+                        "oneOf": [
+                          {
+                            "not": {
+                              "anyOf": [
+                                {
+                                  "required": [
+                                    "exact"
+                                  ]
+                                },
+                                {
+                                  "required": [
+                                    "prefix"
+                                  ]
+                                },
+                                {
+                                  "required": [
+                                    "regex"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "required": [
+                              "exact"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "prefix"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "regex"
+                            ]
+                          }
+                        ],
+                        "properties": {
+                          "exact": {
+                            "type": "string"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          },
+                          "regex": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              },
+              "mirror": {
+                "properties": {
+                  "host": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "properties": {
+                      "number": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "subset": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "host"
+                ],
+                "type": "object",
+                "additionalProperties": false
+              },
+              "mirror_percent": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "nullable": true,
+                "type": "integer"
+              },
+              "mirrorPercent": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "nullable": true,
+                "type": "integer"
+              },
+              "mirrorPercentage": {
+                "properties": {
+                  "value": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "mirrors": {
+                "items": {
+                  "properties": {
+                    "destination": {
+                      "properties": {
+                        "host": {
+                          "type": "string"
+                        },
+                        "port": {
+                          "properties": {
+                            "number": {
+                              "maximum": 4294967295,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        },
+                        "subset": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "host"
+                      ],
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "percentage": {
+                      "properties": {
+                        "value": {
+                          "format": "double",
+                          "type": "number"
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "destination"
+                  ],
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": "string"
+              },
+              "redirect": {
+                "oneOf": [
+                  {
+                    "not": {
+                      "anyOf": [
+                        {
+                          "required": [
+                            "port"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "derivePort"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "required": [
+                      "port"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "derivePort"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "authority": {
+                    "type": "string"
+                  },
+                  "derivePort": {
+                    "enum": [
+                      "FROM_PROTOCOL_DEFAULT",
+                      "FROM_REQUEST_PORT"
+                    ],
+                    "type": "string"
+                  },
+                  "port": {
+                    "maximum": 4294967295,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "prefixRewrite": {
+                    "type": "string"
+                  },
+                  "redirectCode": {
+                    "maximum": 4294967295,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "scheme": {
+                    "type": "string"
+                  },
+                  "uri": {
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "retries": {
+                "properties": {
+                  "attempts": {
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "backoff": {
+                    "type": "string",
+                    "x-kubernetes-validations": [
+                      {
+                        "message": "must be a valid duration greater than 1ms",
+                        "rule": "duration(self) >= duration('1ms')"
+                      }
+                    ]
+                  },
+                  "perTryTimeout": {
+                    "type": "string",
+                    "x-kubernetes-validations": [
+                      {
+                        "message": "must be a valid duration greater than 1ms",
+                        "rule": "duration(self) >= duration('1ms')"
+                      }
+                    ]
+                  },
+                  "retryIgnorePreviousHosts": {
+                    "nullable": true,
+                    "type": "boolean"
+                  },
+                  "retryOn": {
+                    "type": "string"
+                  },
+                  "retryRemoteLocalities": {
+                    "nullable": true,
+                    "type": "boolean"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "rewrite": {
+                "properties": {
+                  "authority": {
+                    "type": "string"
+                  },
+                  "uri": {
+                    "type": "string"
+                  },
+                  "uriRegexRewrite": {
+                    "properties": {
+                      "match": {
+                        "type": "string"
+                      },
+                      "rewrite": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "route": {
+                "items": {
+                  "properties": {
+                    "destination": {
+                      "properties": {
+                        "host": {
+                          "type": "string"
+                        },
+                        "port": {
+                          "properties": {
+                            "number": {
+                              "maximum": 4294967295,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        },
+                        "subset": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "host"
+                      ],
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "headers": {
+                      "properties": {
+                        "request": {
+                          "properties": {
+                            "add": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object"
+                            },
+                            "remove": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "set": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object"
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        },
+                        "response": {
+                          "properties": {
+                            "add": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object"
+                            },
+                            "remove": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "set": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object"
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "weight": {
+                      "format": "int32",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "destination"
+                  ],
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              },
+              "timeout": {
+                "type": "string",
+                "x-kubernetes-validations": [
+                  {
+                    "message": "must be a valid duration greater than 1ms",
+                    "rule": "duration(self) >= duration('1ms')"
+                  }
+                ]
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        },
+        "tcp": {
+          "items": {
+            "properties": {
+              "match": {
+                "items": {
+                  "properties": {
+                    "destinationSubnets": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "gateways": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "port": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "sourceLabels": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "sourceNamespace": {
+                      "type": "string"
+                    },
+                    "sourceSubnet": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              },
+              "route": {
+                "items": {
+                  "properties": {
+                    "destination": {
+                      "properties": {
+                        "host": {
+                          "type": "string"
+                        },
+                        "port": {
+                          "properties": {
+                            "number": {
+                              "maximum": 4294967295,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        },
+                        "subset": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "host"
+                      ],
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "weight": {
+                      "format": "int32",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "destination"
+                  ],
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        },
+        "tls": {
+          "items": {
+            "properties": {
+              "match": {
+                "items": {
+                  "properties": {
+                    "destinationSubnets": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "gateways": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "port": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "sniHosts": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "sourceLabels": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "sourceNamespace": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sniHosts"
+                  ],
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              },
+              "route": {
+                "items": {
+                  "properties": {
+                    "destination": {
+                      "properties": {
+                        "host": {
+                          "type": "string"
+                        },
+                        "port": {
+                          "properties": {
+                            "number": {
+                              "maximum": 4294967295,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        },
+                        "subset": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "host"
+                      ],
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "weight": {
+                      "format": "int32",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "destination"
+                  ],
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "match"
+            ],
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "additionalProperties": false
+    },
+    "status": {
+      "properties": {
+        "conditions": {
+          "items": {
+            "properties": {
+              "lastProbeTime": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "lastTransitionTime": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "observedGeneration": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "x-kubernetes-int-or-string": true
+              },
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        },
+        "observedGeneration": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "x-kubernetes-int-or-string": true
+        },
+        "validationMessages": {
+          "items": {
+            "properties": {
+              "documentationUrl": {
+                "type": "string"
+              },
+              "level": {
+                "enum": [
+                  "UNKNOWN",
+                  "ERROR",
+                  "WARNING",
+                  "INFO"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "x-kubernetes-preserve-unknown-fields": true,
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "additionalProperties": false
+}

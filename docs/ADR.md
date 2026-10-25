@@ -2,14 +2,14 @@
 
 > **Тип:** Справочник
 > **Аудитория:** участники разработки, архитекторы
-> **Последнее обновление:** 2026-10-05
+> **Последнее обновление:** 2026-10-07
 > **Связанные документы:** [README.md](../README.md), [DEVELOPER.md](DEVELOPER.md)
 
 ## Обзор
 
 В этом файле собраны все Architecture Decision Records проекта deckhouse-helm-generator. Каждая запись документирует значимое техническое решение: контекст, который его потребовал, что именно было решено, и текущий статус.
 
-Статусы: **Accepted** (принято, в действии), **Proposed** (предложено, ещё не реализовано).
+Статусы: **Accepted** (принято, в действии), **Proposed** (предложено, ещё не реализовано), **Superseded by ADR-NNN** (заменено более поздним решением, указан его номер), **Rejected** (не принято: код пошёл другим путём), **Deferred** (отложено: кода нет, решение остаётся возможным планом). Пометка _Факт: …_ в колонке «Контекст» фиксирует, что показала сверка с кодом.
 
 ---
 
@@ -37,9 +37,9 @@
 
 | ADR | Дата | Решение | Статус | Контекст |
 |-----|------|---------|--------|---------|
-| ADR-014 | 2026-03-28 | Использовать динамический client `k8s.io/client-go` для извлечения из cluster | Proposed | `k8s.io/apimachinery` уже присутствует; `client-go` разделяет транзитивные зависимости. Встроенная аутентификация (kubeconfig, OIDC, exec, in-cluster), пагинация и обнаружение CRD оправдывают увеличение бинарного файла на ~15–20 МБ |
-| ADR-015 | 2026-03-28 | Использовать `go-git/v5` для git-операций; вызов бинарного файла `kustomize` через shell-exec для kustomize build | Proposed | Pure Go клонирование работает в scratch Docker образах; `kustomize build` в любом случае требует внешний бинарный файл |
-| ADR-016 | 2026-03-28 | Multi-source merge как отдельный компонент `merger.go`; стратегия по умолчанию `file-wins`; без three-way merge в v1 | Proposed | Дедупликация по `ResourceKey`; конфликты создают структуры `MergeConflict`. Three-way merge отложен — высокая сложность, низкая ROI для v1 |
+| ADR-014 | 2026-03-28 | Использовать динамический client `k8s.io/client-go` для извлечения из cluster | Superseded by ADR-051 | `k8s.io/apimachinery` уже присутствует; `client-go` разделяет транзитивные зависимости. Встроенная аутентификация (kubeconfig, OIDC, exec, in-cluster), пагинация и обнаружение CRD оправдывают увеличение бинарного файла на ~15–20 МБ. _Факт: `client-go` нет в `go.mod`; кластерный экстрактор обращается к API по REST (`net/http`, `pkg/extractor/cluster.go`)_ |
+| ADR-015 | 2026-03-28 | Использовать `go-git/v5` для git-операций; вызов бинарного файла `kustomize` через shell-exec для kustomize build | Superseded by ADR-051 | Pure Go клонирование работает в scratch Docker образах; `kustomize build` в любом случае требует внешний бинарный файл. _Факт: `go-git` нет в `go.mod`; gitops-экстрактор делает `git clone --depth 1` через git CLI и читает YAML из клона (`pkg/extractor/gitops.go`), `kustomize build` не вызывается_ |
+| ADR-016 | 2026-03-28 | Multi-source merge как отдельный компонент `merger.go`; стратегия по умолчанию `file-wins`; без three-way merge в v1 | Deferred | Дедупликация по `ResourceKey`; конфликты создают структуры `MergeConflict`. Three-way merge отложен — высокая сложность, низкая ROI для v1. _Факт: `--source` принимает один тип, слияния источников нет. `pkg/extractor/merger.go` содержит только `Deduplicate`: дубликаты по `ResourceKey` внутри одного источника, побеждает первое вхождение, выводится предупреждение; стратегий и `MergeConflict` нет_ |
 
 ---
 
@@ -47,14 +47,14 @@
 
 | ADR | Дата | Решение | Статус | Контекст |
 |-----|------|---------|--------|---------|
-| ADR-017 | 2026-03-28 | `dhg fix` как самостоятельная Cobra-команда (не `generate --fix`) | Proposed | `fix` мутирует входные манифесты; `generate` создаёт Helm chart — разные I/O-контракты требуют отдельных команд |
-| ADR-018 | 2026-03-28 | `GenericCRDProcessor` как динамический fallback для неизвестных CRD | Proposed | Обходит поля `spec` в runtime; генерирует шаблон `{{ toYaml .Values.<kind>.spec }}`. Типизированные процессоры остаются для известных типов (ADR-003) |
-| ADR-019 | 2026-03-28 | Нативная генерация DOT-текста — без зависимости от библиотеки graphviz | Proposed | DOT — тривиальный текстовый формат; пользователи рендерят через `dot -Tpng`. Исключает CGo-зависимость и сохраняет переносимость бинарного файла |
-| ADR-020 | 2026-03-28 | Один файл на каждый secret provider в `pkg/generator/secrets/`; общий интерфейс `SecretStrategy` | Proposed | ESO, Sealed Secrets, Vault CSI, Vault Agent, SOPS, Reloader изолированы. Выбор через флаг `--secret-strategy` |
-| ADR-021 | 2026-03-28 | Генераторы service mesh (Istio, Linkerd) как pipeline post-processor'ы (copy-on-write) | Proposed | Следует паттерну Phase 2/2.5 — добавляет шаблоны и values в `GeneratedChart`; не требует нового этапа пайплайна |
-| ADR-022 | 2026-03-28 | Плагинная система через subprocess JSON (stdin/stdout); не Go `plugin.Open` и не WASM | Proposed | Go-плагины требуют совпадения версий Go и работают только на Linux/macOS. Subprocess-паттерн проверен (Terraform, Helm, kubectl plugins) |
-| ADR-023 | 2026-03-28 | Worker pool на каждый этап пайплайна; параллельность в этапах Process и Generate; последовательный Analyze | Proposed | Параллелизм на уровне ресурсов в Stage 2 (процессоры независимы). Построение графа в Stage 3 должно быть последовательным. Ограниченный goroutine pool (`GOMAXPROCS`) |
-| ADR-024 | 2026-03-28 | GoDoc на `pkg.go.dev` как основная документация API; без отдельного docs-сайта для v1.0.0 | Proposed | Автоматически публикуется из публичного Go-модуля; минимальные затраты на поддержку. Пересмотреть при росте экосистемы плагинов |
+| ADR-017 | 2026-03-28 | `dhg fix` как самостоятельная Cobra-команда (не `generate --fix`) | Accepted | `fix` мутирует входные манифесты; `generate` создаёт Helm chart — разные I/O-контракты требуют отдельных команд. _Факт: `dhg fix` (`cmd/dhg/main.go`) не изменяет входные файлы: строит chart, применяет `generator.ApplyAllFixes` и пишет результат в `--output` (по умолчанию `./fixed`)_ |
+| ADR-018 | 2026-03-28 | `GenericCRDProcessor` как динамический fallback для неизвестных CRD | Accepted | Обходит поля `spec` в runtime; генерирует шаблон `{{ toYaml .Values.<kind>.spec }}`. Типизированные процессоры остаются для известных типов (ADR-003). _Факт: реализован не отдельным типом, а как `Registry.processGeneric` (`pkg/processor/registry.go`): каждое поле верхнего уровня, кроме `apiVersion`/`kind`/`metadata`/`status`, рендерится через `toYaml` из `.Values.services.<svc>.<kind>.<field>`_ |
+| ADR-019 | 2026-03-28 | Нативная генерация DOT-текста — без зависимости от библиотеки graphviz | Accepted | DOT — тривиальный текстовый формат; пользователи рендерят через `dot -Tpng`. Исключает CGo-зависимость и сохраняет переносимость бинарного файла. _Факт: `dhg graph --format dot` (по умолчанию; также `mermaid`), `analyzer.GenerateDOTGraph` (`pkg/analyzer/graph.go`); graphviz в `go.mod` нет_ |
+| ADR-020 | 2026-03-28 | Один файл на каждый secret provider в `pkg/generator/secrets/`; общий интерфейс `SecretStrategy` | Superseded by ADR-046 | ESO, Sealed Secrets, Vault CSI, Vault Agent, SOPS, Reloader изолированы. Выбор через флаг `--secret-strategy`. _Факт: каталога `pkg/generator/secrets/`, интерфейса `SecretStrategy` в генераторах и флага `--secret-strategy` нет. ESO, Vault Agent и Reloader подключаются как features `--with external-secrets`, `vault-agent`, `reloader`; Sealed Secrets, Vault CSI и SOPS не реализованы_ |
+| ADR-021 | 2026-03-28 | Генераторы service mesh (Istio, Linkerd) как pipeline post-processor'ы (copy-on-write) | Accepted | Следует паттерну Phase 2/2.5 — добавляет шаблоны и values в `GeneratedChart`; не требует нового этапа пайплайна. _Факт: features `--with istio` и `--with linkerd` (ADR-046); `Feature.Apply` не изменяет входной chart_ |
+| ADR-022 | 2026-03-28 | Плагинная система через subprocess JSON (stdin/stdout); не Go `plugin.Open` и не WASM | Accepted | Go-плагины требуют совпадения версий Go и работают только на Linux/macOS. Subprocess-паттерн проверен (Terraform, Helm, kubectl plugins). _Факт: флаг `--plugin <apiVersion>/<Kind>=<executable>`, `processor.PluginProcessor` (`pkg/processor/plugin.go`): JSON через stdin/stdout, приоритет выше встроенных процессоров_ |
+| ADR-023 | 2026-03-28 | Worker pool на каждый этап пайплайна; параллельность в этапах Process и Generate; последовательный Analyze | Deferred | Параллелизм на уровне ресурсов в Stage 2 (процессоры независимы). Построение графа в Stage 3 должно быть последовательным. Ограниченный goroutine pool (`GOMAXPROCS`). _Факт: worker pool нет — `cmd/dhg/pipeline.go` обрабатывает ресурсы последовательным циклом; goroutine есть только в экстракторах для стриминга (ADR-013)_ |
+| ADR-024 | 2026-03-28 | GoDoc на `pkg.go.dev` как основная документация API; без отдельного docs-сайта для v1.0.0 | Accepted | Автоматически публикуется из публичного Go-модуля; минимальные затраты на поддержку. Пересмотреть при росте экосистемы плагинов. _Факт: v1.0.0 вышел без docs-сайта; API описан комментариями пакетов (`// Package` нет у `pkg/processor/k8s` и `pkg/testutil`)_ |
 
 ---
 
@@ -65,7 +65,7 @@
 | ADR-039 | 2026-03-29 | Глубина валидации JSON Schema ограничена 5 уровнями вложенности | Accepted | Предотвращает комбинаторный взрыв при генерации схемы; покрывает все практические структуры Helm values |
 | ADR-040 | 2026-03-29 | Типизированный struct `PostRendererEnv` вместо встраивания `KustomizeDir` в генератор post-renderer | Accepted | Исключает aliasing struct между вызовами генератора; соответствует контракту copy-on-write (ADR-008) |
 | ADR-041 | 2026-03-29 | Scaffold оператора использует чистые YAML-шаблоны, без маркеров Kubebuilder | Accepted | Маркеры Kubebuilder требуют бинарный файл `controller-gen`; чистый YAML работает везде и проще тестируется |
-| ADR-042 | 2026-03-29 | Стратегии секретов (ESO, Sealed Secrets, Vault CSI, SOPS) взаимоисключающие через флаг `--secret-strategy` | Accepted | Несколько стратегий в одном chart создают конфликтующие ссылки на Secret; выбор одной стратегии исключает неоднозначность |
+| ADR-042 | 2026-03-29 | Стратегии секретов (ESO, Sealed Secrets, Vault CSI, SOPS) взаимоисключающие через флаг `--secret-strategy` | Superseded by ADR-046 | Несколько стратегий в одном chart создают конфликтующие ссылки на Secret; выбор одной стратегии исключает неоднозначность. _Факт: флага `--secret-strategy` нет; ESO и Vault Agent — фичи `--with external-secrets` и `--with vault-agent`, Sealed Secrets, Vault CSI и SOPS не реализованы_ |
 | ADR-043 | 2026-03-29 | Генераторы Istio и Linkerd — независимые модули, без общей абстракции | Accepted | Два mesh-решения достаточно различаются в CRD (VirtualService vs SMI), что вынужденный общий интерфейс создал бы утечку абстракции |
 | ADR-044 | 2026-03-29 | Определение языка OpenTelemetry использует эвристику по имени образа, а не runtime-анализ | Accepted | Runtime-анализ требует доступа к кластеру; паттерны имён образов (`*-java`, `*-python` и т.д.) работают в file-only режиме |
 
@@ -81,8 +81,8 @@ _См. таблицу Phase 5 выше — ADR-022, ADR-023, ADR-024 затра�
 
 | ADR | Дата | Решение | Статус | Контекст |
 |-----|------|---------|--------|---------|
-| ADR-025 | 2026-03-28 | Генераторы Phase 7 организованы в доменных поддиректориях внутри `pkg/generator/` (`gitops/`, `monitoring/`, `backup/`, `delivery/`) | Proposed | Плоская структура уже содержит 37 файлов генераторов; 10+ добавлений без группировки сделали бы навигацию непрактичной |
-| ADR-026 | 2026-03-28 | Один файл Helm-шаблона на каждый тип CRD (не группировать по инструменту) | Proposed | Следует конвенции Helm; позволяет использовать per-CRD переключатели `enabled` в values |
+| ADR-025 | 2026-03-28 | Генераторы Phase 7 организованы в доменных поддиректориях внутри `pkg/generator/` (`gitops/`, `monitoring/`, `backup/`, `delivery/`) | Rejected | Плоская структура уже содержит 37 файлов генераторов; 10+ добавлений без группировки сделали бы навигацию непрактичной. _Факт: `pkg/generator/` остался плоским (58 файлов без тестов, поддиректорий нет); опциональные генераторы сгруппированы реестром features (ADR-046) и файлами `features_*.go`_ |
+| ADR-026 | 2026-03-28 | Один файл Helm-шаблона на каждый тип CRD (не группировать по инструменту) | Rejected | Следует конвенции Helm; позволяет использовать per-CRD переключатели `enabled` в values. _Факт: шаблоны features группируются по инструменту: файл `istio-*.yaml` на каждый Service содержит VirtualService, DestinationRule, PeerAuthentication и AuthorizationPolicy с отдельными `enabled`; также `external-secrets.yaml`, `prometheus-rules.yaml`. Процессоры пишут файл на объект (`templates/<kind>-<name>.yaml`)_ |
 
 ---
 
@@ -90,9 +90,9 @@ _См. таблицу Phase 5 выше — ADR-022, ADR-023, ADR-024 затра�
 
 | ADR | Дата | Решение | Статус | Контекст |
 |-----|------|---------|--------|---------|
-| ADR-027 | 2026-03-28 | LSP-сервер как отдельный бинарный файл `dhg-lsp`; общие импорты `pkg/` | Proposed | LSP — долго живущий процесс с иным жизненным циклом, чем CLI; независимый цикл релизов, более лёгкая установка в IDE |
-| ADR-028 | 2026-03-28 | Kubernetes Operator в отдельном репозитории `dhg-operator`; импортирует `dhg` как библиотеку | Proposed | Сохраняет Unix-философию CLI; оператор опционален и привлекает отдельные feature requests |
-| ADR-029 | 2026-03-28 | Hot reload через встроенный `fsnotify` + генерируемые шаблоны `Tiltfile` / `devspace.yaml` | Proposed | `dhg dev` регенерирует chart при изменении файлов; Tilt/DevSpace управляют деплоем в кластер — чёткое разделение ответственности |
+| ADR-027 | 2026-03-28 | LSP-сервер как отдельный бинарный файл `dhg-lsp`; общие импорты `pkg/` | Deferred | LSP — долго живущий процесс с иным жизненным циклом, чем CLI; независимый цикл релизов, более лёгкая установка в IDE. _Факт: бинарного файла `dhg-lsp` нет; GoReleaser собирает только `./cmd/dhg`_ |
+| ADR-028 | 2026-03-28 | Kubernetes Operator в отдельном репозитории `dhg-operator`; импортирует `dhg` как библиотеку | Deferred | Сохраняет Unix-философию CLI; оператор опционален и привлекает отдельные feature requests. _Факт: в репозитории нет кода оператора и ссылок на `dhg-operator`_ |
+| ADR-029 | 2026-03-28 | Hot reload через встроенный `fsnotify` + генерируемые шаблоны `Tiltfile` / `devspace.yaml` | Deferred | `dhg dev` регенерирует chart при изменении файлов; Tilt/DevSpace управляют деплоем в кластер — чёткое разделение ответственности. _Факт: команды `dhg dev` нет, `fsnotify` нет в `go.mod`, `Tiltfile`/`devspace.yaml` не генерируются_ |
 
 ---
 
@@ -100,8 +100,8 @@ _См. таблицу Phase 5 выше — ADR-022, ADR-023, ADR-024 затра�
 
 | ADR | Дата | Решение | Статус | Контекст |
 |-----|------|---------|--------|---------|
-| ADR-030 | 2026-03-28 | AI/ML процессоры следуют паттерну plugin registry (ADR-003); организованы в `pkg/processor/k8s/ml/` | Proposed | CRD Kubeflow, KServe, Ray, Seldon регистрируют GVK штатно; группировка в поддиректории для ~8–10 файлов |
-| ADR-031 | 2026-03-28 | Инъекция GPU-конфигурации как copy-on-write post-processor | Proposed | Обнаруживает GPU-паттерны в именах образов; добавляет лимиты `nvidia.com/gpu`, tolerations и emptyDir-том для `/dev/shm` |
+| ADR-030 | 2026-03-28 | AI/ML процессоры следуют паттерну plugin registry (ADR-003); организованы в `pkg/processor/k8s/ml/` | Deferred | CRD Kubeflow, KServe, Ray, Seldon регистрируют GVK штатно; группировка в поддиректории для ~8–10 файлов. _Факт: `pkg/processor/k8s/ml/` нет; процессоров Kubeflow, KServe, Ray, Seldon нет_ |
+| ADR-031 | 2026-03-28 | Инъекция GPU-конфигурации как copy-on-write post-processor | Deferred | Обнаруживает GPU-паттерны в именах образов; добавляет лимиты `nvidia.com/gpu`, tolerations и emptyDir-том для `/dev/shm`. _Факт: GPU-инъекции (`nvidia.com/gpu`) в коде нет_ |
 
 ---
 
@@ -109,9 +109,9 @@ _См. таблицу Phase 5 выше — ADR-022, ADR-023, ADR-024 затра�
 
 | ADR | Дата | Решение | Статус | Контекст |
 |-----|------|---------|--------|---------|
-| ADR-032 | 2026-03-28 | Процессоры баз данных организованы в поддиректориях по семействам операторов (`db/postgres/`, `db/mysql/`, `db/redis/` и т.д.) | Proposed | 51 задача для 12+ операторов; плоская директория `k8s/` неприемлема при таком масштабе |
-| ADR-033 | 2026-03-28 | Общие DB-интерфейсы: `BackupConfigurer`, `HAConfigurer`, `PoolerConfigurer` — реализации специфичны для каждого оператора | Proposed | Общие паттерны для всех DB-операторов; вспомогательные функции в `db/common.go` для S3-credentials и PDB-scaffold |
-| ADR-034 | 2026-03-28 | 7-уровневый каскад обнаружения операторов (явные values → версия API → kind → labels → зависимости chart → паттерны ConfigMap → ссылки Secret) | Proposed | Несколько операторов для одного DB-движка требуют надёжного разграничения до GVK-маршрутизации |
+| ADR-032 | 2026-03-28 | Процессоры баз данных организованы в поддиректориях по семействам операторов (`db/postgres/`, `db/mysql/`, `db/redis/` и т.д.) | Deferred | 51 задача для 12+ операторов; плоская директория `k8s/` неприемлема при таком масштабе. _Факт: процессоров DB-операторов и `pkg/processor/k8s/db/` нет_ |
+| ADR-033 | 2026-03-28 | Общие DB-интерфейсы: `BackupConfigurer`, `HAConfigurer`, `PoolerConfigurer` — реализации специфичны для каждого оператора | Deferred | Общие паттерны для всех DB-операторов; вспомогательные функции в `db/common.go` для S3-credentials и PDB-scaffold. _Факт: интерфейсов `BackupConfigurer`/`HAConfigurer`/`PoolerConfigurer` и `db/common.go` нет_ |
+| ADR-034 | 2026-03-28 | 7-уровневый каскад обнаружения операторов (явные values → версия API → kind → labels → зависимости chart → паттерны ConfigMap → ссылки Secret) | Deferred | Несколько операторов для одного DB-движка требуют надёжного разграничения до GVK-маршрутизации. _Факт: каскада нет; `OperatorDetector` (`pkg/analyzer/pattern/detectors.go`) только распознаёт паттерн «CRD + controller Deployment»_ |
 
 ---
 
@@ -119,7 +119,7 @@ _См. таблицу Phase 5 выше — ADR-022, ADR-023, ADR-024 затра�
 
 | ADR | Дата | Решение | Статус | Контекст |
 |-----|------|---------|--------|---------|
-| ADR-035 | 2026-03-28 | Конфигурация планирования через чекеры анализатора + генераторы-post-processor'ы; без нового этапа пайплайна | Proposed | `TopologySpreadChecker`, `PriorityClassChecker`, `AffinityChecker` добавлены в pattern analyzer; генераторы инъецируют конфигурацию после анализа |
+| ADR-035 | 2026-03-28 | Конфигурация планирования через чекеры анализатора + генераторы-post-processor'ы; без нового этапа пайплайна | Accepted | `TopologySpreadChecker`, `PriorityClassChecker`, `AffinityChecker` добавлены в pattern analyzer; генераторы инъецируют конфигурацию после анализа. _Факт: реализовано частично — в анализаторе есть `TopologySpreadChecker`, а `PriorityClassChecker` и `AffinityChecker` нет; генератор — feature `--with anti-affinity` (podAntiAffinity, опционально zone topologySpread)_ |
 
 ---
 
@@ -127,7 +127,7 @@ _См. таблицу Phase 5 выше — ADR-022, ADR-023, ADR-024 затра�
 
 | ADR | Дата | Решение | Статус | Контекст |
 |-----|------|---------|--------|---------|
-| ADR-036 | 2026-03-28 | CSI/storage конфигурация: генераторы для автосоздания + процессоры для существующих CRD; values-based обнаружение как основное (cluster-based как будущее улучшение) | Proposed | Исключает жёсткую зависимость от cluster extractor Phase 4; флаг `--cloud-provider` предоставляет контекст хранилища уже сегодня |
+| ADR-036 | 2026-03-28 | CSI/storage конфигурация: генераторы для автосоздания + процессоры для существующих CRD; values-based обнаружение как основное (cluster-based как будущее улучшение) | Deferred | Исключает жёсткую зависимость от cluster extractor Phase 4; флаг `--cloud-provider` предоставляет контекст хранилища уже сегодня. _Факт: генераторов и процессоров CSI/storage CRD нет, флага `--cloud-provider` нет (провайдер есть только как параметр feature `resource-report` для оценки стоимости)_ |
 
 ---
 
@@ -135,8 +135,8 @@ _См. таблицу Phase 5 выше — ADR-022, ADR-023, ADR-024 затра�
 
 | ADR | Дата | Решение | Статус | Контекст |
 |-----|------|---------|--------|---------|
-| ADR-037 | 2026-03-28 | Обнаружение K8s-дистрибутивов (K3s, MicroK8s, KubeEdge) как pattern detector анализатора | Proposed | Работает в file-only режиме через инспекцию CRD; переходит к cluster metadata при наличии extractor Phase 4 |
-| ADR-038 | 2026-03-28 | IoT CRD: процессор для существующих ресурсов + генератор для автосоздаваемых (MQTT broker, DaemonSet device mapper) | Proposed | Двойной подход зеркалирует стратегию CSI Phase 12; соответствует существующему разделению пайплайна |
+| ADR-037 | 2026-03-28 | Обнаружение K8s-дистрибутивов (K3s, MicroK8s, KubeEdge) как pattern detector анализатора | Deferred | Работает в file-only режиме через инспекцию CRD; переходит к cluster metadata при наличии extractor Phase 4. _Факт: детектора K3s/MicroK8s/KubeEdge нет_ |
+| ADR-038 | 2026-03-28 | IoT CRD: процессор для существующих ресурсов + генератор для автосоздаваемых (MQTT broker, DaemonSet device mapper) | Deferred | Двойной подход зеркалирует стратегию CSI Phase 12; соответствует существующему разделению пайплайна. _Факт: процессоров и генераторов IoT CRD (MQTT broker, device mapper) нет_ |
 
 ---
 
@@ -160,13 +160,28 @@ _См. таблицу Phase 5 выше — ADR-022, ADR-023, ADR-024 затра�
 
 ---
 
-## Генерация без манифестов (ADR-058 – ADR-060)
+## Генерация без манифестов (ADR-058 – ADR-060, ADR-062)
 
 | ADR | Дата | Решение | Статус | Контекст |
 |-----|------|---------|--------|---------|
 | ADR-058 | 2026-10-07 | Источники `image`, `compose`, `source` строят синтетические манифесты (`pkg/synth`), которые идут в неизменённый конвейер | Accepted | Один путь для всех входов: режимы, `--with`, golden-проверки применяются без особых случаев. Альтернатива — генерировать chart напрямую из модели — дублировала бы генераторы. См. docs/SPEC_SYNTHESIS.md |
 | ADR-059 | 2026-10-07 | В chart попадают только факты входа; невыводимое (requests/limits, пароли, размеры томов, Ingress) не подставляется, а перечисляется в `SYNTHESIS.md` | Accepted | Выдуманные значения ресурсов ломают планирование и выглядят как решения. Имя порта `http` — только при известном протоколе (Spring Boot), иначе `tcp-<порт>`: имя порта управляет определением протокола в mesh |
-| ADR-060 | 2026-10-07 | Конфигурация образа читается по Docker Registry HTTP API v2 на `net/http` (manifest + config, без слоёв), без `go-containerregistry` | Accepted | Как ADR-051: минимум зависимостей и контроль размера ответов (≤ 4 MiB) и digest. Цена: нет credential helpers и схем, кроме Basic/Bearer — для Docker Hub, Harbor, GitLab, Nexus и Deckhouse registry достаточно. Bearer-токен кэшируется по паре registry+scope и не уходит в другой registry. Compose разбирается по YAML 1.2 (`sigs.k8s.io/yaml/goyaml.v3`, подпакет уже подключённой зависимости), Spring `application.yml` — по YAML 1.1, как их читают сами Docker Compose v2 и SnakeYAML |
+| ADR-060 | 2026-10-07 | Конфигурация образа читается по Docker Registry HTTP API v2 на `net/http` (manifest + config, без слоёв), без `go-containerregistry` | Accepted | Как ADR-051: минимум зависимостей и контроль размера ответов (≤ 4 MiB) и digest. Цена: нет схем, кроме Basic/Bearer — для Docker Hub, Harbor, GitLab, Nexus и Deckhouse registry достаточно. Учётные данные — из docker `config.json`: `credHelpers.<host>` → `auths.<host>` → `credsStore`; credential helpers запускаются по протоколу docker-credential-helpers (`docker-credential-<имя> get`, без shell, таймаут 30 с, результат кэшируется по хосту), identity token'ы (OAuth2) не поддерживаются, причина отсутствия учётных данных попадает в `SYNTHESIS.md` и в ошибку. Bearer-токен кэшируется по паре registry+scope и не уходит в другой registry. Compose разбирается по YAML 1.2 (`sigs.k8s.io/yaml/goyaml.v3`, подпакет уже подключённой зависимости), Spring `application.yml` — по YAML 1.1, как их читают сами Docker Compose v2 и SnakeYAML |
+| ADR-062 | 2026-10-07 | `-s source` читает Spring Boot, Quarkus и Micronaut по правилам самих фреймворков (приоритет файлов, `%prod` Quarkus, пути health), профили фреймворка дают `values-profile-<profile>.yaml` как разницу двух прогонов конвейера, а `--image-config` берёт факты контейнера из config образа вместо Dockerfile | Accepted | Разница считается по готовым values, а не по модели `App`: так она верна для всех режимов (universal/separate/library/umbrella), путей values и разрешения коллизий без отдельного кода. Цена — конвейер прогоняется по разу на профиль; для синтезируемых приложений это миллисекунды. Config образа точнее Dockerfile (в нём `USER`/`EXPOSE` базового образа), но требует сети и запушенного образа, поэтому включается флагом |
+
+---
+
+## Ingress за Istio и дорожная карта EPIC-01..11 (ADR-061, ADR-063 – ADR-068)
+
+| ADR | Дата | Решение | Статус | Контекст |
+|-----|------|---------|--------|---------|
+| ADR-061 | 2026-10-07 | `--with istio-ingress` строит Istio `Gateway` + `VirtualService` из входного Ingress; конфигурация вычисляется при генерации и хранится в values (`istioIngress.ingresses`), Ingress по умолчанию остаётся, `istioIngress.replaceIngress` его выключает | Accepted | Istio обслуживает Ingress (`ingressClassName: istio`) без аннотаций, redirect и с секретом в namespace gateway, а `--detect-ingress` для Istio молча ничего не делал. Вычисление при генерации, а не в шаблоне: порядок маршрутов по правилам Ingress (Exact, длина пути) и именованные порты Service в Sprig не выразить. Ingress сохраняется по умолчанию ради fidelity (ADR-053); цена — правки `services.*.ingress` не переносятся в `istioIngress` |
+| ADR-063 | 2026-10-25 | Общая модель `IngressModel` для `--with istio-ingress` и `--with gateway-api` (Gateway API v1.5+: `HTTPRoute`, `GRPCRoute`, `ListenerSet`, `ReferenceGrant`, профиль Deckhouse `alb`) | Accepted | Позволяет единообразно извлекать хосты, пути, TLS и аннотации `ingress-nginx` без дублирования парсера Ingress (EPIC-01) |
+| ADR-064 | 2026-10-25 | Универсальный реестр инъекций в workload-шаблоны (`WorkloadInjectSpec`: env, volumes, volumeMounts) и единый канал `FeatureContext.Note` | Accepted | Позволяет фичам (`--with kafka-client`, `--with strimzi` и др.) добавлять переменные окружения и тома в контейнеры без хрупких строковых замен (EPIC-02) |
+| ADR-065 | 2026-10-25 | Единый граф сетевых и брокерных подключений (`pkg/connect`, `graph.Connections`) и двухуровневая топология «сервис → PBC → продукт» (`--group-by pbc`) | Accepted | Объединяет разбор URL/JDBC/host:port/конфигов/топиков для манифестов и `pkg/synth`, питает `istio-egress`, `connection-policies`, `strimzi`, `dhg graph` и `PBC.md` (EPIC-03) |
+| ADR-066 | 2026-10-25 | Значения по умолчанию `global.securityContextDefaults` через `merge`/`deepCopy` в шаблонах и оценка Pod Security Standards (`pkg/compliance/pss`) | Accepted | Исправляет `dhg fix` (ранее патчивший только первый `image:` блок в `initContainers`) и обеспечивает совместимость с Deckhouse `admission-policy-engine`, `log-shipper` и `observability` (EPIC-05) |
+| ADR-067 | 2026-10-25 | Повторная генерация (`--update`) через `OutputSet`, `.dhg/base/` и трёхстороннее слияние (`pkg/merge`, `pkg/regen`) | Accepted | Сохраняет ручные правки и комментарии пользователя в `values.yaml`, `Chart.yaml` и шаблонах при повторной генерации чарта, записывая неразрешимые конфликты в `MERGE.md` (EPIC-06) |
+| ADR-068 | 2026-10-25 | Расширения доставки и эксплуатации (`multi-env`, `argocd`, `golden-signals`, `supply-chain`, `workload-scaling`, `ci-workflow`, `pkg/compliance/sarif`) | Accepted | Закрывает сценарии GitOps/multi-env доставки, Golden Signals, проверки `@sha256` digests, `StatefulSet` PVC retention и SARIF v2.1.0 экспорта в CI (EPIC-04, EPIC-07..11) |
 
 ---
 
@@ -174,8 +189,13 @@ _См. таблицу Phase 5 выше — ADR-022, ADR-023, ADR-024 затра�
 
 | Статус | Количество | ADR |
 |--------|-----------|-----|
-| Accepted | 35 | 001–013, 039–060 |
-| Proposed | 25 | 014–038 |
-| **Итого** | **60** | |
+| Accepted | 49 | 001–013, 017–019, 021, 022, 024, 035, 039–041, 043–068 |
+| Superseded | 4 | 014, 015 (ADR-051), 020, 042 (ADR-046) |
+| Rejected | 2 | 025, 026 |
+| Deferred | 13 | 016, 023, 027–034, 036–038 |
+| Proposed | 0 | — |
+| **Итого** | **68** | |
 
-> Proposed ADR представляют задокументированные намерения для будущих фаз. Они ещё не реализованы. Детали реализации могут измениться до принятия.
+> 2026-10-07: статусы ADR-014 – ADR-038 и ADR-042 сверены с кодом (`cmd/dhg`, `pkg/`, `go.mod`). Реализованные решения переведены в Accepted, заменённые — в Superseded, нереализованные — в Rejected или Deferred; расхождения с текстом решения описаны пометкой _Факт_ в колонке «Контекст».
+>
+> Deferred ADR представляют задокументированные намерения для будущих фаз: кода для них нет, детали могут измениться до принятия.

@@ -64,9 +64,15 @@ func RegisterAll(r *processor.Registry) {
 	r.Register(NewGatewayProcessor())
 	r.Register(NewGRPCRouteProcessor())
 	r.Register(NewTLSRouteProcessor())
+	r.Register(NewListenerSetProcessor())
+	r.Register(NewReferenceGrantProcessor())
 
 	// Flagger
 	r.Register(NewFlaggerCanaryProcessor())
+
+	// Strimzi
+	r.Register(NewKafkaTopicProcessor())
+	r.Register(NewKafkaUserProcessor())
 
 	// Monitoring (Prometheus Operator + Grafana)
 	r.Register(NewServiceMonitorProcessor())
@@ -76,12 +82,18 @@ func RegisterAll(r *processor.Registry) {
 
 	// Deckhouse CRDs
 	r.Register(NewModuleConfigProcessor())
+	r.Register(NewPodLoggingConfigProcessor())
+	r.Register(NewClusterLoggingConfigProcessor())
 	r.Register(NewIngressNginxControllerProcessor())
 	r.Register(NewClusterAuthorizationRuleProcessor())
 	r.Register(NewNodeGroupProcessor())
 	r.Register(NewDexAuthenticatorProcessor())
 	r.Register(NewUserProcessor())
 	r.Register(NewGroupProcessor())
+
+	// Argo CD
+	r.Register(NewArgoCDApplicationProcessor())
+	r.Register(NewArgoCDApplicationSetProcessor())
 
 	// Deckhouse cloud InstanceClasses
 	r.Register(NewOpenstackInstanceClassProcessor())

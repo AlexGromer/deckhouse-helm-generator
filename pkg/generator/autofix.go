@@ -36,27 +36,6 @@ func copyChartTemplates(chart *types.GeneratedChart) *types.GeneratedChart {
 	}
 }
 
-// InjectSecurityContext adds container-level securityContext to workload templates
-// that are missing it: runAsNonRoot, readOnlyRootFilesystem, allowPrivilegeEscalation=false,
-// capabilities drop ALL. Uses copy-on-write.
-func InjectSecurityContext(chart *types.GeneratedChart) (*types.GeneratedChart, int) {
-	result := copyChartTemplates(chart)
-	count := 0
-
-	for path, content := range result.Templates {
-		if !isWorkloadTemplate(content) {
-			continue
-		}
-		if strings.Contains(content, "securityContext:") {
-			continue
-		}
-		result.Templates[path] = injectSecurityContext(content, "restricted")
-		count++
-	}
-
-	return result, count
-}
-
 // InjectResourceDefaults adds resource requests/limits to workload templates that lack them.
 // Uses the profile from resourceProfiles based on workloadType. Copy-on-write.
 func InjectResourceDefaults(chart *types.GeneratedChart, workloadType WorkloadType) (*types.GeneratedChart, int) {
@@ -226,26 +205,6 @@ func InjectPDB(chart *types.GeneratedChart) (*types.GeneratedChart, int) {
 	return result, count
 }
 
-// InjectPSSRestricted wraps InjectPSSDefaults with level=restricted.
-// Returns the patched chart and the count of modified templates.
-func InjectPSSRestricted(chart *types.GeneratedChart) (*types.GeneratedChart, int) {
-	before := countTemplatesWithField(chart, "seccompProfile")
-	result := InjectPSSDefaults(chart, "restricted")
-	after := countTemplatesWithField(result, "seccompProfile")
-	return result, after - before
-}
-
-// countTemplatesWithField counts how many workload templates contain a given field.
-func countTemplatesWithField(chart *types.GeneratedChart, field string) int {
-	count := 0
-	for _, content := range chart.Templates {
-		if isWorkloadTemplate(content) && strings.Contains(content, field) {
-			count++
-		}
-	}
-	return count
-}
-
 // gracePeriodByKind maps workload kinds to their terminationGracePeriodSeconds defaults.
 var gracePeriodByKind = map[string]int{
 	"Deployment":  30,
@@ -319,13 +278,31 @@ func detectWorkloadKind(content string) string {
 }
 
 // ApplyAllFixes runs all auto-fix functions on the chart and returns the result.
-func ApplyAllFixes(chart *types.GeneratedChart, workloadType WorkloadType) (*types.GeneratedChart, *AutoFixResult) {
+func ApplyAllFixes(chart *types.GeneratedChart, workloadType WorkloadType) (*types.GeneratedChart, *AutoFixResult, error) {
 	result := &AutoFixResult{}
 	current := chart
 
 	var n int
-	current, n = InjectSecurityContext(current)
+	var err error
+	podSC := map[string]interface{}{
+		"runAsNonRoot": true,
+		"seccompProfile": map[string]interface{}{
+			"type": "RuntimeDefault",
+		},
+	}
+	containerSC := map[string]interface{}{
+		"allowPrivilegeEscalation": false,
+		"readOnlyRootFilesystem":   true,
+		"capabilities": map[string]interface{}{
+			"drop": []interface{}{"ALL"},
+		},
+	}
+	current, n, err = SetSecurityContextDefaults(current, podSC, containerSC)
+	if err != nil {
+		return nil, nil, fmt.Errorf("applying securityContext defaults: %w", err)
+	}
 	result.SecurityContextInjected = n
+	result.PSSRestrictedApplied = n
 
 	current, n = InjectResourceDefaults(current, workloadType)
 	result.ResourcesInjected = n
@@ -336,11 +313,47 @@ func ApplyAllFixes(chart *types.GeneratedChart, workloadType WorkloadType) (*typ
 	current, n = InjectPDB(current)
 	result.PDBsGenerated = n
 
-	current, n = InjectPSSRestricted(current)
-	result.PSSRestrictedApplied = n
-
 	current, n = InjectGracefulShutdown(current)
 	result.GracefulShutdownAdded = n
 
-	return current, result
+	return current, result, nil
+}
+
+// SetSecurityContextDefaults uses setGlobalValue to inject securityContext defaults for pod and container.
+// It returns the modified chart, the number of workload templates in the chart, and an error if setGlobalValue fails.
+func SetSecurityContextDefaults(chart *types.GeneratedChart, pod, container map[string]interface{}) (*types.GeneratedChart, int, error) {
+	count := 0
+	for _, content := range chart.Templates {
+		if isWorkloadTemplate(content) {
+			count++
+		}
+	}
+
+	if count == 0 {
+		return chart, 0, nil
+	}
+
+	defaults := map[string]interface{}{}
+	if len(pod) > 0 {
+		defaults["pod"] = pod
+	}
+	if len(container) > 0 {
+		defaults["container"] = container
+	}
+	if len(defaults) == 0 {
+		return chart, count, nil
+	}
+
+	newValuesYAML, err := setGlobalValue(chart.ValuesYAML, "securityContextDefaults", defaults)
+	if err != nil {
+		if strings.Contains(err.Error(), "already has global.securityContextDefaults") {
+			// If already set by something else, we don't treat it as error but we don't inject again
+			return chart, count, nil
+		}
+		return nil, 0, err
+	}
+
+	result := cloneChart(chart)
+	result.ValuesYAML = newValuesYAML
+	return result, count, nil
 }

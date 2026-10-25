@@ -1,0 +1,179 @@
+{
+  "properties": {
+    "spec": {
+      "properties": {
+        "mtls": {
+          "properties": {
+            "mode": {
+              "enum": [
+                "UNSET",
+                "DISABLE",
+                "PERMISSIVE",
+                "STRICT"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "additionalProperties": false
+        },
+        "portLevelMtls": {
+          "additionalProperties": {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "UNSET",
+                  "DISABLE",
+                  "PERMISSIVE",
+                  "STRICT"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "minProperties": 1,
+          "type": "object",
+          "x-kubernetes-validations": [
+            {
+              "message": "port must be between 1-65535",
+              "rule": "self.all(key, 0 < int(key) && int(key) <= 65535)"
+            }
+          ]
+        },
+        "selector": {
+          "properties": {
+            "matchLabels": {
+              "additionalProperties": {
+                "maxLength": 63,
+                "type": "string",
+                "x-kubernetes-validations": [
+                  {
+                    "message": "wildcard not allowed in label value match",
+                    "rule": "!self.contains(\"*\")"
+                  }
+                ]
+              },
+              "maxProperties": 4096,
+              "type": "object",
+              "x-kubernetes-validations": [
+                {
+                  "message": "wildcard not allowed in label key match",
+                  "rule": "self.all(key, !key.contains(\"*\"))"
+                },
+                {
+                  "message": "key must not be empty",
+                  "rule": "self.all(key, key.size() != 0)"
+                }
+              ]
+            }
+          },
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "type": "object",
+      "x-kubernetes-validations": [
+        {
+          "message": "portLevelMtls requires selector",
+          "rule": "has(self.portLevelMtls) ? (((has(self.selector) && has(self.selector.matchLabels)) ? self.selector.matchLabels : {}).size() > 0) : true"
+        }
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "properties": {
+        "conditions": {
+          "items": {
+            "properties": {
+              "lastProbeTime": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "lastTransitionTime": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "observedGeneration": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "x-kubernetes-int-or-string": true
+              },
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        },
+        "observedGeneration": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "x-kubernetes-int-or-string": true
+        },
+        "validationMessages": {
+          "items": {
+            "properties": {
+              "documentationUrl": {
+                "type": "string"
+              },
+              "level": {
+                "enum": [
+                  "UNKNOWN",
+                  "ERROR",
+                  "WARNING",
+                  "INFO"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "x-kubernetes-preserve-unknown-fields": true,
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "additionalProperties": false
+}

@@ -1,8 +1,6 @@
 package synth
 
 import (
-	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/synth/registry"
@@ -20,41 +18,12 @@ func FromImage(ref registry.Reference, cfg *registry.ImageConfig, notes *Notes) 
 	}
 	app := App{Name: DNSName(name), Image: ref.Name()}
 
-	ports := make([]string, 0, len(c.ExposedPorts))
-	for p := range c.ExposedPorts {
-		ports = append(ports, p)
-	}
-	sort.Strings(ports)
-	for _, p := range ports {
-		number, proto, _ := strings.Cut(p, "/")
-		n, err := strconv.ParseInt(number, 10, 64)
-		if err != nil || n < 1 || n > 65535 {
-			notes.Addf("%s: ignored exposed port %q", app.Name, p)
-			continue
-		}
-		app.AddPort(n, proto)
-	}
+	f := imageFacts(cfg)
+	applyContainer(&app, f, notes)
 	if len(app.Ports) == 0 {
 		notes.Addf("%s: the image exposes no port, so no Service was created; add ports in values if the app listens on one", app.Name)
 	}
-
-	applyUser(&app, c.User, "image", notes)
-
-	vols := make([]string, 0, len(c.Volumes))
-	for v := range c.Volumes {
-		vols = append(vols, v)
-	}
-	sort.Strings(vols)
-	for i, v := range vols {
-		app.Volumes = append(app.Volumes, Volume{Name: "volume-" + strconv.Itoa(i+1), MountPath: v, Kind: VolumeEmptyDir})
-		notes.Addf("%s: image volume %s is an emptyDir (lost on restart); make it persistent if it holds data", app.Name, v)
-	}
-
-	if c.Healthcheck != nil {
-		if p := healthcheckProbe(c.Healthcheck.Test, c.Healthcheck.Interval, c.Healthcheck.Timeout, c.Healthcheck.StartPeriod, c.Healthcheck.Retries); p != nil {
-			app.Liveness, app.Readiness = p, copyProbe(p)
-		}
-	} else {
+	if c.Healthcheck == nil {
 		notes.Addf("%s: the image defines no HEALTHCHECK, so the chart has no probes; add liveness and readiness probes", app.Name)
 	}
 

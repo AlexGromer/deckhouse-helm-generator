@@ -1,0 +1,2806 @@
+{
+  "properties": {
+    "spec": {
+      "properties": {
+        "exportTo": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "host": {
+          "type": "string"
+        },
+        "subsets": {
+          "items": {
+            "properties": {
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "trafficPolicy": {
+                "properties": {
+                  "connectionPool": {
+                    "properties": {
+                      "http": {
+                        "properties": {
+                          "h2UpgradePolicy": {
+                            "enum": [
+                              "DEFAULT",
+                              "DO_NOT_UPGRADE",
+                              "UPGRADE"
+                            ],
+                            "type": "string"
+                          },
+                          "http1MaxPendingRequests": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "http2KeepAlive": {
+                            "properties": {
+                              "interval": {
+                                "type": "string",
+                                "x-kubernetes-validations": [
+                                  {
+                                    "message": "must be a valid duration greater than 1ms",
+                                    "rule": "duration(self) >= duration('1ms')"
+                                  }
+                                ]
+                              },
+                              "timeout": {
+                                "type": "string",
+                                "x-kubernetes-validations": [
+                                  {
+                                    "message": "must be a valid duration greater than 1ms",
+                                    "rule": "duration(self) >= duration('1ms')"
+                                  }
+                                ]
+                              }
+                            },
+                            "type": "object",
+                            "additionalProperties": false
+                          },
+                          "http2MaxRequests": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "idleTimeout": {
+                            "type": "string",
+                            "x-kubernetes-validations": [
+                              {
+                                "message": "must be a valid duration greater than 1ms",
+                                "rule": "duration(self) >= duration('1ms')"
+                              }
+                            ]
+                          },
+                          "maxConcurrentStreams": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "maxRequestsPerConnection": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "maxRetries": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "useClientProtocol": {
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "tcp": {
+                        "properties": {
+                          "connectTimeout": {
+                            "type": "string",
+                            "x-kubernetes-validations": [
+                              {
+                                "message": "must be a valid duration greater than 1ms",
+                                "rule": "duration(self) >= duration('1ms')"
+                              }
+                            ]
+                          },
+                          "idleTimeout": {
+                            "type": "string"
+                          },
+                          "maxConnectionDuration": {
+                            "type": "string",
+                            "x-kubernetes-validations": [
+                              {
+                                "message": "must be a valid duration greater than 1ms",
+                                "rule": "duration(self) >= duration('1ms')"
+                              }
+                            ]
+                          },
+                          "maxConnections": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "tcpKeepalive": {
+                            "properties": {
+                              "interval": {
+                                "type": "string",
+                                "x-kubernetes-validations": [
+                                  {
+                                    "message": "must be a valid duration greater than 1ms",
+                                    "rule": "duration(self) >= duration('1ms')"
+                                  }
+                                ]
+                              },
+                              "probes": {
+                                "maximum": 4294967295,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "time": {
+                                "type": "string",
+                                "x-kubernetes-validations": [
+                                  {
+                                    "message": "must be a valid duration greater than 1ms",
+                                    "rule": "duration(self) >= duration('1ms')"
+                                  }
+                                ]
+                              }
+                            },
+                            "type": "object",
+                            "additionalProperties": false
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "loadBalancer": {
+                    "oneOf": [
+                      {
+                        "not": {
+                          "anyOf": [
+                            {
+                              "required": [
+                                "simple"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "consistentHash"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "backendUtilization"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "required": [
+                          "simple"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "consistentHash"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "backendUtilization"
+                        ]
+                      }
+                    ],
+                    "properties": {
+                      "backendUtilization": {
+                        "properties": {
+                          "errorUtilizationPenaltyPercent": {
+                            "maximum": 4294967295,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "metricNamesForComputingUtilization": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "weightExpirationPeriod": {
+                            "type": "string"
+                          },
+                          "weightStabilizationPeriod": {
+                            "type": "string"
+                          },
+                          "weightUpdatePeriod": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "consistentHash": {
+                        "allOf": [
+                          {
+                            "oneOf": [
+                              {
+                                "not": {
+                                  "anyOf": [
+                                    {
+                                      "required": [
+                                        "httpHeaderName"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "httpCookie"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "useSourceIp"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "httpQueryParameterName"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "required": [
+                                  "httpHeaderName"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "httpCookie"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "useSourceIp"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "httpQueryParameterName"
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "oneOf": [
+                              {
+                                "not": {
+                                  "anyOf": [
+                                    {
+                                      "required": [
+                                        "ringHash"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "maglev"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "required": [
+                                  "ringHash"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "maglev"
+                                ]
+                              }
+                            ]
+                          }
+                        ],
+                        "properties": {
+                          "httpCookie": {
+                            "properties": {
+                              "attributes": {
+                                "items": {
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ],
+                                  "type": "object",
+                                  "additionalProperties": false
+                                },
+                                "type": "array"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              },
+                              "ttl": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ],
+                            "type": "object",
+                            "additionalProperties": false
+                          },
+                          "httpHeaderName": {
+                            "type": "string"
+                          },
+                          "httpQueryParameterName": {
+                            "type": "string"
+                          },
+                          "maglev": {
+                            "properties": {
+                              "tableSize": {
+                                "minimum": 0,
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object",
+                            "additionalProperties": false
+                          },
+                          "minimumRingSize": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "ringHash": {
+                            "properties": {
+                              "minimumRingSize": {
+                                "minimum": 0,
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object",
+                            "additionalProperties": false
+                          },
+                          "useSourceIp": {
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "localityLbSetting": {
+                        "properties": {
+                          "distribute": {
+                            "items": {
+                              "properties": {
+                                "from": {
+                                  "type": "string"
+                                },
+                                "to": {
+                                  "additionalProperties": {
+                                    "maximum": 4294967295,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "type": "object"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "type": "array"
+                          },
+                          "enabled": {
+                            "nullable": true,
+                            "type": "boolean"
+                          },
+                          "failover": {
+                            "items": {
+                              "properties": {
+                                "from": {
+                                  "type": "string"
+                                },
+                                "to": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "type": "array"
+                          },
+                          "failoverPriority": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "simple": {
+                        "enum": [
+                          "UNSPECIFIED",
+                          "LEAST_CONN",
+                          "RANDOM",
+                          "PASSTHROUGH",
+                          "ROUND_ROBIN",
+                          "LEAST_REQUEST"
+                        ],
+                        "type": "string"
+                      },
+                      "warmup": {
+                        "properties": {
+                          "aggression": {
+                            "format": "double",
+                            "minimum": 0,
+                            "nullable": true,
+                            "type": "number"
+                          },
+                          "duration": {
+                            "type": "string",
+                            "x-kubernetes-validations": [
+                              {
+                                "message": "must be a valid duration greater than 1ms",
+                                "rule": "duration(self) >= duration('1ms')"
+                              }
+                            ]
+                          },
+                          "minimumPercent": {
+                            "format": "double",
+                            "maximum": 100,
+                            "minimum": 0,
+                            "nullable": true,
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "duration"
+                        ],
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "warmupDurationSecs": {
+                        "type": "string",
+                        "x-kubernetes-validations": [
+                          {
+                            "message": "must be a valid duration greater than 1ms",
+                            "rule": "duration(self) >= duration('1ms')"
+                          }
+                        ]
+                      },
+                      "zoneAwareLbSetting": {
+                        "properties": {
+                          "enabled": {
+                            "nullable": true,
+                            "type": "boolean"
+                          },
+                          "failover": {
+                            "items": {
+                              "properties": {
+                                "from": {
+                                  "type": "string"
+                                },
+                                "to": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "type": "array"
+                          },
+                          "failoverPriority": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "minClusterSize": {
+                            "maximum": 4294967295,
+                            "minimum": 1,
+                            "nullable": true,
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "outlierDetection": {
+                    "properties": {
+                      "baseEjectionTime": {
+                        "type": "string",
+                        "x-kubernetes-validations": [
+                          {
+                            "message": "must be a valid duration greater than 1ms",
+                            "rule": "duration(self) >= duration('1ms')"
+                          }
+                        ]
+                      },
+                      "consecutive5xxErrors": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "consecutiveErrors": {
+                        "format": "int32",
+                        "type": "integer"
+                      },
+                      "consecutiveGatewayErrors": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "consecutiveLocalOriginFailures": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "failurePercentageThreshold": {
+                        "maximum": 100,
+                        "minimum": 0,
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "interval": {
+                        "type": "string",
+                        "x-kubernetes-validations": [
+                          {
+                            "message": "must be a valid duration greater than 1ms",
+                            "rule": "duration(self) >= duration('1ms')"
+                          }
+                        ]
+                      },
+                      "maxEjectionPercent": {
+                        "format": "int32",
+                        "type": "integer"
+                      },
+                      "minHealthPercent": {
+                        "format": "int32",
+                        "type": "integer"
+                      },
+                      "outlierDetectionHttpErrorCodes": {
+                        "items": {
+                          "maximum": 599,
+                          "minimum": 100,
+                          "type": "integer"
+                        },
+                        "type": "array"
+                      },
+                      "splitExternalLocalOriginErrors": {
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "portLevelSettings": {
+                    "items": {
+                      "properties": {
+                        "connectionPool": {
+                          "properties": {
+                            "http": {
+                              "properties": {
+                                "h2UpgradePolicy": {
+                                  "enum": [
+                                    "DEFAULT",
+                                    "DO_NOT_UPGRADE",
+                                    "UPGRADE"
+                                  ],
+                                  "type": "string"
+                                },
+                                "http1MaxPendingRequests": {
+                                  "format": "int32",
+                                  "type": "integer"
+                                },
+                                "http2KeepAlive": {
+                                  "properties": {
+                                    "interval": {
+                                      "type": "string",
+                                      "x-kubernetes-validations": [
+                                        {
+                                          "message": "must be a valid duration greater than 1ms",
+                                          "rule": "duration(self) >= duration('1ms')"
+                                        }
+                                      ]
+                                    },
+                                    "timeout": {
+                                      "type": "string",
+                                      "x-kubernetes-validations": [
+                                        {
+                                          "message": "must be a valid duration greater than 1ms",
+                                          "rule": "duration(self) >= duration('1ms')"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "type": "object",
+                                  "additionalProperties": false
+                                },
+                                "http2MaxRequests": {
+                                  "format": "int32",
+                                  "type": "integer"
+                                },
+                                "idleTimeout": {
+                                  "type": "string",
+                                  "x-kubernetes-validations": [
+                                    {
+                                      "message": "must be a valid duration greater than 1ms",
+                                      "rule": "duration(self) >= duration('1ms')"
+                                    }
+                                  ]
+                                },
+                                "maxConcurrentStreams": {
+                                  "format": "int32",
+                                  "type": "integer"
+                                },
+                                "maxRequestsPerConnection": {
+                                  "format": "int32",
+                                  "type": "integer"
+                                },
+                                "maxRetries": {
+                                  "format": "int32",
+                                  "type": "integer"
+                                },
+                                "useClientProtocol": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "tcp": {
+                              "properties": {
+                                "connectTimeout": {
+                                  "type": "string",
+                                  "x-kubernetes-validations": [
+                                    {
+                                      "message": "must be a valid duration greater than 1ms",
+                                      "rule": "duration(self) >= duration('1ms')"
+                                    }
+                                  ]
+                                },
+                                "idleTimeout": {
+                                  "type": "string"
+                                },
+                                "maxConnectionDuration": {
+                                  "type": "string",
+                                  "x-kubernetes-validations": [
+                                    {
+                                      "message": "must be a valid duration greater than 1ms",
+                                      "rule": "duration(self) >= duration('1ms')"
+                                    }
+                                  ]
+                                },
+                                "maxConnections": {
+                                  "format": "int32",
+                                  "type": "integer"
+                                },
+                                "tcpKeepalive": {
+                                  "properties": {
+                                    "interval": {
+                                      "type": "string",
+                                      "x-kubernetes-validations": [
+                                        {
+                                          "message": "must be a valid duration greater than 1ms",
+                                          "rule": "duration(self) >= duration('1ms')"
+                                        }
+                                      ]
+                                    },
+                                    "probes": {
+                                      "maximum": 4294967295,
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "time": {
+                                      "type": "string",
+                                      "x-kubernetes-validations": [
+                                        {
+                                          "message": "must be a valid duration greater than 1ms",
+                                          "rule": "duration(self) >= duration('1ms')"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "type": "object",
+                                  "additionalProperties": false
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        },
+                        "loadBalancer": {
+                          "oneOf": [
+                            {
+                              "not": {
+                                "anyOf": [
+                                  {
+                                    "required": [
+                                      "simple"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "consistentHash"
+                                    ]
+                                  },
+                                  {
+                                    "required": [
+                                      "backendUtilization"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "required": [
+                                "simple"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "consistentHash"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "backendUtilization"
+                              ]
+                            }
+                          ],
+                          "properties": {
+                            "backendUtilization": {
+                              "properties": {
+                                "errorUtilizationPenaltyPercent": {
+                                  "maximum": 4294967295,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "metricNamesForComputingUtilization": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "weightExpirationPeriod": {
+                                  "type": "string"
+                                },
+                                "weightStabilizationPeriod": {
+                                  "type": "string"
+                                },
+                                "weightUpdatePeriod": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "consistentHash": {
+                              "allOf": [
+                                {
+                                  "oneOf": [
+                                    {
+                                      "not": {
+                                        "anyOf": [
+                                          {
+                                            "required": [
+                                              "httpHeaderName"
+                                            ]
+                                          },
+                                          {
+                                            "required": [
+                                              "httpCookie"
+                                            ]
+                                          },
+                                          {
+                                            "required": [
+                                              "useSourceIp"
+                                            ]
+                                          },
+                                          {
+                                            "required": [
+                                              "httpQueryParameterName"
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    {
+                                      "required": [
+                                        "httpHeaderName"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "httpCookie"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "useSourceIp"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "httpQueryParameterName"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "oneOf": [
+                                    {
+                                      "not": {
+                                        "anyOf": [
+                                          {
+                                            "required": [
+                                              "ringHash"
+                                            ]
+                                          },
+                                          {
+                                            "required": [
+                                              "maglev"
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    {
+                                      "required": [
+                                        "ringHash"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "maglev"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ],
+                              "properties": {
+                                "httpCookie": {
+                                  "properties": {
+                                    "attributes": {
+                                      "items": {
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "value": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "name"
+                                        ],
+                                        "type": "object",
+                                        "additionalProperties": false
+                                      },
+                                      "type": "array"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "ttl": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ],
+                                  "type": "object",
+                                  "additionalProperties": false
+                                },
+                                "httpHeaderName": {
+                                  "type": "string"
+                                },
+                                "httpQueryParameterName": {
+                                  "type": "string"
+                                },
+                                "maglev": {
+                                  "properties": {
+                                    "tableSize": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "additionalProperties": false
+                                },
+                                "minimumRingSize": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "ringHash": {
+                                  "properties": {
+                                    "minimumRingSize": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "type": "object",
+                                  "additionalProperties": false
+                                },
+                                "useSourceIp": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "localityLbSetting": {
+                              "properties": {
+                                "distribute": {
+                                  "items": {
+                                    "properties": {
+                                      "from": {
+                                        "type": "string"
+                                      },
+                                      "to": {
+                                        "additionalProperties": {
+                                          "maximum": 4294967295,
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        },
+                                        "type": "object"
+                                      }
+                                    },
+                                    "type": "object",
+                                    "additionalProperties": false
+                                  },
+                                  "type": "array"
+                                },
+                                "enabled": {
+                                  "nullable": true,
+                                  "type": "boolean"
+                                },
+                                "failover": {
+                                  "items": {
+                                    "properties": {
+                                      "from": {
+                                        "type": "string"
+                                      },
+                                      "to": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "type": "object",
+                                    "additionalProperties": false
+                                  },
+                                  "type": "array"
+                                },
+                                "failoverPriority": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "simple": {
+                              "enum": [
+                                "UNSPECIFIED",
+                                "LEAST_CONN",
+                                "RANDOM",
+                                "PASSTHROUGH",
+                                "ROUND_ROBIN",
+                                "LEAST_REQUEST"
+                              ],
+                              "type": "string"
+                            },
+                            "warmup": {
+                              "properties": {
+                                "aggression": {
+                                  "format": "double",
+                                  "minimum": 0,
+                                  "nullable": true,
+                                  "type": "number"
+                                },
+                                "duration": {
+                                  "type": "string",
+                                  "x-kubernetes-validations": [
+                                    {
+                                      "message": "must be a valid duration greater than 1ms",
+                                      "rule": "duration(self) >= duration('1ms')"
+                                    }
+                                  ]
+                                },
+                                "minimumPercent": {
+                                  "format": "double",
+                                  "maximum": 100,
+                                  "minimum": 0,
+                                  "nullable": true,
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "duration"
+                              ],
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "warmupDurationSecs": {
+                              "type": "string",
+                              "x-kubernetes-validations": [
+                                {
+                                  "message": "must be a valid duration greater than 1ms",
+                                  "rule": "duration(self) >= duration('1ms')"
+                                }
+                              ]
+                            },
+                            "zoneAwareLbSetting": {
+                              "properties": {
+                                "enabled": {
+                                  "nullable": true,
+                                  "type": "boolean"
+                                },
+                                "failover": {
+                                  "items": {
+                                    "properties": {
+                                      "from": {
+                                        "type": "string"
+                                      },
+                                      "to": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "type": "object",
+                                    "additionalProperties": false
+                                  },
+                                  "type": "array"
+                                },
+                                "failoverPriority": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "type": "array"
+                                },
+                                "minClusterSize": {
+                                  "maximum": 4294967295,
+                                  "minimum": 1,
+                                  "nullable": true,
+                                  "type": "integer"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        },
+                        "outlierDetection": {
+                          "properties": {
+                            "baseEjectionTime": {
+                              "type": "string",
+                              "x-kubernetes-validations": [
+                                {
+                                  "message": "must be a valid duration greater than 1ms",
+                                  "rule": "duration(self) >= duration('1ms')"
+                                }
+                              ]
+                            },
+                            "consecutive5xxErrors": {
+                              "maximum": 4294967295,
+                              "minimum": 0,
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "consecutiveErrors": {
+                              "format": "int32",
+                              "type": "integer"
+                            },
+                            "consecutiveGatewayErrors": {
+                              "maximum": 4294967295,
+                              "minimum": 0,
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "consecutiveLocalOriginFailures": {
+                              "maximum": 4294967295,
+                              "minimum": 0,
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "failurePercentageThreshold": {
+                              "maximum": 100,
+                              "minimum": 0,
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "interval": {
+                              "type": "string",
+                              "x-kubernetes-validations": [
+                                {
+                                  "message": "must be a valid duration greater than 1ms",
+                                  "rule": "duration(self) >= duration('1ms')"
+                                }
+                              ]
+                            },
+                            "maxEjectionPercent": {
+                              "format": "int32",
+                              "type": "integer"
+                            },
+                            "minHealthPercent": {
+                              "format": "int32",
+                              "type": "integer"
+                            },
+                            "outlierDetectionHttpErrorCodes": {
+                              "items": {
+                                "maximum": 599,
+                                "minimum": 100,
+                                "type": "integer"
+                              },
+                              "type": "array"
+                            },
+                            "splitExternalLocalOriginErrors": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        },
+                        "port": {
+                          "properties": {
+                            "number": {
+                              "maximum": 4294967295,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        },
+                        "tls": {
+                          "properties": {
+                            "caCertCredentialName": {
+                              "type": "string"
+                            },
+                            "caCertificates": {
+                              "type": "string"
+                            },
+                            "caCrl": {
+                              "type": "string"
+                            },
+                            "clientCertificate": {
+                              "type": "string"
+                            },
+                            "credentialName": {
+                              "type": "string"
+                            },
+                            "insecureSkipVerify": {
+                              "nullable": true,
+                              "type": "boolean"
+                            },
+                            "mode": {
+                              "enum": [
+                                "DISABLE",
+                                "SIMPLE",
+                                "MUTUAL",
+                                "ISTIO_MUTUAL"
+                              ],
+                              "type": "string"
+                            },
+                            "privateKey": {
+                              "type": "string"
+                            },
+                            "sni": {
+                              "type": "string"
+                            },
+                            "subjectAltNames": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "type": "object",
+                          "additionalProperties": false
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "maxItems": 4096,
+                    "type": "array"
+                  },
+                  "proxyProtocol": {
+                    "properties": {
+                      "version": {
+                        "enum": [
+                          "V1",
+                          "V2"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "retryBudget": {
+                    "properties": {
+                      "budgetInterval": {
+                        "type": "string"
+                      },
+                      "minRetryConcurrency": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "percent": {
+                        "format": "double",
+                        "maximum": 100,
+                        "minimum": 0,
+                        "nullable": true,
+                        "type": "number"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "tls": {
+                    "properties": {
+                      "caCertCredentialName": {
+                        "type": "string"
+                      },
+                      "caCertificates": {
+                        "type": "string"
+                      },
+                      "caCrl": {
+                        "type": "string"
+                      },
+                      "clientCertificate": {
+                        "type": "string"
+                      },
+                      "credentialName": {
+                        "type": "string"
+                      },
+                      "insecureSkipVerify": {
+                        "nullable": true,
+                        "type": "boolean"
+                      },
+                      "mode": {
+                        "enum": [
+                          "DISABLE",
+                          "SIMPLE",
+                          "MUTUAL",
+                          "ISTIO_MUTUAL"
+                        ],
+                        "type": "string"
+                      },
+                      "privateKey": {
+                        "type": "string"
+                      },
+                      "sni": {
+                        "type": "string"
+                      },
+                      "subjectAltNames": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "tunnel": {
+                    "properties": {
+                      "protocol": {
+                        "type": "string"
+                      },
+                      "targetHost": {
+                        "type": "string"
+                      },
+                      "targetPort": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "targetHost",
+                      "targetPort"
+                    ],
+                    "type": "object",
+                    "additionalProperties": false
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        },
+        "trafficPolicy": {
+          "properties": {
+            "connectionPool": {
+              "properties": {
+                "http": {
+                  "properties": {
+                    "h2UpgradePolicy": {
+                      "enum": [
+                        "DEFAULT",
+                        "DO_NOT_UPGRADE",
+                        "UPGRADE"
+                      ],
+                      "type": "string"
+                    },
+                    "http1MaxPendingRequests": {
+                      "format": "int32",
+                      "type": "integer"
+                    },
+                    "http2KeepAlive": {
+                      "properties": {
+                        "interval": {
+                          "type": "string",
+                          "x-kubernetes-validations": [
+                            {
+                              "message": "must be a valid duration greater than 1ms",
+                              "rule": "duration(self) >= duration('1ms')"
+                            }
+                          ]
+                        },
+                        "timeout": {
+                          "type": "string",
+                          "x-kubernetes-validations": [
+                            {
+                              "message": "must be a valid duration greater than 1ms",
+                              "rule": "duration(self) >= duration('1ms')"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "http2MaxRequests": {
+                      "format": "int32",
+                      "type": "integer"
+                    },
+                    "idleTimeout": {
+                      "type": "string",
+                      "x-kubernetes-validations": [
+                        {
+                          "message": "must be a valid duration greater than 1ms",
+                          "rule": "duration(self) >= duration('1ms')"
+                        }
+                      ]
+                    },
+                    "maxConcurrentStreams": {
+                      "format": "int32",
+                      "type": "integer"
+                    },
+                    "maxRequestsPerConnection": {
+                      "format": "int32",
+                      "type": "integer"
+                    },
+                    "maxRetries": {
+                      "format": "int32",
+                      "type": "integer"
+                    },
+                    "useClientProtocol": {
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "tcp": {
+                  "properties": {
+                    "connectTimeout": {
+                      "type": "string",
+                      "x-kubernetes-validations": [
+                        {
+                          "message": "must be a valid duration greater than 1ms",
+                          "rule": "duration(self) >= duration('1ms')"
+                        }
+                      ]
+                    },
+                    "idleTimeout": {
+                      "type": "string"
+                    },
+                    "maxConnectionDuration": {
+                      "type": "string",
+                      "x-kubernetes-validations": [
+                        {
+                          "message": "must be a valid duration greater than 1ms",
+                          "rule": "duration(self) >= duration('1ms')"
+                        }
+                      ]
+                    },
+                    "maxConnections": {
+                      "format": "int32",
+                      "type": "integer"
+                    },
+                    "tcpKeepalive": {
+                      "properties": {
+                        "interval": {
+                          "type": "string",
+                          "x-kubernetes-validations": [
+                            {
+                              "message": "must be a valid duration greater than 1ms",
+                              "rule": "duration(self) >= duration('1ms')"
+                            }
+                          ]
+                        },
+                        "probes": {
+                          "maximum": 4294967295,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "time": {
+                          "type": "string",
+                          "x-kubernetes-validations": [
+                            {
+                              "message": "must be a valid duration greater than 1ms",
+                              "rule": "duration(self) >= duration('1ms')"
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    }
+                  },
+                  "type": "object",
+                  "additionalProperties": false
+                }
+              },
+              "type": "object",
+              "additionalProperties": false
+            },
+            "loadBalancer": {
+              "oneOf": [
+                {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "simple"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "consistentHash"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "backendUtilization"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "simple"
+                  ]
+                },
+                {
+                  "required": [
+                    "consistentHash"
+                  ]
+                },
+                {
+                  "required": [
+                    "backendUtilization"
+                  ]
+                }
+              ],
+              "properties": {
+                "backendUtilization": {
+                  "properties": {
+                    "errorUtilizationPenaltyPercent": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "metricNamesForComputingUtilization": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "weightExpirationPeriod": {
+                      "type": "string"
+                    },
+                    "weightStabilizationPeriod": {
+                      "type": "string"
+                    },
+                    "weightUpdatePeriod": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "consistentHash": {
+                  "allOf": [
+                    {
+                      "oneOf": [
+                        {
+                          "not": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "httpHeaderName"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "httpCookie"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "useSourceIp"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "httpQueryParameterName"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "httpHeaderName"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "httpCookie"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "useSourceIp"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "httpQueryParameterName"
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "oneOf": [
+                        {
+                          "not": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "ringHash"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "maglev"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "ringHash"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "maglev"
+                          ]
+                        }
+                      ]
+                    }
+                  ],
+                  "properties": {
+                    "httpCookie": {
+                      "properties": {
+                        "attributes": {
+                          "items": {
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ],
+                            "type": "object",
+                            "additionalProperties": false
+                          },
+                          "type": "array"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "ttl": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "httpHeaderName": {
+                      "type": "string"
+                    },
+                    "httpQueryParameterName": {
+                      "type": "string"
+                    },
+                    "maglev": {
+                      "properties": {
+                        "tableSize": {
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "minimumRingSize": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "ringHash": {
+                      "properties": {
+                        "minimumRingSize": {
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "useSourceIp": {
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "localityLbSetting": {
+                  "properties": {
+                    "distribute": {
+                      "items": {
+                        "properties": {
+                          "from": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "additionalProperties": {
+                              "maximum": 4294967295,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "type": "array"
+                    },
+                    "enabled": {
+                      "nullable": true,
+                      "type": "boolean"
+                    },
+                    "failover": {
+                      "items": {
+                        "properties": {
+                          "from": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "type": "array"
+                    },
+                    "failoverPriority": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "simple": {
+                  "enum": [
+                    "UNSPECIFIED",
+                    "LEAST_CONN",
+                    "RANDOM",
+                    "PASSTHROUGH",
+                    "ROUND_ROBIN",
+                    "LEAST_REQUEST"
+                  ],
+                  "type": "string"
+                },
+                "warmup": {
+                  "properties": {
+                    "aggression": {
+                      "format": "double",
+                      "minimum": 0,
+                      "nullable": true,
+                      "type": "number"
+                    },
+                    "duration": {
+                      "type": "string",
+                      "x-kubernetes-validations": [
+                        {
+                          "message": "must be a valid duration greater than 1ms",
+                          "rule": "duration(self) >= duration('1ms')"
+                        }
+                      ]
+                    },
+                    "minimumPercent": {
+                      "format": "double",
+                      "maximum": 100,
+                      "minimum": 0,
+                      "nullable": true,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "duration"
+                  ],
+                  "type": "object",
+                  "additionalProperties": false
+                },
+                "warmupDurationSecs": {
+                  "type": "string",
+                  "x-kubernetes-validations": [
+                    {
+                      "message": "must be a valid duration greater than 1ms",
+                      "rule": "duration(self) >= duration('1ms')"
+                    }
+                  ]
+                },
+                "zoneAwareLbSetting": {
+                  "properties": {
+                    "enabled": {
+                      "nullable": true,
+                      "type": "boolean"
+                    },
+                    "failover": {
+                      "items": {
+                        "properties": {
+                          "from": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "type": "array"
+                    },
+                    "failoverPriority": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "minClusterSize": {
+                      "maximum": 4294967295,
+                      "minimum": 1,
+                      "nullable": true,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object",
+                  "additionalProperties": false
+                }
+              },
+              "type": "object",
+              "additionalProperties": false
+            },
+            "outlierDetection": {
+              "properties": {
+                "baseEjectionTime": {
+                  "type": "string",
+                  "x-kubernetes-validations": [
+                    {
+                      "message": "must be a valid duration greater than 1ms",
+                      "rule": "duration(self) >= duration('1ms')"
+                    }
+                  ]
+                },
+                "consecutive5xxErrors": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "consecutiveErrors": {
+                  "format": "int32",
+                  "type": "integer"
+                },
+                "consecutiveGatewayErrors": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "consecutiveLocalOriginFailures": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "failurePercentageThreshold": {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "integer"
+                },
+                "interval": {
+                  "type": "string",
+                  "x-kubernetes-validations": [
+                    {
+                      "message": "must be a valid duration greater than 1ms",
+                      "rule": "duration(self) >= duration('1ms')"
+                    }
+                  ]
+                },
+                "maxEjectionPercent": {
+                  "format": "int32",
+                  "type": "integer"
+                },
+                "minHealthPercent": {
+                  "format": "int32",
+                  "type": "integer"
+                },
+                "outlierDetectionHttpErrorCodes": {
+                  "items": {
+                    "maximum": 599,
+                    "minimum": 100,
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "splitExternalLocalOriginErrors": {
+                  "type": "boolean"
+                }
+              },
+              "type": "object",
+              "additionalProperties": false
+            },
+            "portLevelSettings": {
+              "items": {
+                "properties": {
+                  "connectionPool": {
+                    "properties": {
+                      "http": {
+                        "properties": {
+                          "h2UpgradePolicy": {
+                            "enum": [
+                              "DEFAULT",
+                              "DO_NOT_UPGRADE",
+                              "UPGRADE"
+                            ],
+                            "type": "string"
+                          },
+                          "http1MaxPendingRequests": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "http2KeepAlive": {
+                            "properties": {
+                              "interval": {
+                                "type": "string",
+                                "x-kubernetes-validations": [
+                                  {
+                                    "message": "must be a valid duration greater than 1ms",
+                                    "rule": "duration(self) >= duration('1ms')"
+                                  }
+                                ]
+                              },
+                              "timeout": {
+                                "type": "string",
+                                "x-kubernetes-validations": [
+                                  {
+                                    "message": "must be a valid duration greater than 1ms",
+                                    "rule": "duration(self) >= duration('1ms')"
+                                  }
+                                ]
+                              }
+                            },
+                            "type": "object",
+                            "additionalProperties": false
+                          },
+                          "http2MaxRequests": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "idleTimeout": {
+                            "type": "string",
+                            "x-kubernetes-validations": [
+                              {
+                                "message": "must be a valid duration greater than 1ms",
+                                "rule": "duration(self) >= duration('1ms')"
+                              }
+                            ]
+                          },
+                          "maxConcurrentStreams": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "maxRequestsPerConnection": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "maxRetries": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "useClientProtocol": {
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "tcp": {
+                        "properties": {
+                          "connectTimeout": {
+                            "type": "string",
+                            "x-kubernetes-validations": [
+                              {
+                                "message": "must be a valid duration greater than 1ms",
+                                "rule": "duration(self) >= duration('1ms')"
+                              }
+                            ]
+                          },
+                          "idleTimeout": {
+                            "type": "string"
+                          },
+                          "maxConnectionDuration": {
+                            "type": "string",
+                            "x-kubernetes-validations": [
+                              {
+                                "message": "must be a valid duration greater than 1ms",
+                                "rule": "duration(self) >= duration('1ms')"
+                              }
+                            ]
+                          },
+                          "maxConnections": {
+                            "format": "int32",
+                            "type": "integer"
+                          },
+                          "tcpKeepalive": {
+                            "properties": {
+                              "interval": {
+                                "type": "string",
+                                "x-kubernetes-validations": [
+                                  {
+                                    "message": "must be a valid duration greater than 1ms",
+                                    "rule": "duration(self) >= duration('1ms')"
+                                  }
+                                ]
+                              },
+                              "probes": {
+                                "maximum": 4294967295,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "time": {
+                                "type": "string",
+                                "x-kubernetes-validations": [
+                                  {
+                                    "message": "must be a valid duration greater than 1ms",
+                                    "rule": "duration(self) >= duration('1ms')"
+                                  }
+                                ]
+                              }
+                            },
+                            "type": "object",
+                            "additionalProperties": false
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "loadBalancer": {
+                    "oneOf": [
+                      {
+                        "not": {
+                          "anyOf": [
+                            {
+                              "required": [
+                                "simple"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "consistentHash"
+                              ]
+                            },
+                            {
+                              "required": [
+                                "backendUtilization"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "required": [
+                          "simple"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "consistentHash"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "backendUtilization"
+                        ]
+                      }
+                    ],
+                    "properties": {
+                      "backendUtilization": {
+                        "properties": {
+                          "errorUtilizationPenaltyPercent": {
+                            "maximum": 4294967295,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "metricNamesForComputingUtilization": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "weightExpirationPeriod": {
+                            "type": "string"
+                          },
+                          "weightStabilizationPeriod": {
+                            "type": "string"
+                          },
+                          "weightUpdatePeriod": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "consistentHash": {
+                        "allOf": [
+                          {
+                            "oneOf": [
+                              {
+                                "not": {
+                                  "anyOf": [
+                                    {
+                                      "required": [
+                                        "httpHeaderName"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "httpCookie"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "useSourceIp"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "httpQueryParameterName"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "required": [
+                                  "httpHeaderName"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "httpCookie"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "useSourceIp"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "httpQueryParameterName"
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "oneOf": [
+                              {
+                                "not": {
+                                  "anyOf": [
+                                    {
+                                      "required": [
+                                        "ringHash"
+                                      ]
+                                    },
+                                    {
+                                      "required": [
+                                        "maglev"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "required": [
+                                  "ringHash"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "maglev"
+                                ]
+                              }
+                            ]
+                          }
+                        ],
+                        "properties": {
+                          "httpCookie": {
+                            "properties": {
+                              "attributes": {
+                                "items": {
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "name"
+                                  ],
+                                  "type": "object",
+                                  "additionalProperties": false
+                                },
+                                "type": "array"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              },
+                              "ttl": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ],
+                            "type": "object",
+                            "additionalProperties": false
+                          },
+                          "httpHeaderName": {
+                            "type": "string"
+                          },
+                          "httpQueryParameterName": {
+                            "type": "string"
+                          },
+                          "maglev": {
+                            "properties": {
+                              "tableSize": {
+                                "minimum": 0,
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object",
+                            "additionalProperties": false
+                          },
+                          "minimumRingSize": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "ringHash": {
+                            "properties": {
+                              "minimumRingSize": {
+                                "minimum": 0,
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object",
+                            "additionalProperties": false
+                          },
+                          "useSourceIp": {
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "localityLbSetting": {
+                        "properties": {
+                          "distribute": {
+                            "items": {
+                              "properties": {
+                                "from": {
+                                  "type": "string"
+                                },
+                                "to": {
+                                  "additionalProperties": {
+                                    "maximum": 4294967295,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  "type": "object"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "type": "array"
+                          },
+                          "enabled": {
+                            "nullable": true,
+                            "type": "boolean"
+                          },
+                          "failover": {
+                            "items": {
+                              "properties": {
+                                "from": {
+                                  "type": "string"
+                                },
+                                "to": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "type": "array"
+                          },
+                          "failoverPriority": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "simple": {
+                        "enum": [
+                          "UNSPECIFIED",
+                          "LEAST_CONN",
+                          "RANDOM",
+                          "PASSTHROUGH",
+                          "ROUND_ROBIN",
+                          "LEAST_REQUEST"
+                        ],
+                        "type": "string"
+                      },
+                      "warmup": {
+                        "properties": {
+                          "aggression": {
+                            "format": "double",
+                            "minimum": 0,
+                            "nullable": true,
+                            "type": "number"
+                          },
+                          "duration": {
+                            "type": "string",
+                            "x-kubernetes-validations": [
+                              {
+                                "message": "must be a valid duration greater than 1ms",
+                                "rule": "duration(self) >= duration('1ms')"
+                              }
+                            ]
+                          },
+                          "minimumPercent": {
+                            "format": "double",
+                            "maximum": 100,
+                            "minimum": 0,
+                            "nullable": true,
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "duration"
+                        ],
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "warmupDurationSecs": {
+                        "type": "string",
+                        "x-kubernetes-validations": [
+                          {
+                            "message": "must be a valid duration greater than 1ms",
+                            "rule": "duration(self) >= duration('1ms')"
+                          }
+                        ]
+                      },
+                      "zoneAwareLbSetting": {
+                        "properties": {
+                          "enabled": {
+                            "nullable": true,
+                            "type": "boolean"
+                          },
+                          "failover": {
+                            "items": {
+                              "properties": {
+                                "from": {
+                                  "type": "string"
+                                },
+                                "to": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "type": "array"
+                          },
+                          "failoverPriority": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "minClusterSize": {
+                            "maximum": 4294967295,
+                            "minimum": 1,
+                            "nullable": true,
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object",
+                        "additionalProperties": false
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "outlierDetection": {
+                    "properties": {
+                      "baseEjectionTime": {
+                        "type": "string",
+                        "x-kubernetes-validations": [
+                          {
+                            "message": "must be a valid duration greater than 1ms",
+                            "rule": "duration(self) >= duration('1ms')"
+                          }
+                        ]
+                      },
+                      "consecutive5xxErrors": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "consecutiveErrors": {
+                        "format": "int32",
+                        "type": "integer"
+                      },
+                      "consecutiveGatewayErrors": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "consecutiveLocalOriginFailures": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "failurePercentageThreshold": {
+                        "maximum": 100,
+                        "minimum": 0,
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "interval": {
+                        "type": "string",
+                        "x-kubernetes-validations": [
+                          {
+                            "message": "must be a valid duration greater than 1ms",
+                            "rule": "duration(self) >= duration('1ms')"
+                          }
+                        ]
+                      },
+                      "maxEjectionPercent": {
+                        "format": "int32",
+                        "type": "integer"
+                      },
+                      "minHealthPercent": {
+                        "format": "int32",
+                        "type": "integer"
+                      },
+                      "outlierDetectionHttpErrorCodes": {
+                        "items": {
+                          "maximum": 599,
+                          "minimum": 100,
+                          "type": "integer"
+                        },
+                        "type": "array"
+                      },
+                      "splitExternalLocalOriginErrors": {
+                        "type": "boolean"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "port": {
+                    "properties": {
+                      "number": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  },
+                  "tls": {
+                    "properties": {
+                      "caCertCredentialName": {
+                        "type": "string"
+                      },
+                      "caCertificates": {
+                        "type": "string"
+                      },
+                      "caCrl": {
+                        "type": "string"
+                      },
+                      "clientCertificate": {
+                        "type": "string"
+                      },
+                      "credentialName": {
+                        "type": "string"
+                      },
+                      "insecureSkipVerify": {
+                        "nullable": true,
+                        "type": "boolean"
+                      },
+                      "mode": {
+                        "enum": [
+                          "DISABLE",
+                          "SIMPLE",
+                          "MUTUAL",
+                          "ISTIO_MUTUAL"
+                        ],
+                        "type": "string"
+                      },
+                      "privateKey": {
+                        "type": "string"
+                      },
+                      "sni": {
+                        "type": "string"
+                      },
+                      "subjectAltNames": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "type": "object",
+                    "additionalProperties": false
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              },
+              "maxItems": 4096,
+              "type": "array"
+            },
+            "proxyProtocol": {
+              "properties": {
+                "version": {
+                  "enum": [
+                    "V1",
+                    "V2"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object",
+              "additionalProperties": false
+            },
+            "retryBudget": {
+              "properties": {
+                "budgetInterval": {
+                  "type": "string"
+                },
+                "minRetryConcurrency": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "percent": {
+                  "format": "double",
+                  "maximum": 100,
+                  "minimum": 0,
+                  "nullable": true,
+                  "type": "number"
+                }
+              },
+              "type": "object",
+              "additionalProperties": false
+            },
+            "tls": {
+              "properties": {
+                "caCertCredentialName": {
+                  "type": "string"
+                },
+                "caCertificates": {
+                  "type": "string"
+                },
+                "caCrl": {
+                  "type": "string"
+                },
+                "clientCertificate": {
+                  "type": "string"
+                },
+                "credentialName": {
+                  "type": "string"
+                },
+                "insecureSkipVerify": {
+                  "nullable": true,
+                  "type": "boolean"
+                },
+                "mode": {
+                  "enum": [
+                    "DISABLE",
+                    "SIMPLE",
+                    "MUTUAL",
+                    "ISTIO_MUTUAL"
+                  ],
+                  "type": "string"
+                },
+                "privateKey": {
+                  "type": "string"
+                },
+                "sni": {
+                  "type": "string"
+                },
+                "subjectAltNames": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object",
+              "additionalProperties": false
+            },
+            "tunnel": {
+              "properties": {
+                "protocol": {
+                  "type": "string"
+                },
+                "targetHost": {
+                  "type": "string"
+                },
+                "targetPort": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "targetHost",
+                "targetPort"
+              ],
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "type": "object",
+          "additionalProperties": false
+        },
+        "workloadSelector": {
+          "properties": {
+            "matchLabels": {
+              "additionalProperties": {
+                "maxLength": 63,
+                "type": "string",
+                "x-kubernetes-validations": [
+                  {
+                    "message": "wildcard not allowed in label value match",
+                    "rule": "!self.contains(\"*\")"
+                  }
+                ]
+              },
+              "maxProperties": 4096,
+              "type": "object",
+              "x-kubernetes-validations": [
+                {
+                  "message": "wildcard not allowed in label key match",
+                  "rule": "self.all(key, !key.contains(\"*\"))"
+                },
+                {
+                  "message": "key must not be empty",
+                  "rule": "self.all(key, key.size() != 0)"
+                }
+              ]
+            }
+          },
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "host"
+      ],
+      "type": "object",
+      "additionalProperties": false
+    },
+    "status": {
+      "properties": {
+        "conditions": {
+          "items": {
+            "properties": {
+              "lastProbeTime": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "lastTransitionTime": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "observedGeneration": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "x-kubernetes-int-or-string": true
+              },
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        },
+        "observedGeneration": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "x-kubernetes-int-or-string": true
+        },
+        "validationMessages": {
+          "items": {
+            "properties": {
+              "documentationUrl": {
+                "type": "string"
+              },
+              "level": {
+                "enum": [
+                  "UNKNOWN",
+                  "ERROR",
+                  "WARNING",
+                  "INFO"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object",
+                "additionalProperties": false
+              }
+            },
+            "type": "object",
+            "additionalProperties": false
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "x-kubernetes-preserve-unknown-fields": true,
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "additionalProperties": false
+}

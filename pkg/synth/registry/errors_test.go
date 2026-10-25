@@ -137,7 +137,7 @@ func TestReferenceFormsAndDockerConfigEdges(t *testing.T) {
 
 	dir := t.TempDir()
 	t.Setenv("DOCKER_CONFIG", dir)
-	if creds, _ := DockerConfigCredentials(); creds != nil {
+	if creds := DockerConfigCredentials(); creds != nil {
 		t.Error("no config.json gives no credentials")
 	}
 	write := func(s string) {
@@ -145,14 +145,18 @@ func TestReferenceFormsAndDockerConfigEdges(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("{")
-	if creds, _ := DockerConfigCredentials(); creds != nil {
+	write(`{"auths":{"x":{"auth":"secret-value"`)
+	if creds := DockerConfigCredentials(); creds == nil {
+		t.Error("invalid config.json must be reported")
+	} else if _, _, ok := creds.Lookup("x"); ok {
 		t.Error("invalid config.json gives no credentials")
+	} else if w := creds.Warnings(); len(w) != 1 || !strings.Contains(w[0], "not valid JSON") || strings.Contains(w[0], "secret-value") {
+		t.Errorf("warnings = %v", w)
 	}
 	write(`{"auths":{"bad.example":{"auth":"!!"},"nocolon.example":{"auth":"` + base64.StdEncoding.EncodeToString([]byte("x")) + `"}}}`)
-	creds, _ := DockerConfigCredentials()
+	creds := DockerConfigCredentials()
 	for _, host := range []string{"bad.example", "nocolon.example", "missing.example"} {
-		if _, _, ok := creds(host); ok {
+		if _, _, ok := creds.Lookup(host); ok {
 			t.Errorf("%s: unusable auth entries must be skipped", host)
 		}
 	}

@@ -79,7 +79,7 @@ dhg generate -f ./manifests -o ./charts --chart-name myapp \
 | `gitops` | `--git-repo`, `--git-branch`, `--git-path`, `--ssh-key` | `git clone --depth 1` во временный каталог, далее как `file` |
 | `image` | `--image` (можно несколько), `--platform`, `--insecure-registry` | Строит манифесты из конфигурации образа в registry (см. ниже) |
 | `compose` | `-f docker-compose.yml` (можно несколько) | Строит манифесты из сервисов docker-compose |
-| `source` | `-f <каталог проекта>`, `--image` | Строит манифесты из Dockerfile и проекта Spring Boot |
+| `source` | `-f <каталог проекта>`, `--image`, `--image-config` | Строит манифесты из Dockerfile (или config образа) и проекта Spring Boot, Quarkus или Micronaut |
 
 Общие фильтры: `-n/--namespace`, `--namespaces`, `-l/--selector` (синтаксис kubectl), `--include-kinds`, `--exclude-kinds`. Одинаковый объект в нескольких файлах берётся один раз (первое определение), с предупреждением.
 
@@ -110,11 +110,11 @@ dhg generate -s source  -f ./orders-service --image registry.example.com/orders:
 
 | Источник | Что берётся |
 |---|---|
-| `image` | Из конфигурации образа (манифест и config-блоб, слои не скачиваются): `ExposedPorts`, `User` (→ `runAsUser`/`runAsNonRoot`), `Volumes`, `Healthcheck` (→ exec-probes), имя из `org.opencontainers.image.title`. Мультиплатформенные образы — по `--platform`. Учётные данные — из `~/.docker/config.json` (`auths`; credential helpers не поддерживаются). |
+| `image` | Из конфигурации образа (манифест и config-блоб, слои не скачиваются): `ExposedPorts`, `User` (→ `runAsUser`/`runAsNonRoot`), `Volumes`, `Healthcheck` (→ exec-probes), имя из `org.opencontainers.image.title`. Мультиплатформенные образы — по `--platform`. Учётные данные — из `~/.docker/config.json`: `auths` и credential helpers (`credHelpers`, `credsStore`; бинарь `docker-credential-<имя>` из `PATH`). |
 | `compose` | `image`, `ports`/`expose`, `environment`/`env_file` (секретные имена → Secret), `command`/`entrypoint`, `user`, `volumes` (именованные → PVC, файлы ≤ 1 MiB → ConfigMap, остальное → emptyDir), `healthcheck`, `deploy.replicas`/`resources`, подстановка `${VAR:-default}` с `.env`. Service называется как сервис compose, поэтому адреса вида `db:5432` продолжают работать. |
-| `source` | Dockerfile (последняя стадия): `EXPOSE`, `USER`, `HEALTHCHECK`, `VOLUME`. Spring Boot (`pom.xml`/`build.gradle`): имя, версия, `server.port`, actuator → HTTP-probes `/actuator/health/liveness` и `/readiness` (с учётом `base-path`, `management.server.port`, `context-path`), datasource/Kafka/OAuth2 issuer (Keycloak) → env. Пароль datasource — пустым значением в Secret. |
+| `source` | Dockerfile (последняя стадия): `EXPOSE`, `USER`, `HEALTHCHECK`, `VOLUME`; с `--image-config` — те же факты из config образа в registry (включая то, что задаёт базовый образ). Spring Boot, Quarkus, Micronaut (`pom.xml`/`build.gradle`): имя, версия, HTTP-порт, health-зависимость → HTTP-probes (Actuator `/actuator/health/*`, SmallRye Health `/q/health/*`, Micronaut Management `/health/*` с учётом root/context/base-path и отдельного management-порта), datasource/Kafka/OIDC issuer (Keycloak) → env, пароли и client secrets — пустыми ключами в Secret. Профили фреймворка → `values-profile-<profile>.yaml` с тем, что профиль меняет в chart. |
 
-Порт получает имя `http` только там, где протокол известен (Spring Boot); остальные — `tcp-<порт>`, потому что имя порта влияет на определение протокола в mesh. Подробности и границы — в [docs/SPEC_SYNTHESIS.md](docs/SPEC_SYNTHESIS.md).
+Порт получает имя `http` только там, где протокол известен (Spring Boot, Quarkus, Micronaut); остальные — `tcp-<порт>`, потому что имя порта влияет на определение протокола в mesh. Подробности и границы — в [docs/SPEC_SYNTHESIS.md](docs/SPEC_SYNTHESIS.md).
 
 ---
 
@@ -156,11 +156,11 @@ helm upgrade --install shop ./charts/shop --set database.enabled=false
 | Флаг | Что добавляет |
 |---|---|
 | `--env-values` | `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml` с профилями по типу нагрузки |
-| `--namespace-resources` | ResourceQuota, LimitRange, NetworkPolicy по умолчанию и NetworkPolicy по связям сервисов (переключатели `namespace.*`) |
+| `--namespace-resources` | ResourceQuota, LimitRange, NetworkPolicy по умолчанию и NetworkPolicy по связям сервисов (переключатели `namespace.*`). Квота — сумма по всем workload'ам группы: ресурсы pod'а (init-контейнеры по правилу Kubernetes) × пиковое число pod'ов (replicas или maxReplicas HPA + maxSurge); расчёт описан комментарием в шаблоне |
 | `--multi-tenant`, `--tenant-count` | Оверлей с изоляцией арендаторов |
 | `--feature-flags` | Переключатели monitoring/ingress/autoscaling/security/storage/rbac |
 | `--cloud-provider aws\|gcp\|azure`, `--cloud-internal` | Аннотации балансировщика для Service (сливаются с аннотациями из values) |
-| `--detect-ingress` | Аннотации для обнаруженного ingress-контроллера |
+| `--detect-ingress` | Аннотации для обнаруженного ingress-контроллера (по IngressClass, классу Ingress или образу). Для Istio аннотаций нет — Istio их не читает; печатается `Note:` с советом `--with istio-ingress` |
 | `--spot`, `--spot-grace-period` | Tolerations для spot-узлов, `terminationGracePeriodSeconds` и PDB на каждый workload (`spot.enabled`) |
 | `--auto-deps` | Bitnami-зависимости (PostgreSQL, Redis, …), найденные по env, выключенные по умолчанию |
 | `--airgap-registry` | `images.txt`, `mirror-images.sh`, `values-airgap.yaml` |
@@ -192,6 +192,7 @@ dhg generate -f ./manifests --chart-name app \
 | `ingress-tls` | TLS для Ingress без `tls`: аннотация issuer cert-manager и секрет сертификата |
 | `istio` | VirtualService, DestinationRule, PeerAuthentication, AuthorizationPolicy из values |
 | `istio-egress` | ServiceEntry для внешних хостов, найденных в env |
+| `istio-ingress` | Istio `Gateway` и `VirtualService` (`networking.istio.io/v1`, Istio ≥ 1.22) из каждого Ingress: хосты, пути, backend'ы, TLS с `credentialName` и HTTP→HTTPS redirect. Ingress остаётся; `istioIngress.replaceIngress=true` (или `--feature-opt istio-ingress.replace-ingress=true`) рендерит только Istio-ресурсы. Подробнее — ниже |
 | `linkerd` | Аннотация инъекции прокси |
 | `otel` | `Instrumentation` (OpenTelemetry Operator) и аннотации автоинструментирования |
 | `policies` | Политики безопасности workload'ов: Kyverno `Policy` и/или Rego для conftest в `policy/` |
@@ -201,7 +202,17 @@ dhg generate -f ./manifests --chart-name app \
 | `vault-agent` | Аннотации HashiCorp Vault Agent для workload'ов с Secrets |
 | `velero-backup` | `Schedule` Velero (≥ 1.10) для chart'ов с томами: объекты релиза, pod'ы его workload'ов и их PVC (`orLabelSelectors`, `veleroBackup.labelSelectors`) |
 
-Все 16 возможностей проверяются в CI и по отдельности, и все вместе, во всех режимах.
+Все 17 возможностей проверяются в CI и по отдельности, и все вместе, во всех режимах.
+
+**Ingress за Istio.** Istio обслуживает обычный Ingress с `ingressClassName: istio` (или устаревшей аннотацией `kubernetes.io/ingress.class: istio`), но только его `spec`: аннотации контроллеров (`nginx.ingress.kubernetes.io/ssl-redirect`, `rewrite-target`, …) не действуют, HTTP→HTTPS redirect не выполняется, а TLS-секрет должен лежать в namespace deployment'а ingress gateway (обычно `istio-system`). `--with istio-ingress` строит из Ingress эквивалент на `Gateway` + `VirtualService`: `Exact` → `exact`; `Prefix /p` → `exact: /p` или `prefix: /p/` (Prefix в Ingress сравнивает элементы пути, а `prefix` в Istio — символы); `ImplementationSpecific` → `prefix` (как в ingress-nginx); маршруты упорядочены по правилам Ingress (Exact, затем более длинные пути), потому что Istio берёт первый совпавший; именованный порт backend'а берётся из Service во входе. Всё, что перенести нельзя, записано комментарием `# Note:` в шаблоне. Конфигурация лежит в `istioIngress.ingresses` и правок `services.*.ingress` не отслеживает. Выбор между ними:
+
+| Что нужно | values |
+|---|---|
+| Только Ingress (контроллер nginx и т.п.) | `istioIngress.enabled: false` |
+| Только Istio Gateway/VirtualService | `istioIngress.replaceIngress: true` — обязательно, если у Ingress класс `istio`: иначе Istio обслужит оба объекта для одних и тех же хостов |
+| Оба (миграция с другого контроллера) | по умолчанию |
+
+Секрет из `credentialName` нужно создать в namespace ingress gateway (например, `Certificate` cert-manager в `istio-system`); селектор gateway — `--feature-opt istio-ingress.gateway-selector=istio=ingressgateway`.
 
 ---
 
@@ -257,7 +268,7 @@ template-dir: ./chart-overrides
    Service, PDB и NetworkPolicy, выбиравшие pod'ы, продолжают их выбирать.
 5. **Точность (fidelity).** В режимах universal/separate/library/umbrella рендер со значениями по умолчанию содержит каждое поле входных манифестов с тем же значением: метки, данные ConfigMap байт в байт, нулевые значения (`replicas: 0`, `enabled: false`), image digest, весь `spec` custom resources.
 6. `helm unittest` для сгенерированных тестов (если установлен плагин), запуск post-renderer'а через `helm template --post-renderer` и `kustomize build` каждого overlay `--kustomize` (если есть kustomize или kubectl).
-7. **Источники.** Генерация из fake API-сервера с «шумом» живого кластера и из локального git-репозитория; синтез из docker-compose, проекта Spring Boot и образа из fake registry (Bearer-аутентификация, мультиплатформенный index) — с проверкой, что выведенные порты, probes, securityContext и переменные дошли до рендера.
+7. **Источники.** Генерация из fake API-сервера с «шумом» живого кластера и из локального git-репозитория; синтез из docker-compose, проектов Spring Boot (с рендером профиля через `values-profile-*.yaml`), Quarkus и Micronaut и образа из fake registry (Bearer-аутентификация, мультиплатформенный index) — с проверкой, что выведенные порты, probes, securityContext и переменные дошли до рендера.
 
 ```bash
 DHG_REQUIRE_HELM=1 go test ./tests/golden/   # без helm набор пропускается; с DHG_REQUIRE_HELM=1 — падает

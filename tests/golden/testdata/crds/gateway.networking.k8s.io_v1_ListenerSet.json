@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "spec": {
+      "type": "object",
+      "properties": {
+        "listeners": {
+          "type": "array"
+        }
+      }
+    }
+  }
+}

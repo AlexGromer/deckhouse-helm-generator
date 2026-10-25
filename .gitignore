@@ -130,7 +130,7 @@ settings.local.json
 # ─────────────────────────────────────────────────────────────────────
 # INTERNAL DEVELOPMENT FILES (not for public repo)
 # ─────────────────────────────────────────────────────────────────────
-BACKLOG.md
+/BACKLOG.md
 ARCHITECTURE.md
 FILEMAP.md
 CHANGELOG.md

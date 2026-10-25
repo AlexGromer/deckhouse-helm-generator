@@ -1,0 +1,171 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-api
+  namespace: shop
+  labels:
+    app.kubernetes.io/name: order-api
+    app.kubernetes.io/part-of: orders
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: order-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: order-api
+        app.kubernetes.io/part-of: orders
+    spec:
+      containers:
+      - name: app
+        image: ghcr.io/example/order-api:1.0.0
+        env:
+        - name: DB_HOST
+          value: "orders-db"
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: "orders"
+        - name: PAYMENT_URL
+          value: "http://payment-api:8080/api/v1"
+        - name: OIDC_ISSUER
+          value: "https://sso.example.com/auth/realms/shop"
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka"
+        - name: KAFKA_TOPIC_PRODUCE_ORDERS
+          value: "shop.orders.created"
+        - name: KAFKA_TOPIC_CONSUME_PAYMENTS
+          value: "shop.payments.completed"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-api
+  namespace: shop
+spec:
+  selector:
+    app.kubernetes.io/name: order-api
+  ports:
+  - port: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-worker
+  namespace: shop
+  labels:
+    app.kubernetes.io/name: order-worker
+    app.kubernetes.io/part-of: orders
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: order-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: order-worker
+        app.kubernetes.io/part-of: orders
+    spec:
+      containers:
+      - name: worker
+        image: ghcr.io/example/order-worker:1.0.0
+        env:
+        - name: ORDER_API_HOST
+          value: "order-api:8080"
+        - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"
+        - name: KAFKA_TOPIC_ORDERS
+          value: "shop.orders.created"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  namespace: shop
+  labels:
+    app.kubernetes.io/name: payment-api
+    app.kubernetes.io/part-of: payments
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: payment-api
+        app.kubernetes.io/part-of: payments
+    spec:
+      containers:
+      - name: app
+        image: ghcr.io/example/payment-api:1.0.0
+        env:
+        - name: BANK_URL
+          value: "https://api.bank.example.com/v1"
+        - name: KAFKA_TOPIC_PRODUCE_PAYMENTS
+          value: "shop.payments.completed"
+        envFrom:
+        - configMapRef:
+            name: payment-config
+        - secretRef:
+            name: payment-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-api
+  namespace: shop
+spec:
+  selector:
+    app.kubernetes.io/name: payment-api
+  ports:
+  - port: 8080
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-config
+  namespace: shop
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: payment-secret
+  namespace: shop
+stringData:
+  DB_URL: "jdbc:postgresql://10.20.0.5:5432/payments"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notifier
+  namespace: shop
+  labels:
+    app.kubernetes.io/name: notifier
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notifier
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notifier
+    spec:
+      containers:
+      - name: mailer
+        image: ghcr.io/example/notifier:1.0.0
+        env:
+        - name: SMTP_SERVER
+          value: "smtp.example.com:587"
+        - name: KAFKA_TOPIC_PAYMENTS
+          value: "shop.payments.completed"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-db
+  namespace: shop
+spec:
+  ports:
+  - port: 5432

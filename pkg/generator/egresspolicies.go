@@ -89,7 +89,7 @@ func egressEndpoint(raw string) (host string, port egressPort, ok bool) {
 // egressIsExternal reports whether host is outside the cluster: a DNS name
 // with a dot that is not a cluster-local name or "<service>.<namespace>".
 func egressIsExternal(host string, services, namespaces map[string]bool) bool {
-	if host == "" || !strings.Contains(host, ".") || net.ParseIP(host) != nil {
+	if host == "" || !strings.Contains(host, ".") || strings.ContainsAny(host, ":/ ") || net.ParseIP(host) != nil {
 		return false
 	}
 	if strings.Contains(host, ".svc.") {
@@ -126,6 +126,31 @@ func egressDetectHosts(workloads []secWorkload, graph *types.ResourceGraph) map[
 	}
 
 	hosts := map[string]map[egressPort]bool{}
+
+	// EPIC-03 / 08: Merge connections from graph.
+	if graph != nil && len(graph.Connections) > 0 {
+		for _, w := range workloads {
+			conns := graph.ConnectionsFrom(w.res.Original.ResourceKey())
+			for _, c := range conns {
+				if c.To.Node != "" && strings.HasPrefix(string(c.To.Node), "external-host:") && c.Port > 0 {
+					host := strings.TrimPrefix(string(c.To.Node), "external-host:")
+					if egressIsExternal(host, services, namespaces) {
+						if hosts[host] == nil {
+							hosts[host] = map[egressPort]bool{}
+						}
+						proto := strings.ToUpper(c.Protocol)
+						if proto == "" || proto == "TCP" || proto == "HTTP" || proto == "HTTPS" {
+							proto = "TCP"
+							if c.TLS {
+								proto = "TLS"
+							}
+						}
+						hosts[host][egressPort{Number: int(c.Port), Protocol: proto}] = true
+					}
+				}
+			}
+		}
+	}
 	for _, w := range workloads {
 		for _, c := range secContainers(w.podSpec) {
 			env := map[string]string{}

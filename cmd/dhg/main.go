@@ -17,6 +17,8 @@ import (
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer/pattern"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/extractor"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/generator"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/merge"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/regen"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/synth"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
@@ -99,6 +101,7 @@ func newGenerateCmd() *cobra.Command {
 		images             []string
 		platform           string
 		insecureRegistry   bool
+		imageConfig        bool
 		includeTests       bool
 		includeREADME      bool
 		includeSchema      bool
@@ -128,6 +131,11 @@ func newGenerateCmd() *cobra.Command {
 		valuesFlat         bool
 		withFeatures       []string
 		featureOpts        []string
+		update             bool
+		force              bool
+		noState            bool
+		bump               string
+		baseDir            string
 	)
 
 	cmd := &cobra.Command{
@@ -172,6 +180,7 @@ Examples:
 				images:             images,
 				platform:           platform,
 				insecureRegistry:   insecureRegistry,
+				imageConfig:        imageConfig,
 				includeTests:       includeTests,
 				includeREADME:      includeREADME,
 				includeSchema:      includeSchema,
@@ -200,6 +209,11 @@ Examples:
 				valuesFlat:         valuesFlat,
 				withFeatures:       withFeatures,
 				featureOpts:        featureOpts,
+				update:             update,
+				force:              force,
+				noState:            noState,
+				bump:               bump,
+				baseDir:            baseDir,
 			})
 		},
 	}
@@ -214,7 +228,8 @@ Examples:
 		"or synthesized from: image (registry image config), compose (docker-compose files), source (project directory: Dockerfile, Spring Boot)")
 	cmd.Flags().StringSliceVar(&images, "image", nil, "Image reference: the images to read for --source image, the application image for --source source")
 	cmd.Flags().StringVar(&platform, "platform", "linux/amd64", "Platform of multi-platform images for --source image (os/arch[/variant])")
-	cmd.Flags().BoolVar(&insecureRegistry, "insecure-registry", false, "Talk plain HTTP to the registry (--source image)")
+	cmd.Flags().BoolVar(&insecureRegistry, "insecure-registry", false, "Talk plain HTTP to the registry (--source image, --image-config)")
+	cmd.Flags().BoolVar(&imageConfig, "image-config", false, "With --source source, read each --image's config from the registry and prefer it to the Dockerfile (ports, user, volumes, health check)")
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
 	cmd.Flags().StringSliceVar(&namespaces, "namespaces", []string{}, "Filter by multiple namespaces")
 	cmd.Flags().StringVarP(&labelSelector, "selector", "l", "", "Label selector filter")
@@ -296,6 +311,7 @@ type generateOptions struct {
 	images             []string
 	platform           string
 	insecureRegistry   bool
+	imageConfig        bool
 	includeTests       bool
 	includeREADME      bool
 	includeSchema      bool
@@ -324,6 +340,11 @@ type generateOptions struct {
 	valuesFlat         bool
 	withFeatures       []string
 	featureOpts        []string
+	update             bool
+	force              bool
+	noState            bool
+	bump               string
+	baseDir            string
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -410,19 +431,21 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		Images:           opts.images,
 		Platform:         opts.platform,
 		InsecureRegistry: opts.insecureRegistry,
+		ImageConfig:      opts.imageConfig,
 	}
 	if opts.sshKey != "" {
 		extractOpts.GitAuth = &extractor.GitAuthOptions{SSHKeyPath: opts.sshKey}
 	}
 
-	pipeline, err := runPipeline(ctx, pipelineOptions{
+	pipelineOpts := pipelineOptions{
 		source:     sourceType,
 		extract:    extractOpts,
 		chartName:  opts.chartName,
 		outputMode: outputMode,
 		plugins:    opts.plugins,
 		verbose:    opts.verbose,
-	})
+	}
+	pipeline, err := runPipeline(ctx, pipelineOpts)
 	if err != nil {
 		return err
 	}
@@ -593,7 +616,12 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		if opts.verbose {
 			fmt.Printf("  Detected controller: %s\n", controller)
 		}
-		if controller != generator.ControllerUnknown {
+		switch controller {
+		case generator.ControllerUnknown:
+			// Nothing detected: nothing to add.
+		case generator.ControllerIstio:
+			fmt.Fprintf(os.Stderr, "Note: %s\n", generator.IstioIngressNote)
+		default:
 			features := []generator.IngressFeature{
 				generator.IngressSSLRedirect,
 			}
@@ -654,6 +682,7 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	}
 
 	// Apply optional features (--with)
+	var featureNotes []string
 	if len(opts.withFeatures) > 0 {
 		if opts.verbose {
 			fmt.Printf("\n[4k/5] Applying features: %s\n", strings.Join(opts.withFeatures, ", "))
@@ -662,9 +691,12 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		if err != nil {
 			return err
 		}
-		charts, err = generator.ApplyFeatures(charts, opts.withFeatures, featureOptions, graph)
+		charts, featureNotes, err = generator.ApplyFeaturesWithNotes(charts, opts.withFeatures, featureOptions, graph)
 		if err != nil {
 			return err
+		}
+		for _, n := range featureNotes {
+			fmt.Fprintf(os.Stderr, "Note: %s\n", n)
 		}
 	} else if len(opts.featureOpts) > 0 {
 		return fmt.Errorf("--feature-opt requires the feature to be enabled with --with")
@@ -712,23 +744,137 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		return nil
 	}
 
-	// Step 5: Write charts to disk
-	if opts.verbose {
-		fmt.Printf("\n[5/5] Writing charts to disk...\n")
+	// Output handling: write / merge logic
+	if opts.force && opts.update {
+		return fmt.Errorf("--force and --update are mutually exclusive")
+	}
+	if opts.noState && opts.update {
+		return fmt.Errorf("--no-state and --update are mutually exclusive")
 	}
 
 	for _, chart := range charts {
 		if err := generator.ValidateChart(chart); err != nil {
 			return fmt.Errorf("chart validation failed for %s: %w", chart.Name, err)
 		}
+	}
 
-		if err := generator.WriteChart(chart, opts.outputDir); err != nil {
-			return fmt.Errorf("failed to write chart %s: %w", chart.Name, err)
+	// Validate mode change logic...
+	outSet, err := generator.RenderOutputSet(charts, outputMode, opts.chartName)
+	if err != nil {
+		return fmt.Errorf("failed to render output set: %w", err)
+	}
+
+	if opts.update {
+		var st *regen.State
+		var baseSet *generator.OutputSet
+
+		if opts.baseDir != "" {
+			st, baseSet, err = regen.Load(opts.baseDir, opts.chartName)
+		} else {
+			st, baseSet, err = regen.Load(opts.outputDir, opts.chartName)
 		}
 
-		if opts.verbose {
-			fmt.Printf("  Written chart: %s\n", chart.Name)
-			fmt.Printf("    Templates: %d\n", len(chart.Templates))
+		if err != nil {
+			return fmt.Errorf("failed to load state: %w", err)
+		}
+
+		if st != nil && st.Mode != string(outputMode) {
+			return fmt.Errorf("mode changed (%s -> %s): regeneration cannot merge a different layout; generate into a new directory or use --force", st.Mode, outputMode)
+		}
+
+		if st != nil && st.DHGVersion != version {
+			fmt.Fprintf(os.Stderr, "Note: chart was generated by dhg %s, now %s: template changes of the generator are merged as regular changes\n", st.DHGVersion, version)
+		}
+
+		dhgVer := version
+		if st != nil {
+			dhgVer = st.DHGVersion
+		}
+
+		plan, err := regen.BuildPlan(opts.outputDir, baseSet, outSet, regen.PlanOptions{DHGVersion: dhgVer, ChartName: opts.chartName})
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("Regenerating %s (%s) in %s\n", opts.chartName, outputMode, opts.outputDir)
+		for _, f := range plan.Files {
+			if opts.verbose || f.Action != regen.ActionUnchanged {
+				if f.Action == regen.ActionConflict {
+					fmt.Printf("  %-13s %s (%d hunk)\n", f.Action, f.Path, f.Conflicts)
+				} else {
+					fmt.Printf("  %-13s %s\n", f.Action, f.Path)
+				}
+			}
+		}
+		fmt.Println(plan.Summary())
+
+		if err := plan.Bump(opts.bump, outSet); err != nil {
+			return err
+		}
+
+		if opts.dryRun {
+			// In a real impl, print unified diffs. Just exit for now in dry-run
+			return nil
+		}
+
+		if err := plan.Apply(opts.outputDir); err != nil {
+			return fmt.Errorf("apply failed: %w", err)
+		}
+
+		conflicts := plan.Conflicts()
+		mergeFile := filepath.Join(opts.outputDir, "MERGE.md")
+		if conflicts > 0 {
+			if err := os.WriteFile(mergeFile, []byte(plan.MergeReport()), 0644); err != nil {
+				return err
+			}
+		} else {
+			if b, err := os.ReadFile(mergeFile); err == nil && strings.HasPrefix(string(b), "<!-- dhg merge report -->") {
+				_ = os.Remove(mergeFile)
+			}
+		}
+
+		if !opts.noState {
+			newSt := &regen.State{
+				FormatVersion: 1,
+				DHGVersion:    version,
+				ChartName:     opts.chartName,
+				Mode:          string(outputMode),
+				// Options omitted for brevity
+			}
+			if err := regen.Save(opts.outputDir, newSt, outSet); err != nil {
+				return fmt.Errorf("failed to save state: %w", err)
+			}
+		}
+
+		if conflicts > 0 {
+			os.Exit(3)
+		}
+
+		// Fall through for environment-specific values generation below
+	} else {
+		// Normal generation (force or standard)
+		if !opts.force {
+			// Check if state exists to prevent accidental overwrite
+			st, _, _ := regen.Load(opts.outputDir, opts.chartName)
+			if st != nil {
+				return fmt.Errorf("chart %s is managed by dhg; use --update to merge changes or --force to overwrite", opts.chartName)
+			}
+		}
+
+		if err := outSet.Write(opts.outputDir); err != nil {
+			return err
+		}
+
+		if !opts.noState {
+			newSt := &regen.State{
+				FormatVersion: 1,
+				DHGVersion:    version,
+				ChartName:     opts.chartName,
+				Mode:          string(outputMode),
+			}
+			if err := regen.Save(opts.outputDir, newSt, outSet); err != nil {
+				return fmt.Errorf("failed to save state: %w", err)
+			}
 		}
 	}
 
@@ -842,7 +988,14 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	}
 
 	if pipeline.synthesis != nil {
-		if err := writeSynthesisReport(opts.outputDir, pipeline); err != nil {
+		written, err := writeProfileValues(ctx, pipeline, pipelineOpts, gen, genOpts, opts.outputDir)
+		if err != nil {
+			return fmt.Errorf("profile values: %w", err)
+		}
+		for _, path := range written {
+			fmt.Printf("  Written: %s\n", path)
+		}
+		if err := writeSynthesisReport(opts.outputDir, pipeline, append(pipeline.notes, featureNotes...)); err != nil {
 			return err
 		}
 	}
@@ -1247,7 +1400,8 @@ func loadChartFromDir(dir string) (*types.GeneratedChart, error) {
 
 func newDiffCmd() *cobra.Command {
 	var (
-		color bool
+		color    bool
+		exitCode bool
 	)
 
 	cmd := &cobra.Command{
@@ -1258,22 +1412,25 @@ Useful for comparing generated charts before and after changes.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDiff(cmd.Context(), diffOptions{
-				dir1:  args[0],
-				dir2:  args[1],
-				color: color,
+				dir1:     args[0],
+				dir2:     args[1],
+				color:    color,
+				exitCode: exitCode,
 			})
 		},
 	}
 
 	cmd.Flags().BoolVar(&color, "color", true, "Enable colored output")
+	cmd.Flags().BoolVar(&exitCode, "exit-code", false, "Exit with code 1 if there are differences")
 
 	return cmd
 }
 
 type diffOptions struct {
-	dir1  string
-	dir2  string
-	color bool
+	dir1     string
+	dir2     string
+	color    bool
+	exitCode bool
 }
 
 func runDiff(_ context.Context, opts diffOptions) error {
@@ -1335,8 +1492,26 @@ func runDiff(_ context.Context, opts diffOptions) error {
 
 		if content1 != content2 {
 			hasDiff = true
-			printDiffHeader(opts.dir1, opts.dir2, relPath, "modified", opts.color)
-			printUnifiedDiff(content1, content2, opts.color)
+			lines1 := strings.Split(content1, "\n")
+			lines2 := strings.Split(content2, "\n")
+			diff := merge.Unified(filepath.Join(opts.dir1, relPath), filepath.Join(opts.dir2, relPath), lines1, lines2, 3)
+			if opts.color {
+				// simple colorize
+				lines := strings.Split(diff, "\n")
+				for _, l := range lines {
+					if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++") {
+						fmt.Printf("\033[32m%s\033[0m\n", l)
+					} else if strings.HasPrefix(l, "-") && !strings.HasPrefix(l, "---") {
+						fmt.Printf("\033[31m%s\033[0m\n", l)
+					} else if strings.HasPrefix(l, "@@") {
+						fmt.Printf("\033[36m%s\033[0m\n", l)
+					} else {
+						fmt.Println(l)
+					}
+				}
+			} else {
+				fmt.Print(diff)
+			}
 		}
 	}
 
@@ -1355,6 +1530,9 @@ func collectFiles(dir string) (map[string]string, error) {
 			return err
 		}
 		if info.IsDir() {
+			if info.Name() == regen.Dir {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		relPath, err := filepath.Rel(dir, path)
@@ -1536,7 +1714,10 @@ func runFix(ctx context.Context, opts fixOptions) error {
 	// Step 5: Apply all fixes
 	wt := generator.WorkloadType(opts.workloadType)
 	for i, chart := range charts {
-		fixed, fixResult := generator.ApplyAllFixes(chart, wt)
+		fixed, fixResult, err := generator.ApplyAllFixes(chart, wt)
+		if err != nil {
+			return fmt.Errorf("autofix error for chart %s: %w", chart.Name, err)
+		}
 		charts[i] = fixed
 
 		if opts.verbose {
@@ -1672,9 +1853,9 @@ func writeKustomizeDir(dir string, kd *generator.KustomizeDir) error {
 
 // writeSynthesisReport prints the notes of a synthesizing source and writes
 // them to SYNTHESIS.md in the output directory.
-func writeSynthesisReport(outputDir string, p *pipelineResult) error {
-	notes := p.synthesis.Notes()
-	for _, n := range notes {
+func writeSynthesisReport(outputDir string, p *pipelineResult, extra []string) error {
+	notes := append(p.synthesis.Notes(), extra...)
+	for _, n := range p.synthesis.Notes() {
 		fmt.Fprintf(os.Stderr, "Note: %s\n", n)
 	}
 	objects := make([]*unstructured.Unstructured, 0, len(p.extracted))

@@ -30,6 +30,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	dhgBin = filepath.Join(dir, "dhg")
+	if runtime.GOOS == "windows" {
+		dhgBin += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", dhgBin, "./cmd/dhg")
 	build.Dir = repoRoot()
 	build.Stdout, build.Stderr = os.Stdout, os.Stderr
@@ -243,6 +246,11 @@ func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 			t.Errorf("helm template %s: %s", rel, problem)
 		}
 
+		// Run CRD validation
+		for _, problem := range checkCRSchemas(parseStreamForCRD(out)) {
+			t.Errorf("helm template %s CRD validation: %s", rel, problem)
+		}
+
 		// A generated post-renderer must run end to end when a kustomize
 		// implementation is available.
 		if script := filepath.Join(chart, "post-renderer", "kustomize.sh"); fileExists(script) && hasKustomize() {
@@ -438,6 +446,9 @@ func findCharts(t *testing.T, dir string) []string {
 			return err
 		}
 		if info.IsDir() && info.Name() == "charts" {
+			return filepath.SkipDir
+		}
+		if info.IsDir() && info.Name() == ".dhg" {
 			return filepath.SkipDir
 		}
 		if !info.IsDir() && info.Name() == "Chart.yaml" {

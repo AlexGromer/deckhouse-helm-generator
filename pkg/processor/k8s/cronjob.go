@@ -180,5 +180,5 @@ spec:
 %s{{- end }}
 {{- end }}
 `, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName,
-		podTemplate(ctx.ChartName, 6, "OnFailure"))
+		podTemplate(ctx.ChartName, 6, "OnFailure", "CronJob/"+name))
 }

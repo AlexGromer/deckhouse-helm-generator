@@ -198,7 +198,7 @@ spec:
 {{- end }}
 {{- end }}
 `, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName,
-		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, ""))
+		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, "", "StatefulSet/"+name))
 }
 
 // DaemonSetProcessor processes Kubernetes DaemonSets.
@@ -268,7 +268,7 @@ spec:
 %s{{- end }}
 {{- end }}
 `, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName,
-		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, ""))
+		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, "", "DaemonSet/"+name))
 }
 
 // PVCProcessor processes Kubernetes PersistentVolumeClaims.

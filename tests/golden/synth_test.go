@@ -12,8 +12,9 @@ import (
 
 var synthModes = []string{"universal", "separate", "library", "umbrella"}
 
-// renderAll renders every non-library chart under out.
-func renderAll(t *testing.T, helm, out string) []object {
+// renderAll renders every non-library chart under out, with the chart's
+// values files named in extra when they exist.
+func renderAll(t *testing.T, helm, out string, extra ...string) []object {
 	t.Helper()
 	var objs []object
 	for _, chart := range findCharts(t, out) {
@@ -21,7 +22,13 @@ func renderAll(t *testing.T, helm, out string) []object {
 		if err != nil || bytes.Contains(data, []byte("type: library")) {
 			continue
 		}
-		stream, err := run(helm, "template", "golden", chart)
+		args := []string{"template", "golden", chart}
+		for _, f := range extra {
+			if path := filepath.Join(chart, f); fileExists(path) {
+				args = append(args, "-f", path)
+			}
+		}
+		stream, err := run(helm, args...)
 		if err != nil {
 			t.Fatalf("helm template %s: %v\n%s", chart, err, stream)
 		}
@@ -46,7 +53,7 @@ func firstContainer(o object) map[string]interface{} {
 
 // synthesize generates charts from a synthesizing source in every mode,
 // checks them with Helm and hands the rendered objects to check.
-func synthesize(t *testing.T, args []string, check func(t *testing.T, objs []object)) {
+func synthesize(t *testing.T, args []string, check func(t *testing.T, objs []object), profiles ...func(t *testing.T, helm, out string)) {
 	helm := requireHelm(t)
 	for _, mode := range synthModes {
 		t.Run(mode, func(t *testing.T) {
@@ -125,6 +132,49 @@ func TestSynthesizeSpringSource(t *testing.T) {
 		}
 		if s := findObject(objs, "Secret", "orders-env"); s == nil {
 			t.Error("Secret orders-env not rendered")
+		}
+	}, func(t *testing.T, helm, out string) {
+		// Profile "local" moves the server to port 9000.
+		objs := renderAll(t, helm, out, "values-profile-local.yaml")
+		cm := findObject(objs, "ConfigMap", "orders-env")
+		if cm == nil || get(map[string]interface{}(cm), "data", "SPRING_PROFILES_ACTIVE") != "local" {
+			t.Errorf("profile local: ConfigMap orders-env = %v", cm)
+		}
+		if d := findObject(objs, "Deployment", "orders"); d == nil || scalar(get(firstContainer(d), "livenessProbe", "httpGet", "port")) != "9000" {
+			t.Errorf("profile local: probes do not follow port 9000")
+		}
+	})
+}
+
+func TestSynthesizeQuarkusAndMicronaut(t *testing.T) {
+	dir := filepath.Join(repoRoot(), "tests", "golden", "testdata", "synth")
+	synthesize(t, []string{"-s", "source", "-f", filepath.Join(dir, "payments-quarkus"), "-f", filepath.Join(dir, "ledger-micronaut"),
+		"--image", "registry.example.com/payments:1.4.0", "--image", "registry.example.com/ledger:0.3.0"}, func(t *testing.T, objs []object) {
+		for name, want := range map[string][2]string{
+			"payments": {"/payments/q/health/ready", "8081"},
+			"ledger":   {"/mgmt/health/readiness", "8090"},
+		} {
+			d := findObject(objs, "Deployment", name)
+			if d == nil {
+				t.Errorf("Deployment/%s not rendered", name)
+				continue
+			}
+			c := firstContainer(d)
+			if get(c, "readinessProbe", "httpGet", "path") != want[0] || scalar(get(c, "readinessProbe", "httpGet", "port")) != want[1] {
+				t.Errorf("%s readiness = %v", name, c["readinessProbe"])
+			}
+		}
+		if cm := findObject(objs, "ConfigMap", "payments-env"); cm == nil || get(map[string]interface{}(cm), "data", "KAFKA_BOOTSTRAP_SERVERS") != "kafka:9092" {
+			t.Errorf("ConfigMap payments-env = %v", cm)
+		}
+		if cm := findObject(objs, "ConfigMap", "ledger-env"); cm == nil || get(map[string]interface{}(cm), "data", "DATASOURCES_DEFAULT_URL") != "jdbc:postgresql://postgres:5432/ledger" {
+			t.Errorf("ConfigMap ledger-env = %v", cm)
+		}
+	}, func(t *testing.T, helm, out string) {
+		objs := renderAll(t, helm, out, "values-profile-staging.yaml")
+		if cm := findObject(objs, "ConfigMap", "payments-env"); cm == nil || get(map[string]interface{}(cm), "data", "KAFKA_BOOTSTRAP_SERVERS") != "kafka-staging:9092" ||
+			get(map[string]interface{}(cm), "data", "QUARKUS_PROFILE") != "staging" {
+			t.Errorf("profile staging: ConfigMap payments-env = %v", cm)
 		}
 	})
 }
