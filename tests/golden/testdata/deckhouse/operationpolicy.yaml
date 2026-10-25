@@ -1,0 +1,34 @@
+apiVersion: deckhouse.io/v1alpha1
+kind: OperationPolicy
+metadata:
+  name: strict-policy
+spec:
+  match:
+    labelSelector:
+      app: shop
+  allowedRepos:
+    - registry.example.com/shop/
+  requiredProbes:
+    - livenessProbe
+    - readinessProbe
+  requiredResources:
+    limits:
+      - cpu
+      - memory
+    requests:
+      - cpu
+      - memory
+  disallowedImageTags:
+    - latest
+    - dev
+  maxRevisionHistoryLimit: 5
+  imagePullPolicy: Always
+  priorityClassNames:
+    - high-priority
+  ingressClassNames:
+    - nginx
+  storageClassNames:
+    - fast
+  replicaLimits:
+    minReplicas: 2
+    maxReplicas: 10

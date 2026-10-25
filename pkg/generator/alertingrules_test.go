@@ -60,6 +60,43 @@ func TestPrometheusRulesFeature(t *testing.T) {
 	}
 }
 
+func TestPrometheusRulesFeature_ObservabilityMetricsRulesGroup(t *testing.T) {
+	out := applyObsFeatures(t, []string{"prometheus-rules"}, map[string]map[string]string{"prometheus-rules": {
+		"kind":             "ObservabilityMetricsRulesGroup",
+		"slo-availability": "99.5",
+	}})
+
+	content, ok := out.Templates["templates/prometheus-rules.yaml"]
+	if !ok {
+		t.Fatalf("prometheus-rules template missing; templates: %v", keysOfMap(out.Templates))
+	}
+
+	// Should not have "groups" field
+	if strings.Contains(content, "groups:") {
+		t.Errorf("template contains 'groups:', but ObservabilityMetricsRulesGroup should use 'rules:' directly")
+	}
+
+	for _, want := range []string{
+		"apiVersion: observability.deckhouse.io/v1alpha1",
+		"kind: ObservabilityMetricsRulesGroup",
+		"name: {{ include \"app.fullname\" $ }}-workloads",
+		"name: {{ include \"app.fullname\" $ }}-slo",
+		"  rules:\n",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("template misses %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestPrometheusRulesFeature_InvalidKind(t *testing.T) {
+	_, err := ApplyFeatures([]*types.GeneratedChart{obsTestChart()}, []string{"prometheus-rules"},
+		map[string]map[string]string{"prometheus-rules": {"kind": "InvalidKind"}}, obsTestGraph())
+	if err == nil || !strings.Contains(err.Error(), "prometheus-rules: kind must be PrometheusRule or ObservabilityMetricsRulesGroup") {
+		t.Errorf("expected error about invalid kind, got %v", err)
+	}
+}
+
 func TestPrometheusRulesFeature_SLO(t *testing.T) {
 	out := applyObsFeatures(t, []string{"prometheus-rules"}, map[string]map[string]string{"prometheus-rules": {
 		"slo-availability": "99.5", "severity": "critical", "runbook-url": "https://runbooks.example.com",
