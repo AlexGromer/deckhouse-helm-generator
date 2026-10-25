@@ -1,6 +1,10 @@
 package types
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
 // RelationshipType represents the type of relationship between resources.
 type RelationshipType string
@@ -114,6 +118,15 @@ type ResourceGraph struct {
 	// relFrom and relTo are adjacency indexes for O(1) relationship lookup.
 	relFrom map[ResourceKey][]Relationship
 	relTo   map[ResourceKey][]Relationship
+
+	// Connections is a list of all detected connections.
+	Connections []Connection
+	Nodes       map[NodeID]*LogicalNode
+	Topology    *Topology
+
+	connFrom map[ResourceKey][]int
+	connTo   map[string][]int
+	connKey  map[string]int
 }
 
 // NewResourceGraph creates a new empty resource graph.
@@ -125,6 +138,7 @@ func NewResourceGraph() *ResourceGraph {
 		Orphans:       make([]*ProcessedResource, 0),
 		relFrom:       make(map[ResourceKey][]Relationship),
 		relTo:         make(map[ResourceKey][]Relationship),
+		// Maps for connections and nodes are created lazily
 	}
 }
 
@@ -187,4 +201,136 @@ func (g *ResourceGraph) AddGroup(group *ResourceGroup) {
 // AddOrphan adds an orphan resource to the graph.
 func (g *ResourceGraph) AddOrphan(r *ProcessedResource) {
 	g.Orphans = append(g.Orphans, r)
+}
+
+// AddConnection appends c, or merges it into an existing connection with the
+// same From, Container, Type, To, Protocol, Port and Path: evidence is
+// unioned (deduplicated, sorted) and the higher confidence kept. Maps are
+// created lazily, so a zero ResourceGraph works.
+func (g *ResourceGraph) AddConnection(c Connection) {
+	if g.connKey == nil {
+		g.connKey = make(map[string]int)
+		g.connFrom = make(map[ResourceKey][]int)
+		g.connTo = make(map[string][]int)
+	}
+
+	keyParts := []string{
+		c.From.String(),
+		c.Container,
+		string(c.Type),
+		c.To.String(),
+		c.Protocol,
+		fmt.Sprintf("%d", c.Port),
+		c.Path,
+	}
+	key := strings.Join(keyParts, "\x00")
+
+	idx, exists := g.connKey[key]
+	if !exists {
+		idx = len(g.Connections)
+		// Copy attributes so we don't share map references
+		attrCopy := make(map[string]string)
+		for k, v := range c.Attributes {
+			attrCopy[k] = v
+		}
+		c.Attributes = attrCopy
+		c.Evidence = deduplicateEvidence(c.Evidence)
+		g.Connections = append(g.Connections, c)
+		g.connKey[key] = idx
+		g.connFrom[c.From] = append(g.connFrom[c.From], idx)
+		g.connTo[c.To.String()] = append(g.connTo[c.To.String()], idx)
+		return
+	}
+
+	// Merge into existing
+	existing := &g.Connections[idx]
+	existing.Evidence = append(existing.Evidence, c.Evidence...)
+	existing.Evidence = deduplicateEvidence(existing.Evidence)
+
+	if c.Confidence.AtLeast(existing.Confidence) {
+		existing.Confidence = c.Confidence
+	}
+	if c.TLS {
+		existing.TLS = true
+	}
+	if existing.TargetPort == "" {
+		existing.TargetPort = c.TargetPort
+	}
+	if len(c.Attributes) > 0 {
+		if existing.Attributes == nil {
+			existing.Attributes = make(map[string]string)
+		}
+		for k, v := range c.Attributes {
+			if _, ok := existing.Attributes[k]; !ok {
+				existing.Attributes[k] = v
+			}
+		}
+	}
+}
+
+func deduplicateEvidence(ev []Evidence) []Evidence {
+	if len(ev) <= 1 {
+		return ev
+	}
+	sort.Slice(ev, func(i, j int) bool {
+		s1, s2 := ev[i].Object.String(), ev[j].Object.String()
+		if s1 != s2 {
+			return s1 < s2
+		}
+		if ev[i].Field != ev[j].Field {
+			return ev[i].Field < ev[j].Field
+		}
+		return ev[i].Key < ev[j].Key
+	})
+
+	res := make([]Evidence, 0, len(ev))
+	res = append(res, ev[0])
+	for i := 1; i < len(ev); i++ {
+		last := res[len(res)-1]
+		curr := ev[i]
+		if last.Source == curr.Source && last.Object == curr.Object && last.Field == curr.Field && last.Key == curr.Key && last.Value == curr.Value {
+			continue
+		}
+		res = append(res, curr)
+	}
+	return res
+}
+
+// AddNode stores n unless a node with the same ID exists; returns the stored node.
+func (g *ResourceGraph) AddNode(n LogicalNode) *LogicalNode {
+	if g.Nodes == nil {
+		g.Nodes = make(map[NodeID]*LogicalNode)
+	}
+	if existing, ok := g.Nodes[n.ID]; ok {
+		return existing
+	}
+	nCopy := n
+	g.Nodes[n.ID] = &nCopy
+	return &nCopy
+}
+
+func (g *ResourceGraph) Node(id NodeID) (*LogicalNode, bool) {
+	if g.Nodes == nil {
+		return nil, false
+	}
+	n, ok := g.Nodes[id]
+	return n, ok
+}
+
+// ConnectionsFrom returns a copy of connections from key in insertion order.
+func (g *ResourceGraph) ConnectionsFrom(key ResourceKey) []Connection {
+	var res []Connection
+	for _, idx := range g.connFrom[key] {
+		res = append(res, g.Connections[idx])
+	}
+	return res
+}
+
+// ConnectionsTo returns a copy of connections to t in insertion order.
+func (g *ResourceGraph) ConnectionsTo(t ConnectionTarget) []Connection {
+	var res []Connection
+	for _, idx := range g.connTo[t.String()] {
+		res = append(res, g.Connections[idx])
+	}
+	return res
 }
