@@ -20,10 +20,14 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 	// Gateway
 	if t.Gateway != nil {
 		gw := t.Gateway
+		name, _ := gw["name"].(string)
+		if name == "" {
+			name = ingressName + "-gateway"
+		}
 		b = append(b, "apiVersion: gateway.networking.k8s.io/v1")
 		b = append(b, "kind: Gateway")
 		b = append(b, "metadata:")
-		b = append(b, fmt.Sprintf("  name: %s", gw["name"]))
+		b = append(b, fmt.Sprintf("  name: %s", name))
 		b = append(b, "  namespace: {{ $.Release.Namespace }}")
 		b = append(b, "spec:")
 		if spec, ok := gw["spec"].(map[string]interface{}); ok {
@@ -162,7 +166,11 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 
 	// TLSRoute
 	for _, tr := range t.TLSRoutes {
-		b = append(b, "apiVersion: gateway.networking.k8s.io/v1")
+		apiVersion := "gateway.networking.k8s.io/v1"
+		if v, ok := tr["apiVersion"].(string); ok && v != "" {
+			apiVersion = v
+		}
+		b = append(b, fmt.Sprintf("apiVersion: %s", apiVersion))
 		b = append(b, "kind: TLSRoute")
 		b = append(b, "metadata:")
 		b = append(b, fmt.Sprintf("  name: %s", tr["name"]))

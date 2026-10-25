@@ -43,7 +43,7 @@ func (p *TLSRouteProcessor) Process(ctx processor.Context, obj *unstructured.Uns
 	namespace := obj.GetNamespace()
 
 	values, deps := p.extractValues(obj)
-	template := p.generateTemplate(ctx, serviceName, obj.GetName())
+	template := p.generateTemplate(ctx, serviceName, obj.GetName(), obj.GetAPIVersion())
 
 	return &processor.Result{
 		Processed:       true,
@@ -100,13 +100,13 @@ func (p *TLSRouteProcessor) extractValues(obj *unstructured.Unstructured) (map[s
 	return values, deps
 }
 
-func (p *TLSRouteProcessor) generateTemplate(ctx processor.Context, serviceName, name string) string {
+func (p *TLSRouteProcessor) generateTemplate(ctx processor.Context, serviceName, name string, apiVersion string) string {
 	sanitized := processor.SanitizeServiceName(serviceName)
 
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
 {{- with $svc.tlsRoute }}
-apiVersion: gateway.networking.k8s.io/v1
+apiVersion: %s
 kind: TLSRoute
 metadata:
   name: %s
@@ -115,6 +115,6 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
 {{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName,
+`, sanitized, apiVersion, processor.ObjectName(name), ctx.ChartName,
 		processor.SpecOverlay(".", "parentRefs", "rules"))
 }
