@@ -12,6 +12,7 @@ func init() {
 			"slo-errors-selector": `code=~"5.."`,
 			"prometheus":          "main",
 			"labels":              "prometheus=main;component=rules",
+			"kind":                "PrometheusRule",
 		},
 		Apply: applyPrometheusRulesFeature,
 	})
