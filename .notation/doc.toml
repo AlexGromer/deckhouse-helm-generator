@@ -1,0 +1,10 @@
+# .notation/doc.toml: which profile checks which Markdown file (`notation-lint doc resolve FILE` shows the result).
+# Order: --profile flag, `doc_type` in the front matter, the first matching [[glob]] below, else core + a PROFILE-UNSET warning.
+# The pre-commit hook (`notation-lint gate --staged`) lints the Markdown files of a project that has this file.
+# Narrow a profile to a folder by putting a more specific [[glob]] above this one, for example:
+#   [[glob]]
+#   pattern = "docs/runbooks/**/*.md"
+#   doc_type = "runbook"
+[[glob]]
+pattern = "**/*.md"
+doc_type = "generic"
