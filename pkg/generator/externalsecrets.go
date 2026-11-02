@@ -224,7 +224,7 @@ func externalSecretsTemplate(h secChartHelpers, apiVersion string) string {
 apiVersion: ` + apiVersion + `
 kind: ExternalSecret
 metadata:
-  name: {{ $name }}
+  name: {{ ` + h.objname("$name") + ` }}
   namespace: {{ $.Release.Namespace }}
 ` + h.labels(4) + `spec:
   refreshInterval: {{ $es.refreshInterval | default "1h" | quote }}
@@ -232,7 +232,7 @@ metadata:
     name: {{ $es.secretStoreRef.name }}
     kind: {{ $es.secretStoreRef.kind }}
   target:
-    name: {{ $name }}
+    name: {{ ` + h.objname("$name") + ` }}
     creationPolicy: {{ $es.creationPolicy | default "Owner" }}
     {{- with $secret.type }}
     template:

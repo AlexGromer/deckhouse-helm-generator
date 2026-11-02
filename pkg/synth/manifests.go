@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const nameLabel = "app.kubernetes.io/name"
@@ -55,6 +56,13 @@ func Manifests(app App) []*unstructured.Unstructured {
 	}
 
 	var envFrom []interface{}
+	for _, ref := range app.EnvFromExtra {
+		key := "configMapRef"
+		if ref.Secret {
+			key = "secretRef"
+		}
+		envFrom = append(envFrom, map[string]interface{}{key: map[string]interface{}{"name": ref.Name}})
+	}
 	if len(app.Env) > 0 {
 		envFrom = append(envFrom, map[string]interface{}{"configMapRef": map[string]interface{}{"name": name + "-env"}})
 		objects = append(objects, object("v1", "ConfigMap", name+"-env", labels, map[string]interface{}{
@@ -115,6 +123,12 @@ func Manifests(app App) []*unstructured.Unstructured {
 			"name": "files", "configMap": map[string]interface{}{"name": name + "-files"},
 		})
 	}
+	for _, v := range app.ExtraVolumes {
+		volumes = append(volumes, deepCopyMap(v))
+	}
+	for _, m := range app.ExtraMounts {
+		mounts = append(mounts, deepCopyMap(m))
+	}
 	if len(mounts) > 0 {
 		container["volumeMounts"] = mounts
 	}
@@ -142,30 +156,56 @@ func Manifests(app App) []*unstructured.Unstructured {
 	}
 
 	podLabels := copyMap(labels)
-	for k, v := range app.Labels {
-		podLabels[k] = v
+	for _, extra := range []map[string]string{app.Labels, app.PodLabels} {
+		for k, v := range extra {
+			podLabels[k] = v
+		}
+	}
+	podMeta := map[string]interface{}{"labels": podLabels}
+	if len(app.PodAnnotations) > 0 {
+		podMeta["annotations"] = stringMap(app.PodAnnotations)
 	}
 	podSpec := map[string]interface{}{"containers": []interface{}{container}}
+	if len(app.InitContainers) > 0 {
+		inits := make([]interface{}, len(app.InitContainers))
+		for i, c := range app.InitContainers {
+			inits[i] = deepCopyMap(c)
+		}
+		podSpec["initContainers"] = inits
+	}
 	if len(volumes) > 0 {
 		podSpec["volumes"] = volumes
 	}
 	if sc := securityContext(app); len(sc) > 0 {
 		podSpec["securityContext"] = sc
 	}
+	if len(app.ContainerPatch) > 0 {
+		mergePatch(container, deepCopyMap(app.ContainerPatch))
+	}
+	if len(app.PodPatch) > 0 {
+		mergePatch(podSpec, deepCopyMap(app.PodPatch))
+	}
 	replicas := int64(1)
 	if app.Replicas != nil {
 		replicas = *app.Replicas
 	}
-	deployment := object("apps/v1", "Deployment", name, labels, map[string]interface{}{
+	deploymentLabels := copyMap(labels)
+	for k, v := range app.DeploymentLabels {
+		deploymentLabels[k] = v
+	}
+	deployment := object("apps/v1", "Deployment", name, deploymentLabels, map[string]interface{}{
 		"spec": map[string]interface{}{
 			"replicas": replicas,
 			"selector": map[string]interface{}{"matchLabels": copyMap(labels)},
 			"template": map[string]interface{}{
-				"metadata": map[string]interface{}{"labels": podLabels},
+				"metadata": podMeta,
 				"spec":     podSpec,
 			},
 		},
 	})
+	for _, j := range app.Jobs {
+		objects = append(objects, &unstructured.Unstructured{Object: deepCopyMap(j.Object)})
+	}
 	return append([]*unstructured.Unstructured{deployment}, objects...)
 }
 
@@ -183,14 +223,18 @@ func object(apiVersion, kind, name string, labels map[string]interface{}, fields
 
 func probe(p Probe) map[string]interface{} {
 	out := map[string]interface{}{}
-	if len(p.Exec) > 0 {
+	switch {
+	case len(p.Exec) > 0:
 		out["exec"] = map[string]interface{}{"command": stringSlice(p.Exec)}
-	} else {
+	case p.TCP:
+		out["tcpSocket"] = map[string]interface{}{"port": p.Port}
+	default:
 		out["httpGet"] = map[string]interface{}{"path": p.HTTPPath, "port": p.Port}
 	}
 	for key, v := range map[string]int64{
 		"periodSeconds": p.PeriodSeconds, "timeoutSeconds": p.TimeoutSeconds,
 		"failureThreshold": p.FailureThreshold, "initialDelaySeconds": p.InitialDelaySeconds,
+		"successThreshold": p.SuccessThreshold,
 	} {
 		if v > 0 {
 			out[key] = v
@@ -249,6 +293,12 @@ func stringMap(m map[string]string) map[string]interface{} {
 		out[k] = m[k]
 	}
 	return out
+}
+
+// deepCopyMap copies a JSON-typed map: the objects are deep-copied later and
+// must not share maps with the app.
+func deepCopyMap(m map[string]interface{}) map[string]interface{} {
+	return runtime.DeepCopyJSON(m)
 }
 
 func copyMap(m map[string]interface{}) map[string]interface{} {

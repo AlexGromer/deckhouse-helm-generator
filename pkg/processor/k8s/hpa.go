@@ -144,7 +144,7 @@ spec:
   scaleTargetRef:
     apiVersion: {{ .scaleTargetRef.apiVersion | default "apps/v1" }}
     kind: {{ .scaleTargetRef.kind | default "Deployment" }}
-    name: {{ .scaleTargetRef.name }}
+    name: {{ include "%[3]s.ref" (list $ (.scaleTargetRef.kind | default "Deployment") .scaleTargetRef.name) }}
   minReplicas: {{ .minReplicas | default 1 }}
   maxReplicas: {{ .maxReplicas | default 10 }}
   {{- with .metrics }}
@@ -157,5 +157,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(obj.GetName()), ctx.ChartName, serviceName)
+`, serviceName, processor.ObjName(ctx.ChartName, obj.GetName()), ctx.ChartName, serviceName)
 }

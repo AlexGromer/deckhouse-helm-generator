@@ -403,3 +403,93 @@ func TestGenerateREADME_InstallHasNamespace(t *testing.T) {
 		t.Errorf("install hint without --namespace:\n%s", out)
 	}
 }
+
+func TestInferValuesSchema_ContainersAreObjectsByName(t *testing.T) {
+	out := InferValuesSchema(map[string]interface{}{
+		"services": map[string]interface{}{"web": map[string]interface{}{"deployment": map[string]interface{}{
+			"containers": map[string]interface{}{
+				"app": map[string]interface{}{"image": map[string]interface{}{"repository": "nginx", "tag": "1"}},
+			},
+			"containerOrder": []interface{}{"app"},
+			"initContainers": map[string]interface{}{
+				"migrate": map[string]interface{}{"image": map[string]interface{}{"repository": "nginx"}},
+			},
+			"initContainerOrder": []interface{}{"migrate"},
+		}}},
+	})
+	var schema map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &schema); err != nil {
+		t.Fatalf("schema is not JSON: %v\n%s", err, out)
+	}
+	dep := schema["properties"].(map[string]interface{})["services"].(map[string]interface{})["properties"].(map[string]interface{})["web"].(map[string]interface{})["properties"].(map[string]interface{})["deployment"].(map[string]interface{})["properties"].(map[string]interface{})
+	for _, key := range []string{"containers", "initContainers"} {
+		c := dep[key].(map[string]interface{})
+		if c["type"] != "object" {
+			t.Errorf("%s must be an object, got %v", key, c["type"])
+		}
+		extra, ok := c["additionalProperties"].(map[string]interface{})
+		if !ok || extra["type"] != "object" {
+			t.Errorf("%s must allow more containers as objects (additionalProperties), got %v", key, c["additionalProperties"])
+		}
+		if _, ok := c["properties"].(map[string]interface{}); !ok {
+			t.Errorf("%s must keep the properties of its default containers", key)
+		}
+	}
+	for _, key := range []string{"containerOrder", "initContainerOrder"} {
+		o := dep[key].(map[string]interface{})
+		items, _ := o["items"].(map[string]interface{})
+		if o["type"] != "array" || items["type"] != "string" {
+			t.Errorf("%s must be a list of strings, got %v", key, o)
+		}
+	}
+}
+
+func TestGenerateHelpers_NamePrefix(t *testing.T) {
+	out := GenerateHelpersWithRefs("myapp", map[string][]string{
+		"Service":   {"web", "api"},
+		"ConfigMap": {"cfg", `odd"name`},
+	})
+	for _, want := range []string{
+		`define "myapp.objname"`,
+		`define "myapp.ref"`,
+		`define "myapp.refs"`,
+		`define "myapp.refwalk"`,
+		`define "myapp.namePrefix"`,
+		// Kinds and names sorted, names JSON-quoted.
+		"ConfigMap: [\"cfg\",\"odd\\\"name\"]\nService: [\"api\",\"web\"]\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("helpers lack %q", want)
+		}
+	}
+
+	// Without objects the set is an empty map; GenerateHelpers is the same.
+	empty := GenerateHelpers("myapp")
+	if !strings.Contains(empty, "define \"myapp.inChart\" -}}\n{}\n{{- end }}") {
+		t.Errorf("empty set is not an empty map:\n%s", empty)
+	}
+	if empty != GenerateHelpersWithRefs("myapp", nil) {
+		t.Error("GenerateHelpers differs from GenerateHelpersWithRefs(nil)")
+	}
+}
+
+func TestGenerateLibraryHelpers_IndependentOfInput(t *testing.T) {
+	lib := GenerateLibraryHelpers("platform-lib")
+	if strings.Contains(lib, "define \"platform-lib.inChart\"") {
+		t.Error("the library defines the object names; the service chart must")
+	}
+	if !strings.Contains(lib, "include (printf \"%s.inChart\" $root.Chart.Name) $root") {
+		t.Error("the library ref helper does not read the names from the calling chart")
+	}
+	for _, name := range []string{"name", "fullname", "labels", "namePrefix", "objname", "ref", "refone", "refwalk", "refs"} {
+		if n := strings.Count(lib, "define \"platform-lib."+name+"\""); n != 1 {
+			t.Errorf("define platform-lib.%s count = %d, want 1", name, n)
+		}
+	}
+
+	in := GenerateInChartTemplate("web", map[string][]string{"Service": {"web"}, "ConfigMap": {"web-cfg", "a"}})
+	want := "{{- define \"web.inChart\" -}}\nConfigMap: [\"a\",\"web-cfg\"]\nService: [\"web\"]\n{{- end }}\n"
+	if !strings.Contains(in, want) {
+		t.Errorf("GenerateInChartTemplate =\n%s\nwant to contain\n%s", in, want)
+	}
+}

@@ -115,6 +115,6 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
 {{- end }}
-`, sanitized, apiVersion, processor.ObjectName(name), ctx.ChartName,
-		processor.SpecOverlay(".", "parentRefs", "rules"))
+`, sanitized, apiVersion, processor.ObjName(ctx.ChartName, name), ctx.ChartName,
+		processor.SpecOverlay(ctx.ChartName, ".", "parentRefs", "rules"))
 }

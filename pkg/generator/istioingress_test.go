@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
@@ -157,7 +158,7 @@ func TestIstioIngress_TemplatesAndValues(t *testing.T) {
 		`{{- with index $.Values.istioIngress.ingresses "shop" }}`,
 		"apiVersion: networking.istio.io/v1\nkind: Gateway",
 		"kind: VirtualService",
-		"    - shop\n", // gateways reference
+		"    - " + processor.ObjName("app", "shop") + "\n", // gateways reference
 		"Ingress annotations are not translated: nginx.ingress.kubernetes.io/rewrite-target",
 		"istio-system",
 	} {

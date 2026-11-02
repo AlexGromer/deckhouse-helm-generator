@@ -111,7 +111,7 @@ spec:
   {{- end }}
 %s{{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(obj.GetName()), ctx.ChartName, serviceName,
+`, serviceName, processor.ObjName(ctx.ChartName, obj.GetName()), ctx.ChartName, serviceName,
 		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, "", "Deployment/"+obj.GetName()))
 }
 

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"sigs.k8s.io/yaml"
 )
 
 // ChartMetadata contains metadata for a Helm chart.
@@ -41,6 +43,19 @@ type Dependency struct {
 	Tags       []string
 	Enabled    bool
 	Alias      string
+}
+
+// yamlString returns s as a YAML scalar that reads back as the same string:
+// plain when that is safe (0.1.0, ^1.2.0), double-quoted otherwise (>=1.0.0
+// <2.0.0, *, 1.20).
+func yamlString(s string) string {
+	var parsed map[string]interface{}
+	if err := yaml.Unmarshal([]byte("v: "+s), &parsed); err == nil {
+		if got, ok := parsed["v"].(string); ok && got == s {
+			return s
+		}
+	}
+	return fmt.Sprintf("%q", s)
 }
 
 // GenerateChartYAML generates the Chart.yaml content.
@@ -135,7 +150,7 @@ func GenerateChartYAML(meta ChartMetadata) string {
 		sb.WriteString("dependencies:\n")
 		for _, dep := range meta.Dependencies {
 			fmt.Fprintf(&sb, "  - name: %s\n", dep.Name)
-			fmt.Fprintf(&sb, "    version: %s\n", dep.Version)
+			fmt.Fprintf(&sb, "    version: %s\n", yamlString(dep.Version))
 			if dep.Repository != "" {
 				fmt.Fprintf(&sb, "    repository: %s\n", dep.Repository)
 			}

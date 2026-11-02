@@ -275,7 +275,7 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 					}
 					if finished != "" {
 						select {
-						case errors <- &NoteError{Msg: fmt.Sprintf("Job %s has already finished (%s); it is kept in the chart and will run again on install. Consider a Helm hook or excluding it", obj.GetName(), finished)}:
+						case errors <- &NoteError{Msg: fmt.Sprintf("Job %s has already finished (%s); it is rendered as a Helm hook (job values hook.enabled, default true; set hook.enabled=false to run it as a regular Job, enabled=false to drop it)", obj.GetName(), finished)}:
 						case <-ctx.Done():
 						}
 					}
@@ -286,10 +286,11 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 					}
 
 					resource := &types.ExtractedResource{
-						Object:     obj,
-						Source:     types.SourceCluster,
-						SourcePath: client.server,
-						GVK:        obj.GroupVersionKind(),
+						Object:        obj,
+						Source:        types.SourceCluster,
+						SourcePath:    client.server,
+						GVK:           obj.GroupVersionKind(),
+						FinishedState: finished,
 					}
 
 					select {

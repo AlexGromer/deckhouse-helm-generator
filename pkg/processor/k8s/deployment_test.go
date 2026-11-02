@@ -147,14 +147,14 @@ func TestProcessDeployment_ExtractsImage(t *testing.T) {
 		result, err := proc.Process(ctx, obj)
 		testutil.AssertNoError(t, err)
 
-		containers, ok := result.Values["containers"].([]map[string]interface{})
+		containers, ok := result.Values["containers"].(map[string]interface{})
 		if !ok || len(containers) == 0 {
-			t.Fatal("Expected containers array in values")
+			t.Fatal("Expected containers map in values")
 		}
 
-		img, ok := containers[0]["image"].(map[string]interface{})
+		img, ok := containers["nginx"].(map[string]interface{})["image"].(map[string]interface{})
 		if !ok {
-			t.Fatal("Expected image map in first container")
+			t.Fatal("Expected image map in container nginx")
 		}
 		testutil.AssertEqual(t, "nginx", img["repository"], "image repository")
 		testutil.AssertEqual(t, "1.21", img["tag"], "image tag")
@@ -190,19 +190,20 @@ func TestProcessDeployment_ExtractsImage(t *testing.T) {
 		result, err := proc.Process(ctx, obj)
 		testutil.AssertNoError(t, err)
 
-		containers, ok := result.Values["containers"].([]map[string]interface{})
+		containers, ok := result.Values["containers"].(map[string]interface{})
 		if !ok {
-			t.Fatal("Expected containers array in values")
+			t.Fatal("Expected containers map in values")
 		}
 		if len(containers) != 2 {
 			t.Fatalf("Expected 2 containers, got %d", len(containers))
 		}
+		testutil.AssertEqual(t, []interface{}{"app", "sidecar"}, result.Values["containerOrder"], "container order")
 
-		img1 := containers[0]["image"].(map[string]interface{})
+		img1 := containers["app"].(map[string]interface{})["image"].(map[string]interface{})
 		testutil.AssertEqual(t, "myapp", img1["repository"], "first container image repo")
 		testutil.AssertEqual(t, "v2.0", img1["tag"], "first container image tag")
 
-		img2 := containers[1]["image"].(map[string]interface{})
+		img2 := containers["sidecar"].(map[string]interface{})["image"].(map[string]interface{})
 		testutil.AssertEqual(t, "envoy", img2["repository"], "second container image repo")
 		testutil.AssertEqual(t, "1.28", img2["tag"], "second container image tag")
 	})
@@ -218,8 +219,8 @@ func TestProcessDeployment_ExtractsImage(t *testing.T) {
 		result, err := proc.Process(ctx, obj)
 		testutil.AssertNoError(t, err)
 
-		containers := result.Values["containers"].([]map[string]interface{})
-		img := containers[0]["image"].(map[string]interface{})
+		containers := result.Values["containers"].(map[string]interface{})
+		img := containers["nginx"].(map[string]interface{})["image"].(map[string]interface{})
 		testutil.AssertEqual(t, "nginx", img["repository"], "image repository")
 		if _, ok := img["tag"]; ok {
 			t.Errorf("an untagged image must stay untagged (no invented tag), got %v", img["tag"])
@@ -268,7 +269,7 @@ func TestProcessDeployment_ExtractsResources(t *testing.T) {
 		result, err := proc.Process(ctx, obj)
 		testutil.AssertNoError(t, err)
 
-		containers := result.Values["containers"].([]map[string]interface{})
+		containers, _ := orderedContainers(result.Values, "containers")
 		resources, ok := containers[0]["resources"].(map[string]interface{})
 		if !ok {
 			t.Fatal("Expected resources in container values")
@@ -315,7 +316,7 @@ func TestProcessDeployment_ExtractsResources(t *testing.T) {
 		result, err := proc.Process(ctx, obj)
 		testutil.AssertNoError(t, err)
 
-		containers := result.Values["containers"].([]map[string]interface{})
+		containers, _ := orderedContainers(result.Values, "containers")
 		resources := containers[0]["resources"].(map[string]interface{})
 
 		_, hasLimits := resources["limits"]
@@ -673,7 +674,7 @@ func TestProcessDeployment_ExtractsSecurityContext(t *testing.T) {
 		result, err := proc.Process(ctx, obj)
 		testutil.AssertNoError(t, err)
 
-		containers := result.Values["containers"].([]map[string]interface{})
+		containers, _ := orderedContainers(result.Values, "containers")
 		sc, ok := containers[0]["securityContext"].(map[string]interface{})
 		if !ok {
 			t.Fatal("Expected 'securityContext' in container values")
@@ -743,7 +744,7 @@ func TestProcessDeployment_ExtractsVolumes(t *testing.T) {
 		testutil.AssertEqual(t, "my-config", cm["name"], "ConfigMap volume name")
 
 		// Verify volumeMounts in container
-		containers := result.Values["containers"].([]map[string]interface{})
+		containers, _ := orderedContainers(result.Values, "containers")
 		mounts := containers[0]["volumeMounts"].([]interface{})
 		mount := mounts[0].(map[string]interface{})
 		testutil.AssertEqual(t, "config-vol", mount["name"], "volumeMount name")
@@ -857,7 +858,7 @@ func TestProcessDeployment_ExtractsProbes(t *testing.T) {
 	result, err := proc.Process(ctx, obj)
 	testutil.AssertNoError(t, err)
 
-	containers := result.Values["containers"].([]map[string]interface{})
+	containers, _ := orderedContainers(result.Values, "containers")
 
 	// Liveness probe
 	lp, ok := containers[0]["livenessProbe"].(map[string]interface{})
@@ -1325,7 +1326,7 @@ func TestProcessDeployment_GeneratesTemplate(t *testing.T) {
 	testutil.AssertContains(t, tpl, "kind: Deployment", "template should have kind")
 	testutil.AssertContains(t, tpl, "{{ $.Release.Namespace }}", "template should use release namespace")
 	testutil.AssertContains(t, tpl, `include "myapp.labels"`, "template should include labels helper")
-	testutil.AssertContains(t, tpl, "  name: test-deploy\n", "the Deployment keeps its name from the input")
+	testutil.AssertContains(t, tpl, "  name: "+processor.ObjName("myapp", "test-deploy")+"\n", "the Deployment keeps its name from the input (behind global.namePrefix)")
 	if strings.Contains(tpl, `fullname`) {
 		t.Error("the name must not get the release prefix")
 	}
@@ -1363,7 +1364,7 @@ func TestProcessDeployment_Fixture(t *testing.T) {
 	}
 
 	// Containers
-	containers, ok := result.Values["containers"].([]map[string]interface{})
+	containers, ok := orderedContainers(result.Values, "containers")
 	if !ok || len(containers) == 0 {
 		t.Fatal("Expected at least 1 container in values")
 	}

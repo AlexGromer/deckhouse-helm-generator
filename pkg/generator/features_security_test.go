@@ -356,6 +356,11 @@ func TestFeatureExternalSecrets(t *testing.T) {
 			t.Errorf("external-secrets template misses %q", want)
 		}
 	}
+	// The ExternalSecret and the Secret it creates carry global.namePrefix,
+	// as the Secret manifest it replaces does.
+	if n := strings.Count(tpl, `{{ (include "app.objname" (list $ $name)) }}`); n != 2 {
+		t.Errorf("ExternalSecret name and target name use app.objname %d times, want 2:\n%s", n, tpl)
+	}
 	es := secValues(t, out, "externalSecrets")
 	store, _ := es["secretStoreRef"].(map[string]interface{})
 	if es["enabled"] != true || store["name"] != "secret-store" || store["kind"] != "ClusterSecretStore" {
@@ -384,7 +389,7 @@ func TestFeatureExternalSecrets(t *testing.T) {
 		if !strings.Contains(content, "kind: Secret\n") {
 			continue
 		}
-		if !strings.Contains(content, "  name: api-keys\n") {
+		if !strings.Contains(content, "  name: "+processor.ObjName("app", "api-keys")+"\n") {
 			if strings.Contains(content, "externalSecrets") {
 				t.Errorf("%s must not be guarded:\n%s", path, content)
 			}

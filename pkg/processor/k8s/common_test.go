@@ -899,12 +899,17 @@ func TestExtractWorkloadValues_Containers(t *testing.T) {
 	obj := makeStatefulSetObj("app", "default", nil, spec)
 	values, _ := extractWorkloadValues(obj)
 
-	containers, ok := values["containers"].([]map[string]interface{})
+	containerMap, ok := values["containers"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("Expected containers to be []map[string]interface{}, got %T", values["containers"])
+		t.Fatalf("Expected containers to be map[string]interface{}, got %T", values["containers"])
 	}
-	testutil.AssertEqual(t, 1, len(containers))
-	testutil.AssertEqual(t, "app", containers[0]["name"])
+	testutil.AssertEqual(t, 1, len(containerMap))
+	testutil.AssertEqual(t, []interface{}{"app"}, values["containerOrder"])
+	app, ok := containerMap["app"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected containers.app to be a map, got %T", containerMap["app"])
+	}
+	containers := []map[string]interface{}{app}
 
 	img, ok := containers[0]["image"].(map[string]interface{})
 	if !ok {

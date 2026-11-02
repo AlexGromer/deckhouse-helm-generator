@@ -254,12 +254,15 @@ func TestProcessCronJob_ExtractsPodTemplate(t *testing.T) {
 	result, err := p.Process(ctx, obj)
 	testutil.AssertNoError(t, err)
 
-	containers, ok := result.Values["containers"].([]map[string]interface{})
+	containers, ok := result.Values["containers"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("Expected containers to be []map[string]interface{}, got %T", result.Values["containers"])
+		t.Fatalf("Expected containers to be map[string]interface{}, got %T", result.Values["containers"])
 	}
 	testutil.AssertEqual(t, 1, len(containers))
-	testutil.AssertEqual(t, "worker", containers[0]["name"])
+	if _, ok := containers["worker"].(map[string]interface{}); !ok {
+		t.Fatalf("Expected containers.worker to be a map, got %v", containers)
+	}
+	testutil.AssertEqual(t, []interface{}{"worker"}, result.Values["containerOrder"])
 
 	restartPolicy, ok := result.Values["restartPolicy"].(string)
 	if !ok {

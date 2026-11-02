@@ -241,6 +241,33 @@ func ObjectName(name string) string {
 	return strconv.Quote(name)
 }
 
+// ObjName returns the metadata.name of an object of the chart, as a template
+// expression: the name with global.namePrefix in front. With an empty prefix
+// it renders exactly what ObjectName writes. The expression refers to the
+// root context as $, which every generated template does.
+func ObjName(chartName, name string) string {
+	expr := fmt.Sprintf(`{{ include "%s.objname" (list $ %s) }}`, chartName, strconv.Quote(name))
+	if ObjectName(name) != name {
+		return `"` + expr + `"` // a name YAML reads as another type stays a string
+	}
+	return expr
+}
+
+// Prefixable reports whether global.namePrefix applies to the name of an
+// object of this kind. It does not for objects whose name is fixed by their
+// content or by the system that reads them: CustomResourceDefinition
+// (<plural>.<group>), APIService (<version>.<group>), Namespace, and the
+// Deckhouse ModuleConfig (the module name), User and Group (the identity),
+// NodeGroup (master, worker, ...) and the InstanceClass kinds (referenced
+// from a NodeGroup by name).
+func Prefixable(kind string) bool {
+	switch kind {
+	case "CustomResourceDefinition", "APIService", "Namespace", "ModuleConfig", "User", "Group", "NodeGroup":
+		return false
+	}
+	return !strings.HasSuffix(kind, "InstanceClass")
+}
+
 // ValuesPathForKind returns the standard values path for a resource kind.
 func ValuesPathForKind(kind, serviceName string) string {
 	kindPath := kindToValuesKey(kind)

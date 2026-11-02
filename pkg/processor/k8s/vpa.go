@@ -124,7 +124,7 @@ spec:
   targetRef:
     apiVersion: {{ .targetRef.apiVersion | default "apps/v1" }}
     kind: {{ .targetRef.kind | default "Deployment" }}
-    name: {{ .targetRef.name }}
+    name: {{ include "%[3]s.ref" (list $ (.targetRef.kind | default "Deployment") .targetRef.name) }}
   {{- with .updatePolicy }}
   updatePolicy:
     {{- toYaml . | nindent 4 }}
@@ -135,5 +135,5 @@ spec:
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
+`, serviceName, processor.ObjName(ctx.ChartName, name), ctx.ChartName, serviceName)
 }

@@ -85,6 +85,6 @@ metadata:
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName,
-		processor.SpecOverlay(".", "subjects", "accessLevel", "limitNamespaces", "allowScale"))
+`, sanitized, processor.ObjName(ctx.ChartName, name), ctx.ChartName,
+		processor.SpecOverlay(ctx.ChartName, ".", "subjects", "accessLevel", "limitNamespaces", "allowScale"))
 }

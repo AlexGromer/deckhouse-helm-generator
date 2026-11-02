@@ -107,11 +107,12 @@ spec:
   {{- with .unhealthyPodEvictionPolicy }}
   unhealthyPodEvictionPolicy: {{ . }}
   {{- end }}
+  {{- /* With global.namePrefix (several releases in one namespace) the selector also selects the release: the pods carry app.kubernetes.io/instance. */}}
   {{- with .selector }}
   selector:
-    {{- toYaml . | nindent 4 }}
+    {{- toYaml (merge (dict) (deepCopy .) (ternary (dict "matchLabels" (dict "app.kubernetes.io/instance" $.Release.Name)) (dict) (ne (include "%s.namePrefix" $) ""))) | nindent 4 }}
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
+`, serviceName, processor.ObjName(ctx.ChartName, name), ctx.ChartName, serviceName, ctx.ChartName)
 }

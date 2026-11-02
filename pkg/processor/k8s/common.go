@@ -61,10 +61,10 @@ func (p *ServiceAccountProcessor) Process(ctx processor.Context, obj *unstructur
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ .name }}
+  name: {{ include "%[2]s.objname" (list $ .name) }}
   namespace: {{ $.Release.Namespace }}
   labels:
-    {{- include "%s.labels" $ | nindent 4 }}
+    {{- include "%[2]s.labels" $ | nindent 4 }}
   {{- with .annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -193,12 +193,12 @@ spec:
   {{- end }}
 %s  {{- with .volumeClaimTemplates }}
   volumeClaimTemplates:
-    {{- toYaml . | nindent 4 }}
+    {{- include "%s.refs" (list $ .) | nindent 4 }}
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName,
-		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, "", "StatefulSet/"+name))
+`, serviceName, processor.ObjName(ctx.ChartName, name), ctx.ChartName, serviceName,
+		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, "", "StatefulSet/"+name), ctx.ChartName)
 }
 
 // DaemonSetProcessor processes Kubernetes DaemonSets.
@@ -267,7 +267,7 @@ spec:
   {{- end }}
 %s{{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName,
+`, serviceName, processor.ObjName(ctx.ChartName, name), ctx.ChartName, serviceName,
 		workloadSelectorTemplate, podTemplate(ctx.ChartName, 2, "", "DaemonSet/"+name))
 }
 
@@ -349,7 +349,7 @@ spec:
   accessModes:
     {{- toYaml .accessModes | nindent 4 }}
   {{- with .storageClassName }}
-  storageClassName: {{ . }}
+  storageClassName: {{ include "%[3]s.ref" (list $ "StorageClass" .) }}
   {{- end }}
   {{- with .volumeMode }}
   volumeMode: {{ . }}
@@ -367,7 +367,7 @@ spec:
 {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(name), ctx.ChartName)
+`, serviceName, processor.ObjName(ctx.ChartName, name), ctx.ChartName)
 
 	return &processor.Result{
 		Processed:       true,

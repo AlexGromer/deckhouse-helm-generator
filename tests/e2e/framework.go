@@ -42,6 +42,20 @@ type E2ETestHarness struct {
 
 	// Chart is the generated chart metadata.
 	Chart *types.GeneratedChart
+
+	// Mode is the output mode of the next GenerateChart; the zero value is
+	// universal. Only modes that give one chart to render first (universal,
+	// umbrella) are useful here.
+	Mode types.OutputMode
+
+	// Features are the names of the optional features (--with) applied to
+	// the generated charts.
+	Features []string
+
+	// Charts are all generated charts: one for universal mode, the parent
+	// and its subcharts for umbrella, the library and the service charts
+	// for library mode. Chart is the first.
+	Charts []*types.GeneratedChart
 }
 
 // NewE2ETestHarness creates a new E2E test harness.
@@ -148,10 +162,14 @@ func (h *E2ETestHarness) GenerateChartWithOptions(chartName, chartVersion, appVe
 	registry := processor.NewRegistry()
 	k8s.RegisterAll(registry)
 
+	mode := h.Mode
+	if mode == "" {
+		mode = types.OutputModeUniversal
+	}
 	procCtx := processor.Context{
 		Ctx:        ctx,
 		ChartName:  chartName,
-		OutputMode: types.OutputModeUniversal,
+		OutputMode: mode,
 	}
 
 	var processed []*types.ProcessedResource
@@ -188,14 +206,27 @@ func (h *E2ETestHarness) GenerateChartWithOptions(chartName, chartVersion, appVe
 		ChartName:    chartName,
 		ChartVersion: chartVersion,
 		AppVersion:   appVersion,
-		Mode:         types.OutputModeUniversal,
+		Mode:         mode,
 	}
 
-	gen := generator.NewUniversalGenerator()
+	var gen generator.Generator = generator.NewUniversalGenerator()
+	switch mode {
+	case types.OutputModeUmbrella:
+		gen = generator.NewUmbrellaGenerator()
+	case types.OutputModeLibrary:
+		gen = generator.NewLibraryGenerator()
+	}
 	charts, err := gen.Generate(ctx, graph, genOpts)
 	if err != nil {
 		h.T.Fatalf("Generation error: %v", err)
 	}
+	if len(h.Features) > 0 {
+		charts, err = generator.ApplyFeatures(charts, h.Features, nil, graph)
+		if err != nil {
+			h.T.Fatalf("Applying features: %v", err)
+		}
+	}
+	h.Charts = charts
 
 	if len(charts) == 0 {
 		h.T.Fatal("No charts generated")
@@ -206,6 +237,11 @@ func (h *E2ETestHarness) GenerateChartWithOptions(chartName, chartVersion, appVe
 	// Write to disk
 	if err := generator.WriteChart(h.Chart, h.OutputDir); err != nil {
 		h.T.Fatalf("Failed to write chart: %v", err)
+	}
+	for _, sub := range charts[1:] { // subcharts of an umbrella
+		if err := generator.WriteChart(sub, h.OutputDir); err != nil {
+			h.T.Fatalf("Failed to write chart %s: %v", sub.Name, err)
+		}
 	}
 
 	h.ChartDir = filepath.Join(h.OutputDir, h.Chart.Name)
@@ -294,6 +330,12 @@ func (h *E2ETestHarness) ChartPath(parts ...string) string {
 	h.RequireGenerated()
 	args := append([]string{h.ChartDir}, parts...)
 	return filepath.Join(args...)
+}
+
+// ChartPathIn returns a path inside the output directory, next to the
+// generated charts: ChartPathIn("web", "charts") is <output>/web/charts.
+func (h *E2ETestHarness) ChartPathIn(parts ...string) string {
+	return filepath.Join(append([]string{h.OutputDir}, parts...)...)
 }
 
 // startMockAPIServer starts a minimal HTTP server emulating a K8s API server.

@@ -90,5 +90,5 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
 `, sanitized, processor.ObjectName(obj.GetName()), ctx.ChartName,
-		processor.SpecOverlay("$svc.moduleConfig", "enabled", "version", "settings"))
+		processor.SpecOverlay(ctx.ChartName, "$svc.moduleConfig", "enabled", "version", "settings"))
 }

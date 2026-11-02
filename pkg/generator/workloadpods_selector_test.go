@@ -46,6 +46,9 @@ func TestSuffixedName(t *testing.T) {
 		"web":                          "web-pdb",
 		`"web.example"`:                `"web.example-pdb"`,
 		`{{ include "a.fullname" $ }}`: `{{ include "a.fullname" $ }}-pdb`,
+		// processor.ObjName: the suffix goes inside the quotes.
+		`{{ include "a.objname" (list $ "web") }}`:    `{{ include "a.objname" (list $ "web") }}-pdb`,
+		`"{{ include "a.objname" (list $ "true") }}"`: `"{{ include "a.objname" (list $ "true") }}-pdb"`,
 	} {
 		if got := suffixedName(in, "-pdb"); got != want {
 			t.Errorf("suffixedName(%s) = %s, want %s", in, got, want)

@@ -33,6 +33,11 @@ type ExtractedResource struct {
 
 	// GVK is the GroupVersionKind of the resource.
 	GVK schema.GroupVersionKind
+
+	// FinishedState is "succeeded" or "failed" for a Job that the cluster
+	// extractor found already run to its end, and empty for everything else.
+	// The status it was read from is stripped from Object.
+	FinishedState string
 }
 
 // ResourceKey creates a unique identifier for a resource.

@@ -93,6 +93,6 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
 {{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName,
-		processor.SpecOverlay(".", "gatewayClassName", "listeners"))
+`, sanitized, processor.ObjName(ctx.ChartName, name), ctx.ChartName,
+		processor.SpecOverlay(ctx.ChartName, ".", "gatewayClassName", "listeners"))
 }

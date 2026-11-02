@@ -228,7 +228,7 @@ func (d *DeckhouseDetector) Detect(graph *types.ResourceGraph) []ArchitecturePat
 
 		// Check number of containers
 		if containers := resource.Values["containers"]; containers != nil {
-			if containerList, ok := containers.([]map[string]interface{}); ok {
+			if containerList, ok := containersOf(resource.Values, "containers"); ok {
 				if len(containerList) > 1 {
 					patterns = append(patterns, PatternSidecar)
 					break
@@ -282,14 +282,14 @@ func (d *SidecarDetector) Detect(graph *types.ResourceGraph) []ArchitecturePatte
 			continue
 		}
 
-		containerList, ok := containers.([]map[string]interface{})
+		containerList, ok := containersOf(resource.Values, "containers")
 		if !ok {
 			continue
 		}
 
 		for _, container := range containerList {
 			name, _ := container["name"].(string)
-			image, _ := container["image"].(string)
+			image := imageOf(container["image"])
 
 			for sig := range sidecarSignatures {
 				if strings.Contains(strings.ToLower(name), sig) || strings.Contains(strings.ToLower(image), sig) {

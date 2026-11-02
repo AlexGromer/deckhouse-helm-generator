@@ -221,6 +221,7 @@ func doMerge(path string, b, o, t []byte, opts PlanOptions) (FileAction, []byte,
 	}
 
 	if isStructuralYAML(path) {
+		b, o = migrateContainerLists(b, o, t)
 		res, err := merge.MergeYAML(b, o, t, merge.YAMLOptions{Labels: labels})
 		if err != nil {
 			return ActionConflict, o, 1

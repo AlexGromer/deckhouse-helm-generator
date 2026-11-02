@@ -43,13 +43,14 @@ func (g *SeparateGenerator) Generate(ctx context.Context, graph *types.ResourceG
 	}
 
 	charts := make([]*types.GeneratedChart, 0, len(groupResult.Groups))
+	inChart := inChartNames(graph)
 
 	for _, group := range groupResult.Groups {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
-		chart, err := g.generateChartForGroup(group, opts, opts.ChartName)
+		chart, err := g.generateChartForGroup(group, opts, opts.ChartName, inChart)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate chart for group %s: %w", group.Name, err)
 		}
@@ -62,7 +63,8 @@ func (g *SeparateGenerator) Generate(ctx context.Context, graph *types.ResourceG
 // generateChartForGroup creates a complete Helm chart for a single service group.
 // sourceChartName is the chart name the processors rendered templates with;
 // their helper references are rewritten to the group chart's own helpers.
-func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Options, sourceChartName string) (*types.GeneratedChart, error) {
+// inChart is what inChartNames returns for the whole graph.
+func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Options, sourceChartName string, inChart map[string][]string) (*types.GeneratedChart, error) {
 	chartName := group.Name
 
 	// Build Chart.yaml.
@@ -101,7 +103,7 @@ func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Opti
 	}
 
 	// Generate _helpers.tpl.
-	helpers := helm.GenerateHelpers(chartName)
+	helpers := helm.GenerateHelpersWithRefs(chartName, inChart)
 
 	// Generate NOTES.txt.
 	notes := helm.GenerateNOTES(chartName, []string{chartName}, helm.NOTESContext{})
@@ -141,7 +143,8 @@ func (g *SeparateGenerator) buildFlatValues(group *ServiceGroup) map[string]inte
 	// $svc is .Values itself, so the chart must be enabled by default.
 	b.SetValue("enabled", true)
 	// Templates reference $.Values.global.*; an umbrella parent overrides it.
-	b.SetValue("global", map[string]interface{}{})
+	// global.namePrefix is put in front of every object name of the chart.
+	b.SetValue("global", map[string]interface{}{"namePrefix": ""})
 
 	keys := serviceValuesKeys(group)
 	var unplaced []*types.ProcessedResource

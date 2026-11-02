@@ -269,6 +269,18 @@ func inferSchema(v interface{}) map[string]interface{} {
 		props := make(map[string]interface{}, len(val))
 		for k, child := range val {
 			props[k] = inferSchema(child)
+			switch k {
+			case "containers", "initContainers":
+				// Containers are objects by name: a values overlay may add
+				// more of them, each an object.
+				if _, isMap := child.(map[string]interface{}); isMap {
+					props[k].(map[string]interface{})["additionalProperties"] = map[string]interface{}{"type": "object"}
+				}
+			case "containerOrder", "initContainerOrder":
+				if _, isList := child.([]interface{}); isList {
+					props[k] = map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}
+				}
+			}
 		}
 		s := map[string]interface{}{"type": "object"}
 		if len(props) > 0 {

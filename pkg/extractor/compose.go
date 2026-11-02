@@ -39,11 +39,15 @@ func (e *ComposeExtractor) Validate(_ context.Context, opts Options) error {
 			return fmt.Errorf("%s is a directory; pass the compose file itself", p)
 		}
 	}
-	return nil
+	return validateSynthProfile(opts)
 }
 
 // Extract implements Extractor.
 func (e *ComposeExtractor) Extract(ctx context.Context, opts Options) (<-chan *types.ExtractedResource, <-chan error) {
+	opts, err := e.withSynthProfile(opts)
+	if err != nil {
+		return failed(err)
+	}
 	apps, err := synth.FromCompose(opts.Paths, e.env, &e.notes)
 	if err != nil {
 		return failed(err)

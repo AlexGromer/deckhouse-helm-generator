@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
@@ -73,7 +74,7 @@ func init() {
 
 // secHelperRef matches references to a chart's named templates, e.g.
 // `define "app.fullname"` or `include "app.labels"`.
-var secHelperRef = regexp.MustCompile(`(?:define|include|template) "([^"]+)\.(fullname|labels)"`)
+var secHelperRef = regexp.MustCompile(`(?:define|include|template) "([^"]+)\.(fullname|labels|objname)"`)
 
 // secChartHelpers knows how injected templates can reach the chart's own
 // named templates (their prefix is the chart name in every output mode, but a
@@ -81,6 +82,7 @@ var secHelperRef = regexp.MustCompile(`(?:define|include|template) "([^"]+)\.(fu
 type secChartHelpers struct {
 	fullnameTpl string
 	labelsTpl   string
+	objnameTpl  string
 }
 
 func newSecChartHelpers(chart *types.GeneratedChart) secChartHelpers {
@@ -98,6 +100,9 @@ func newSecChartHelpers(chart *types.GeneratedChart) secChartHelpers {
 			if m[2] == "labels" && h.labelsTpl == "" {
 				h.labelsTpl = name
 			}
+			if m[2] == "objname" && h.objnameTpl == "" {
+				h.objnameTpl = name
+			}
 		}
 	}
 	return h
@@ -110,6 +115,43 @@ func (h secChartHelpers) fullname() string {
 		return "$.Release.Name"
 	}
 	return fmt.Sprintf("(include %q $)", h.fullnameTpl)
+}
+
+// objname returns a template expression for the name of an object of the
+// chart, with global.namePrefix in front. nameExpr is a template expression
+// (such as $name) holding the name the input gave the object. Without the
+// helper (a chart made before global.namePrefix) it is nameExpr itself.
+func (h secChartHelpers) objname(nameExpr string) string {
+	if h.objnameTpl == "" {
+		return nameExpr
+	}
+	return fmt.Sprintf("(include %q (list $ %s))", h.objnameTpl, nameExpr)
+}
+
+// chartName is the name the chart's named templates are prefixed with ("" for
+// a chart made before global.namePrefix).
+func (h secChartHelpers) chartName() string {
+	return strings.TrimSuffix(h.objnameTpl, ".objname")
+}
+
+// objNameValue returns the value of a metadata.name the feature gives to an
+// object of its own: the name with global.namePrefix in front, as
+// processor.ObjName writes it. Without the helper it is the plain name.
+func (h secChartHelpers) objNameValue(name string) string {
+	if h.objnameTpl == "" {
+		return name
+	}
+	return processor.ObjName(h.chartName(), name)
+}
+
+// refValue returns the value of a field that names an object of Kind: the
+// name, with global.namePrefix in front when the chart renders that object
+// (the <chart>.ref helper decides). Without the helper it is the plain name.
+func (h secChartHelpers) refValue(kind, name string) string {
+	if h.objnameTpl == "" {
+		return name
+	}
+	return fmt.Sprintf("{{ include %q (list $ %q %q) }}", h.chartName()+".ref", kind, name)
 }
 
 // name returns a template action producing "<fullname>-<suffix>", truncated

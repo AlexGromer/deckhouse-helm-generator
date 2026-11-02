@@ -275,7 +275,7 @@ func processStrimziEntity(
 
 	var specBlock string
 	if _, hasSpec, _ := unstructured.NestedMap(obj.Object, "spec"); hasSpec {
-		specBlock = processor.SpecOverlay("$entity", overlayKeys...)
+		specBlock = processor.SpecOverlay(ctx.ChartName, "$entity", overlayKeys...)
 	}
 
 	template := fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
@@ -299,7 +299,7 @@ metadata:
   {{- end }}
 %s{{- end }}
 {{- end }}
-`, processor.SanitizeServiceName(serviceName), valuesKey, sanitizeName(name), apiVersion, kind, processor.ObjectName(name), labelsDictStr, ctx.ChartName, specBlock)
+`, processor.SanitizeServiceName(serviceName), valuesKey, sanitizeName(name), apiVersion, kind, processor.ObjName(ctx.ChartName, name), labelsDictStr, ctx.ChartName, specBlock)
 
 	return &processor.Result{
 		Processed:       true,

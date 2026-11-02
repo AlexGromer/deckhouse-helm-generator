@@ -47,6 +47,7 @@ func (g *UmbrellaGenerator) Generate(ctx context.Context, graph *types.ResourceG
 	deps := make([]helm.Dependency, 0, len(groupResult.Groups))
 
 	sep := &SeparateGenerator{}
+	inChart := inChartNames(graph)
 	parentValues := make(map[string]interface{})
 
 	for _, group := range groupResult.Groups {
@@ -57,7 +58,7 @@ func (g *UmbrellaGenerator) Generate(ctx context.Context, graph *types.ResourceG
 		// Generate subchart using SeparateGenerator logic.
 		subOpts := opts
 		subOpts.ChartName = group.Name
-		subchart, err := sep.generateChartForGroup(group, subOpts, opts.ChartName)
+		subchart, err := sep.generateChartForGroup(group, subOpts, opts.ChartName, inChart)
 		if err != nil {
 			return nil, fmt.Errorf("generating subchart for %s: %w", group.Name, err)
 		}
@@ -122,6 +123,8 @@ func (g *UmbrellaGenerator) generateParentChart(
 			"imageRegistry": "",
 		}
 	}
+	// Put in front of every object name of every subchart.
+	allValues["global"].(map[string]interface{})["namePrefix"] = ""
 
 	for name, vals := range subValues {
 		allValues[name] = vals

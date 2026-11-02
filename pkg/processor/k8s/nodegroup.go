@@ -86,5 +86,5 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
 `, sanitized, processor.ObjectName(name), ctx.ChartName,
-		processor.SpecOverlay(".", "nodeType", "disruptions", "kubelet", "cloudInstances"))
+		processor.SpecOverlay(ctx.ChartName, ".", "nodeType", "disruptions", "kubelet", "cloudInstances"))
 }

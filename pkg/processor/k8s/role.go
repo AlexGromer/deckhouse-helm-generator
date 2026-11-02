@@ -87,5 +87,5 @@ rules:
 {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
+`, serviceName, processor.ObjName(ctx.ChartName, name), ctx.ChartName, serviceName)
 }

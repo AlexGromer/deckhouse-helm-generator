@@ -123,7 +123,7 @@ func TestPodTemplate_RendersPodSpecFields(t *testing.T) {
 	for _, want := range []string{
 		`hostname: {{ . | quote }}`,
 		`subdomain: {{ . | quote }}`,
-		`priorityClassName: {{ . | quote }}`,
+		`priorityClassName: {{ include "app.ref" (list $ "PriorityClass" .) | quote }}`,
 		`runtimeClassName: {{ . | quote }}`,
 		`dnsPolicy: {{ . | quote }}`,
 		`hostAliases:`,

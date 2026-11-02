@@ -12,8 +12,39 @@ import (
 // 4. TLSRoute
 // 5. ReferenceGrant
 
-func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTranslation) string {
+// gatewayAPITemplate renders the Gateway API objects of an Ingress. h names
+// the helpers of the chart: the objects get global.namePrefix, and the
+// references to objects of the chart follow (the Gateway the translation
+// creates, the Services and Secrets of the input).
+func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTranslation, h secChartHelpers) string {
 	var b []string
+
+	createdGateway := ""
+	if t.Gateway != nil {
+		createdGateway, _ = t.Gateway["name"].(string)
+		if createdGateway == "" {
+			createdGateway = ingressName + "-gateway"
+		}
+	}
+	listenerSets := map[string]bool{}
+	for _, ls := range t.ListenerSets {
+		listenerSets[fmt.Sprint(ls["name"])] = true
+	}
+	// parentName is the name in a parentRef: a Gateway or ListenerSet created
+	// here, one of the input, or one outside the chart (left as it is). A
+	// parent in another namespace is not part of the chart.
+	parentName := func(kind string, name interface{}, namespace string) string {
+		n := fmt.Sprint(name)
+		switch {
+		case namespace != "":
+			return n
+		case kind == "ListenerSet" && listenerSets[n], kind != "ListenerSet" && n == createdGateway:
+			return h.objNameValue(n)
+		case kind == "ListenerSet":
+			return h.refValue("ListenerSet", n)
+		}
+		return h.refValue("Gateway", n)
+	}
 
 	b = append(b, "{{- if and $.Values.gatewayApi $.Values.gatewayApi.enabled }}")
 
@@ -27,7 +58,7 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 		b = append(b, "apiVersion: gateway.networking.k8s.io/v1")
 		b = append(b, "kind: Gateway")
 		b = append(b, "metadata:")
-		b = append(b, fmt.Sprintf("  name: %s", name))
+		b = append(b, fmt.Sprintf("  name: %s", h.objNameValue(name)))
 		b = append(b, "  namespace: {{ $.Release.Namespace }}")
 		b = append(b, "spec:")
 		if spec, ok := gw["spec"].(map[string]interface{}); ok {
@@ -61,14 +92,15 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 			b = append(b, "apiVersion: gateway.networking.k8s.io/v1")
 			b = append(b, "kind: ListenerSet")
 			b = append(b, "metadata:")
-			b = append(b, fmt.Sprintf("  name: %s", ls["name"]))
+			b = append(b, fmt.Sprintf("  name: %s", h.objNameValue(fmt.Sprint(ls["name"]))))
 			b = append(b, "  namespace: {{ $.Release.Namespace }}")
 			b = append(b, "spec:")
 			if spec, ok := ls["spec"].(map[string]interface{}); ok {
 				if pref, ok := spec["parentRef"].(map[string]interface{}); ok {
 					b = append(b, "  parentRef:")
+					prefNS, _ := pref["namespace"].(string)
 					if n, ok := pref["name"].(string); ok {
-						b = append(b, fmt.Sprintf("    name: %s", n))
+						b = append(b, fmt.Sprintf("    name: %s", parentName("Gateway", n, prefNS)))
 					}
 					if ns, ok := pref["namespace"].(string); ok && ns != "" {
 						b = append(b, fmt.Sprintf("    namespace: %s", ns))
@@ -91,7 +123,7 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 								b = append(b, "        certificateRefs:")
 								for _, c := range cref {
 									cMap := c.(map[string]interface{})
-									b = append(b, fmt.Sprintf("          - name: %s", cMap["name"]))
+									b = append(b, fmt.Sprintf("          - name: %s", h.refValue("Secret", fmt.Sprint(cMap["name"]))))
 								}
 							}
 						}
@@ -108,7 +140,7 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 		b = append(b, "apiVersion: gateway.networking.k8s.io/v1")
 		b = append(b, "kind: HTTPRoute")
 		b = append(b, "metadata:")
-		b = append(b, fmt.Sprintf("  name: %s", hr["name"]))
+		b = append(b, fmt.Sprintf("  name: %s", h.objNameValue(fmt.Sprint(hr["name"]))))
 		b = append(b, "  namespace: {{ $.Release.Namespace }}")
 		b = append(b, "spec:")
 		spec := hr["spec"].(map[string]interface{})
@@ -119,7 +151,9 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 				p := pRaw.(map[string]interface{})
 				b = append(b, fmt.Sprintf("    - group: %s", p["group"]))
 				b = append(b, fmt.Sprintf("      kind: %s", p["kind"]))
-				b = append(b, fmt.Sprintf("      name: %s", p["name"]))
+				pNS, _ := p["namespace"].(string)
+				pKind, _ := p["kind"].(string)
+				b = append(b, fmt.Sprintf("      name: %s", parentName(pKind, p["name"], pNS)))
 				if ns, ok := p["namespace"].(string); ok && ns != "" {
 					b = append(b, fmt.Sprintf("      namespace: %s", ns))
 				}
@@ -153,7 +187,7 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 					b = append(b, "      backendRefs:")
 					for _, brRaw := range backendRefsRaw {
 						br := brRaw.(map[string]interface{})
-						b = append(b, fmt.Sprintf("        - name: %s", br["name"]))
+						b = append(b, fmt.Sprintf("        - name: %s", h.refValue("Service", fmt.Sprint(br["name"]))))
 						if port, ok := br["port"]; ok {
 							b = append(b, fmt.Sprintf("          port: %v", port))
 						}
@@ -173,7 +207,7 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 		b = append(b, fmt.Sprintf("apiVersion: %s", apiVersion))
 		b = append(b, "kind: TLSRoute")
 		b = append(b, "metadata:")
-		b = append(b, fmt.Sprintf("  name: %s", tr["name"]))
+		b = append(b, fmt.Sprintf("  name: %s", h.objNameValue(fmt.Sprint(tr["name"]))))
 		b = append(b, "  namespace: {{ $.Release.Namespace }}")
 		b = append(b, "spec:")
 		spec := tr["spec"].(map[string]interface{})
@@ -184,7 +218,9 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 				p := pRaw.(map[string]interface{})
 				b = append(b, fmt.Sprintf("    - group: %s", p["group"]))
 				b = append(b, fmt.Sprintf("      kind: %s", p["kind"]))
-				b = append(b, fmt.Sprintf("      name: %s", p["name"]))
+				pNS, _ := p["namespace"].(string)
+				pKind, _ := p["kind"].(string)
+				b = append(b, fmt.Sprintf("      name: %s", parentName(pKind, p["name"], pNS)))
 				if ns, ok := p["namespace"].(string); ok && ns != "" {
 					b = append(b, fmt.Sprintf("      namespace: %s", ns))
 				}
@@ -208,7 +244,7 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 				if backendRefsRaw, ok := rule["backendRefs"].([]interface{}); ok {
 					for _, brRaw := range backendRefsRaw {
 						br := brRaw.(map[string]interface{})
-						b = append(b, fmt.Sprintf("        - name: %s", br["name"]))
+						b = append(b, fmt.Sprintf("        - name: %s", h.refValue("Service", fmt.Sprint(br["name"]))))
 						if port, ok := br["port"]; ok {
 							b = append(b, fmt.Sprintf("          port: %v", port))
 						}
@@ -224,7 +260,7 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 		b = append(b, "apiVersion: gateway.networking.k8s.io/v1beta1")
 		b = append(b, "kind: ReferenceGrant")
 		b = append(b, "metadata:")
-		b = append(b, fmt.Sprintf("  name: %s", rg["name"]))
+		b = append(b, fmt.Sprintf("  name: %s", h.objNameValue(fmt.Sprint(rg["name"]))))
 		b = append(b, "  namespace: {{ $.Release.Namespace }}")
 		b = append(b, "spec:")
 		if spec, ok := rg["spec"].(map[string]interface{}); ok {
@@ -243,7 +279,7 @@ func gatewayAPITemplate(rt *resourceTemplate, ingressName string, t ingressTrans
 					tg := tRaw.(map[string]interface{})
 					b = append(b, fmt.Sprintf("    - group: \"%s\"", tg["group"]))
 					b = append(b, fmt.Sprintf("      kind: %s", tg["kind"]))
-					b = append(b, fmt.Sprintf("      name: %s", tg["name"]))
+					b = append(b, fmt.Sprintf("      name: %s", h.refValue("Secret", fmt.Sprint(tg["name"]))))
 				}
 			}
 		}

@@ -15,12 +15,11 @@ type config struct {
 	props map[string]string
 	notes *Notes
 
-	// required are the variables left empty because their value needs a
-	// placeholder only the runtime can resolve; needs are those placeholders.
-	required []string
-	needs    map[string]bool
-	// handled are placeholders of credentials, which a Secret key carries.
-	handled map[string]bool
+	// fallback holds defaults for ${NAME} placeholders that have none of
+	// their own, from an environment template next to the sources.
+	// fallbackFrom names the files, for a note.
+	fallback     map[string]string
+	fallbackFrom string
 }
 
 // bareBrace matches "{NAME}" without the "$": a typo of a placeholder that
@@ -34,7 +33,7 @@ func (c *config) lookup(key string) (resolved, unresolved string, ok bool) {
 	if !ok {
 		return "", "", false
 	}
-	resolved, unresolved = ResolvePlaceholders(v)
+	resolved, unresolved = ResolvePlaceholdersWith(v, c.fallback)
 	if unresolved == "" {
 		if typo := bareBrace.FindAllString(resolved, -1); len(typo) > 0 {
 			unresolved = strings.Join(typo, ", ")
@@ -50,16 +49,8 @@ func (c *config) get(key string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	v := c.props[key]
 	if unresolved != "" {
-		c.notes.Addf("%s: %s = %s needs %s at runtime; set it in values", c.app.Name, key, v, unresolved)
-		// Already reported by name; the note on other placeholders skips it.
-		if c.handled == nil {
-			c.handled = map[string]bool{}
-		}
-		for _, n := range strings.Split(unresolved, ", ") {
-			c.handled[n] = true
-		}
+		c.notes.Addf("%s: %s = %s needs %s at runtime; set it in values", c.app.Name, key, c.props[key], unresolved)
 	}
 	return resolved, true
 }
@@ -87,28 +78,16 @@ func (c *config) port(key string, def int64) int64 {
 	return n
 }
 
-// env copies a property into an environment variable of the app.
-// A value that still needs a runtime placeholder is not copied partly
-// resolved: the variable is listed empty, as required, and counted in one
-// note (see flush).
+// env copies a property into an environment variable of the app. A value
+// that still needs a runtime placeholder is not copied, not even partly
+// resolved: an empty or half-built variable would override the property.
+// The placeholders themselves become variables (see flush).
 func (c *config) env(key string) {
 	v, unresolved, ok := c.lookup(key)
-	if !ok {
+	if !ok || unresolved != "" {
 		return
 	}
-	name := envName(key)
-	if unresolved == "" {
-		c.app.SetEnv(name, v)
-		return
-	}
-	c.app.SetEnv(name, "")
-	c.required = append(c.required, name)
-	if c.needs == nil {
-		c.needs = map[string]bool{}
-	}
-	for _, n := range strings.Split(unresolved, ", ") {
-		c.needs[n] = true
-	}
+	c.app.SetEnv(envName(key), v)
 }
 
 // maxListed caps the names a note lists.
@@ -128,56 +107,84 @@ func plural(n int, one, many string) string {
 	return fmt.Sprintf("%d %s", n, many)
 }
 
-// flush reports, in two notes, the variables left empty and the
-// placeholders of the configuration no variable of the chart carries.
+// flush turns every ${NAME} placeholder of the configuration that has no
+// default of its own into a variable of the app: with the value of the
+// environment template when there is one (never for a credential), else
+// empty. The empty ones are required and listed in one note. A variable
+// that already exists is kept.
 func (c *config) flush() {
-	if len(c.required) > 0 {
-		needs := make([]string, 0, len(c.needs))
-		for n := range c.needs {
-			needs = append(needs, n)
-		}
-		sort.Strings(needs)
-		verb := "are"
-		if len(c.required) == 1 {
-			verb = "is"
-		}
-		c.notes.Addf("%s: %s %s empty and required (%s): the value needs %s at runtime; set it in values",
-			c.app.Name, plural(len(c.required), "environment variable", "environment variables"), verb, listed(c.required), listed(needs))
-	}
-	var other []string
 	seen := map[string]bool{}
-	for _, v := range c.props {
-		_, unresolved := ResolvePlaceholders(v)
-		if unresolved == "" {
+	var names []string
+	var typos []string
+	keys := make([]string, 0, len(c.props))
+	for k := range c.props {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := c.props[k]
+		for _, n := range Placeholders(v) {
+			if !seen[n] {
+				seen[n] = true
+				names = append(names, n)
+			}
+		}
+		if resolved, _ := ResolvePlaceholders(v); bareBrace.MatchString(resolved) {
+			typos = append(typos, k+" ("+strings.Join(bareBrace.FindAllString(resolved, -1), ", ")+")")
+		}
+	}
+	sort.Strings(names)
+
+	var empty, secrets []string
+	fromTemplate := 0
+	for _, n := range names {
+		if c.app.hasEnv(n) {
 			continue
 		}
-		for _, n := range strings.Split(unresolved, ", ") {
-			if !c.needs[n] && !c.handled[n] && !seen[n] {
-				seen[n] = true
-				other = append(other, n)
+		value := ""
+		if fb, ok := c.fallback[n]; ok {
+			value = fb
+			fromTemplate++
+		}
+		c.app.SetEnv(n, value)
+		if value == "" {
+			empty = append(empty, n)
+			if c.app.secrets.Match(n) {
+				secrets = append(secrets, n)
 			}
 		}
 	}
-	if len(other) > 0 {
-		sort.Strings(other)
-		c.notes.Addf("%s: %s without a default in the configuration, not mapped to the chart: %s; add the ones the app needs to values", c.app.Name, plural(len(other), "other environment variable", "other environment variables"), listed(other))
+	if len(empty) > 0 {
+		verb := "are"
+		if len(empty) == 1 {
+			verb = "is"
+		}
+		extra := ""
+		if len(secrets) > 0 {
+			extra = fmt.Sprintf(" (in Secret %s-env: %s)", c.app.Name, listed(secrets))
+		}
+		c.notes.Addf("%s: %s %s empty and required (%s): the configuration has no default for them%s; set them in values",
+			c.app.Name, plural(len(empty), "environment variable", "environment variables"), verb, listed(empty), extra)
+	}
+	if fromTemplate > 0 {
+		verb := "take"
+		if fromTemplate == 1 {
+			verb = "takes"
+		}
+		c.notes.Addf("%s: %s %s the value from %s; check it for the target environment", c.app.Name, plural(fromTemplate, "environment variable", "environment variables"), verb, c.fallbackFrom)
+	}
+	if len(typos) > 0 {
+		c.notes.Addf("%s: {NAME} without $ (a typo for ${NAME}?) in %s, so the value is not copied: %s", c.app.Name, plural(len(typos), "property", "properties"), listed(typos))
 	}
 }
 
 // secret adds an empty Secret key for a credential the configuration sets:
-// the value itself never goes into the chart.
+// the value itself never goes into the chart. A credential that only a
+// placeholder sets is the placeholder's variable (see flush).
 func (c *config) secret(key string) {
-	if v, ok := c.props[key]; ok {
+	if _, unresolved, ok := c.lookup(key); ok && unresolved == "" {
 		name := envName(key)
 		c.app.SetEnv(name, "")
-		// The credential is a Secret key already; its placeholders are not "other".
-		_, unresolved := ResolvePlaceholders(v)
-		for _, n := range strings.Split(unresolved, ", ") {
-			if c.handled == nil {
-				c.handled = map[string]bool{}
-			}
-			c.handled[n] = true
-		}
 		c.notes.Addf("%s: %s is empty in Secret %s-env; set it (or use --with external-secrets)", c.app.Name, name, c.app.Name)
 	}
 }

@@ -271,8 +271,8 @@ func TestWrapperChart_Values_EnabledAndFlatPaths(t *testing.T) {
 	if values["enabled"] != true {
 		t.Errorf("wrapper values enabled = %v, want true", values["enabled"])
 	}
-	if g, ok := values["global"].(map[string]interface{}); !ok || len(g) != 0 {
-		t.Errorf("wrapper values global = %v, want empty map", values["global"])
+	if g, ok := values["global"].(map[string]interface{}); !ok || len(g) != 1 || g["namePrefix"] != "" {
+		t.Errorf("wrapper values global = %v, want only an empty namePrefix", values["global"])
 	}
 	if _, ok := values["services"]; ok {
 		t.Error("wrapper values should not be nested under services")

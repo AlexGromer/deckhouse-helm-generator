@@ -135,9 +135,19 @@ func TestLibraryGenerator_Helpers_SharedDefines(t *testing.T) {
 		}
 	}
 
-	// The helpers are the standard generated ones, named after the library.
-	if libChart.Helpers != helm.GenerateHelpers("library") {
-		t.Error("library helpers differ from helm.GenerateHelpers(\"library\")")
+	// The helpers are the generated library ones, named after the library;
+	// they do not know the objects of the chart: the service charts do.
+	if want := helm.GenerateLibraryHelpers("library"); libChart.Helpers != want {
+		t.Error("library helpers differ from helm.GenerateLibraryHelpers(\"library\")")
+	}
+	for _, wrapper := range charts {
+		if wrapper == libChart {
+			continue
+		}
+		in, _ := externalFile(wrapper, inChartTemplatePath)
+		if !strings.Contains(in, `define "`+wrapper.Name+`.inChart"`) || !strings.Contains(in, "Deployment:") {
+			t.Errorf("service chart %s does not define its own object names in %s:\n%s", wrapper.Name, inChartTemplatePath, in)
+		}
 	}
 }
 

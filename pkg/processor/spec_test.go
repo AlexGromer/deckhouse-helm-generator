@@ -9,14 +9,14 @@ import (
 // custom-resources); these tests pin the template it produces.
 
 func TestSpecOverlay_RendersWholeSpecWithOverrides(t *testing.T) {
-	got := SpecOverlay("$svc.moduleConfig", "enabled", "settings")
+	got := SpecOverlay("app", "$svc.moduleConfig", "enabled", "settings")
 	want := `{{- $dhgValues := $svc.moduleConfig }}
 {{- $dhgSpec := deepCopy ($dhgValues.spec | default dict) }}
 {{- range $k := list "enabled" "settings" }}
 {{- if hasKey $dhgValues $k }}{{- $_ := set $dhgSpec $k (index $dhgValues $k) }}{{- end }}
 {{- end }}
 spec:
-  {{- toYaml $dhgSpec | nindent 2 }}
+  {{- include "app.refs" (list $ $dhgSpec) | nindent 2 }}
 `
 	if got != want {
 		t.Errorf("SpecOverlay:\n%s\nwant:\n%s", got, want)

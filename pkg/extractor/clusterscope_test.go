@@ -320,8 +320,16 @@ func TestClusterExtractor_Extract_FinishedJobNote(t *testing.T) {
 	if !errors.As(errs[0], &note) {
 		t.Fatalf("not a NoteError: %T", errs[0])
 	}
-	want := "Job migrate has already finished (succeeded); it is kept in the chart and will run again on install. Consider a Helm hook or excluding it"
+	want := "Job migrate has already finished (succeeded); it is rendered as a Helm hook (job values hook.enabled, default true; set hook.enabled=false to run it as a regular Job, enabled=false to drop it)"
 	if note.Msg != want {
 		t.Errorf("note = %q", note.Msg)
+	}
+	// The finished state travels with the resource to the processor.
+	states := map[string]string{}
+	for _, r := range resources {
+		states[r.Object.GetName()] = r.FinishedState
+	}
+	if states["migrate"] != "succeeded" || states["worker"] != "" {
+		t.Errorf("FinishedState by Job = %v; want migrate=succeeded, worker empty", states)
 	}
 }

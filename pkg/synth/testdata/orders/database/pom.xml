@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.example.shop</groupId>
+    <artifactId>orders-parent</artifactId>
+    <version>1.4.0</version>
+  </parent>
+  <artifactId>orders-database</artifactId>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.liquibase</groupId>
+        <artifactId>liquibase-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

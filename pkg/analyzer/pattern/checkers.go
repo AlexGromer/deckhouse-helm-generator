@@ -44,7 +44,7 @@ func (c *ResourceLimitsChecker) Check(graph *types.ResourceGraph) []BestPractice
 			continue
 		}
 
-		containerList, ok := containers.([]map[string]interface{})
+		containerList, ok := containersOf(resource.Values, "containers")
 		if !ok {
 			continue
 		}
@@ -168,12 +168,12 @@ func (c *SecurityChecker) Check(graph *types.ResourceGraph) []BestPractice {
 		// Check securityContext
 		containers := resource.Values["containers"]
 		if containers == nil {
-			runAsNonRoot = append(runAsNonRoot, key)
-			readOnlyRootFS = append(readOnlyRootFS, key)
+			runAsNonRoot = appendOnce(runAsNonRoot, key)
+			readOnlyRootFS = appendOnce(readOnlyRootFS, key)
 			continue
 		}
 
-		containerList, ok := containers.([]map[string]interface{})
+		containerList, ok := containersOf(resource.Values, "containers")
 		if !ok {
 			continue
 		}
@@ -181,24 +181,24 @@ func (c *SecurityChecker) Check(graph *types.ResourceGraph) []BestPractice {
 		for _, container := range containerList {
 			secCtx, ok := container["securityContext"].(map[string]interface{})
 			if !ok {
-				runAsNonRoot = append(runAsNonRoot, key)
-				readOnlyRootFS = append(readOnlyRootFS, key)
+				runAsNonRoot = appendOnce(runAsNonRoot, key)
+				readOnlyRootFS = appendOnce(readOnlyRootFS, key)
 				continue
 			}
 
 			// Check runAsNonRoot
 			if runAsNonRootVal, ok := secCtx["runAsNonRoot"].(bool); !ok || !runAsNonRootVal {
-				runAsNonRoot = append(runAsNonRoot, key)
+				runAsNonRoot = appendOnce(runAsNonRoot, key)
 			}
 
 			// Check readOnlyRootFilesystem
 			if readOnlyVal, ok := secCtx["readOnlyRootFilesystem"].(bool); !ok || !readOnlyVal {
-				readOnlyRootFS = append(readOnlyRootFS, key)
+				readOnlyRootFS = appendOnce(readOnlyRootFS, key)
 			}
 
 			// Check for privileged containers
 			if privilegedVal, ok := secCtx["privileged"].(bool); ok && privilegedVal {
-				privilegedContainers = append(privilegedContainers, key)
+				privilegedContainers = appendOnce(privilegedContainers, key)
 			}
 		}
 	}
@@ -304,7 +304,7 @@ func (c *HighAvailabilityChecker) Check(graph *types.ResourceGraph) []BestPracti
 		// Check health probes
 		containers := resource.Values["containers"]
 		if containers != nil {
-			if containerList, ok := containers.([]map[string]interface{}); ok {
+			if containerList, ok := containersOf(resource.Values, "containers"); ok {
 				hasProbes := false
 				for _, container := range containerList {
 					if _, ok := container["livenessProbe"]; ok {
@@ -487,7 +487,7 @@ func (c *QoSClassChecker) Check(graph *types.ResourceGraph) []BestPractice {
 			continue
 		}
 
-		containerList, ok := containers.([]map[string]interface{})
+		containerList, ok := containersOf(resource.Values, "containers")
 		if !ok {
 			continue
 		}
@@ -682,7 +682,7 @@ func (c *DaemonSetPatternChecker) Check(graph *types.ResourceGraph) []BestPracti
 		containers, ok := resource.Values["containers"]
 		if !ok || containers == nil {
 			missingItems = append(missingItems, "resource limits not set (DaemonSet runs on every node!)")
-		} else if containerList, ok := containers.([]map[string]interface{}); ok {
+		} else if containerList, ok := containersOf(resource.Values, "containers"); ok {
 			hasLimits := false
 			for _, container := range containerList {
 				if resourcesRaw, ok := container["resources"]; ok {
@@ -764,7 +764,7 @@ func (c *GracefulShutdownChecker) Check(graph *types.ResourceGraph) []BestPracti
 		// Check preStop hooks in containers
 		containers, ok := resource.Values["containers"]
 		if ok && containers != nil {
-			if containerList, ok := containers.([]map[string]interface{}); ok {
+			if containerList, ok := containersOf(resource.Values, "containers"); ok {
 				for _, container := range containerList {
 					if lifecycle, ok := container["lifecycle"].(map[string]interface{}); ok {
 						if _, ok := lifecycle["preStop"]; ok {
@@ -891,7 +891,7 @@ func (c *PodSecurityStandardsChecker) classifyPSSLevel(resource *types.Processed
 		return pssBaseline
 	}
 
-	containerList, ok := containers.([]map[string]interface{})
+	containerList, ok := containersOf(resource.Values, "containers")
 	if !ok {
 		return pssBaseline
 	}

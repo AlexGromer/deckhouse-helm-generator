@@ -117,11 +117,13 @@ server:
 		env["SPRING_KAFKA_BOOTSTRAP_SERVERS"] != "kafka:9092" || !strings.Contains(env["SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI"], "realms/shop") {
 		t.Errorf("env = %v", env)
 	}
-	if len(app.SecretEnv) != 1 || app.SecretEnv[0].Name != "SPRING_DATASOURCE_PASSWORD" || app.SecretEnv[0].Value != "" {
+	// The password is a placeholder: its variable is the Secret key, and a
+	// derived SPRING_DATASOURCE_PASSWORD would override it with an empty value.
+	if len(app.SecretEnv) != 1 || app.SecretEnv[0].Name != "DB_PASSWORD" || app.SecretEnv[0].Value != "" {
 		t.Errorf("secret env = %v (the password must never be copied)", app.SecretEnv)
 	}
 	all := strings.Join(notes.Items(), "\n")
-	for _, want := range []string{"SPRING_DATASOURCE_PASSWORD is empty", "Keycloak"} {
+	for _, want := range []string{"DB_PASSWORD", "Secret orders-env", "Keycloak"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("notes lack %q:\n%s", want, all)
 		}
@@ -203,7 +205,7 @@ func TestFromSourceDockerfileAndSpringDetails(t *testing.T) {
 		t.Errorf("liveness = %+v volumes = %+v", app.Liveness, app.Volumes)
 	}
 	all := strings.Join(notes.Items(), "\n")
-	for _, want := range []string{"EXPOSE ${APP_PORT}", "volume /cache", "needs DB_HOST at runtime", "1 environment variable is empty and required (SPRING_DATASOURCE_URL)"} {
+	for _, want := range []string{"EXPOSE ${APP_PORT}", "volume /cache", "2 environment variables are empty and required (DB_HOST, NAME)"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("notes lack %q:\n%s", want, all)
 		}
@@ -243,5 +245,25 @@ func TestDetectProjectErrors(t *testing.T) {
 	p, err := DetectProject(dir, &Notes{})
 	if err != nil || p.Version != "" || p.Name != filepath.Base(dir) {
 		t.Errorf("gradle without settings: %+v %v", p, err)
+	}
+}
+
+// A literal credential in the sources is never copied: its Secret key is
+// empty and a note says so.
+func TestLiteralPasswordIsNeverCopied(t *testing.T) {
+	dir := writeFiles(t, map[string]string{
+		"pom.xml":                            pom,
+		"src/main/resources/application.yml": "spring:\n  datasource:\n    password: hunter2\n",
+	})
+	var notes Notes
+	app, err := FromSource(dir, "x:1", &notes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(app.SecretEnv) != 1 || app.SecretEnv[0].Name != "SPRING_DATASOURCE_PASSWORD" || app.SecretEnv[0].Value != "" {
+		t.Errorf("secret env = %v", app.SecretEnv)
+	}
+	if all := strings.Join(notes.Items(), "\n"); strings.Contains(all, "hunter2") || !strings.Contains(all, "SPRING_DATASOURCE_PASSWORD is empty") {
+		t.Errorf("notes: %s", all)
 	}
 }

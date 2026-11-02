@@ -55,6 +55,9 @@ func workloadPDBTemplate(chartName string, wl *resourceTemplate, nameSuffix, con
 // template: a plain or templated name gets the suffix appended, a quoted
 // name is re-quoted with it.
 func suffixedName(name, suffix string) string {
+	if strings.HasPrefix(name, `"{{`) && strings.HasSuffix(name, `}}"`) {
+		return name[:len(name)-1] + suffix + `"` // a quoted action (processor.ObjName)
+	}
 	if strings.HasPrefix(name, `"`) {
 		if s, err := strconv.Unquote(name); err == nil {
 			return strconv.Quote(s + suffix)
@@ -114,7 +117,8 @@ func templateSelector(rt *resourceTemplate, values map[string]interface{}) (map[
 		return nil, false
 	}
 	text := strings.TrimSpace(strings.Join(sel[1:], "\n"))
-	if strings.HasPrefix(text, "{{- toYaml .selector |") || strings.HasPrefix(text, "{{- toYaml . |") {
+	if strings.HasPrefix(text, "{{- toYaml .selector |") || strings.HasPrefix(text, "{{- toYaml . |") ||
+		strings.HasPrefix(text, "{{- toYaml (merge (dict) (deepCopy .selector)") || strings.HasPrefix(text, "{{- toYaml (merge (dict) (deepCopy .)") {
 		scope, ok := templateScope(rt.prefix, values)
 		if !ok {
 			return nil, false

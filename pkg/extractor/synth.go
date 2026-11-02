@@ -24,11 +24,38 @@ func (s *synthesized) Inputs() []string { return append([]string(nil), s.inputs.
 // Variants implements Varianter.
 func (s *synthesized) Variants() map[string][]*types.ExtractedResource { return s.variants }
 
-// appResources builds the manifests of apps, honouring the kind filters.
+// withSynthProfile loads opts.SynthProfile, if set, and notes it as an input.
+func (s *synthesized) withSynthProfile(opts Options) (Options, error) {
+	if opts.SynthProfile == "" {
+		return opts, nil
+	}
+	prof, err := synth.LoadProfile(opts.SynthProfile)
+	if err != nil {
+		return opts, err
+	}
+	opts.profile = prof
+	s.inputs = append(s.inputs, "platform profile `"+opts.SynthProfile+"`")
+	return opts, nil
+}
+
+// validateSynthProfile fails early on a profile that cannot be read.
+func validateSynthProfile(opts Options) error {
+	if opts.SynthProfile == "" {
+		return nil
+	}
+	_, err := synth.LoadProfile(opts.SynthProfile)
+	return err
+}
+
+// appResources builds the manifests of apps, honouring the kind filters and
+// the platform profile of opts.
 func appResources(source types.Source, sourcePath string, apps []synth.App, opts Options) ([]*types.ExtractedResource, error) {
 	var out []*types.ExtractedResource
 	seen := map[string]string{}
 	for _, app := range apps {
+		if err := synth.ApplyProfile(&app, opts.profile); err != nil {
+			return nil, fmt.Errorf("%s: %w", app.Name, err)
+		}
 		for _, obj := range synth.Manifests(app) {
 			key := obj.GetKind() + "/" + obj.GetName()
 			if other, dup := seen[key]; dup {

@@ -49,6 +49,32 @@ type App struct {
 	Resources *Resources
 	// Labels are extra pod labels.
 	Labels map[string]string
+
+	// InitContainers, EnvFromExtra, PodLabels, PodAnnotations,
+	// DeploymentLabels, ExtraVolumes, ExtraMounts and Jobs come from a
+	// platform profile (see ApplyProfile). EnvFromExtra comes before the
+	// app's own ConfigMap and Secret in envFrom; ExtraMounts go to the
+	// application container.
+	InitContainers   []map[string]interface{}
+	EnvFromExtra     []EnvFromRef
+	PodLabels        map[string]string
+	PodAnnotations   map[string]string
+	DeploymentLabels map[string]string
+	ExtraVolumes     []map[string]interface{}
+	ExtraMounts      []map[string]interface{}
+	Jobs             []Job
+	// ContainerPatch and PodPatch are merged into the application container
+	// and the pod spec (maps key by key, the patch winning).
+	ContainerPatch map[string]interface{}
+	PodPatch       map[string]interface{}
+
+	// Migrations lists the database migration tools ("liquibase", "flyway")
+	// found in modules next to the application.
+	Migrations []string
+
+	// secrets decides which variables go to the Secret; nil is the built-in
+	// heuristic.
+	secrets *SecretRules
 }
 
 // Port is a container port.
@@ -89,15 +115,18 @@ type Volume struct {
 	ReadOnly bool
 }
 
-// Probe is an HTTP GET or exec probe.
+// Probe is an HTTP GET, TCP socket or exec probe.
 type Probe struct {
 	HTTPPath string
 	Port     int64
 	Exec     []string
+	// TCP probes Port with a socket connection instead of an HTTP GET.
+	TCP bool
 
 	PeriodSeconds       int64
 	TimeoutSeconds      int64
 	FailureThreshold    int64
+	SuccessThreshold    int64
 	InitialDelaySeconds int64
 }
 
@@ -126,9 +155,8 @@ func (n *Notes) Items() []string {
 }
 
 var (
-	nonDNS        = regexp.MustCompile(`[^a-z0-9-]+`)
-	repeatedDash  = regexp.MustCompile(`-+`)
-	sensitiveName = regexp.MustCompile(`(?i)(PASSWORD|PASSWD|SECRET|TOKEN|PRIVATE_?KEY|API_?KEY|ACCESS_?KEY|CREDENTIAL)`)
+	nonDNS       = regexp.MustCompile(`[^a-z0-9-]+`)
+	repeatedDash = regexp.MustCompile(`-+`)
 )
 
 // DNSName turns s into a DNS-1123 label: lower case, [a-z0-9-], at most 63
@@ -148,9 +176,10 @@ func DNSName(s string) string {
 }
 
 // IsSensitive reports whether an environment variable name suggests a
-// secret value (password, token, key, credential).
+// secret value (password, token, key, credential) by the built-in heuristic;
+// see SecretRules.
 func IsSensitive(name string) bool {
-	return sensitiveName.MatchString(name)
+	return builtinSensitive(name)
 }
 
 // AddPort adds a port unless the same number and protocol is already
@@ -196,7 +225,7 @@ func (a *App) hasPortName(name string) bool {
 func (a *App) SetEnv(name, value string) {
 	target := &a.Env
 	other := &a.SecretEnv
-	if IsSensitive(name) {
+	if a.secrets.Match(name) {
 		target, other = other, target
 	}
 	*other = removeEnv(*other, name)
@@ -207,6 +236,18 @@ func (a *App) SetEnv(name, value string) {
 		}
 	}
 	*target = append(*target, EnvVar{Name: name, Value: value})
+}
+
+// hasEnv reports whether a variable of that name is set, plain or secret.
+func (a *App) hasEnv(name string) bool {
+	for _, list := range [][]EnvVar{a.Env, a.SecretEnv} {
+		for _, e := range list {
+			if e.Name == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func removeEnv(env []EnvVar, name string) []EnvVar {

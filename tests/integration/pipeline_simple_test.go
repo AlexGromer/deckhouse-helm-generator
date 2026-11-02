@@ -508,27 +508,32 @@ data:
 	containersVal, hasContainers := findNestedKey(webapp, "containers")
 	if !hasContainers {
 		t.Error("containers not found in values")
-	} else if containers, ok := containersVal.([]interface{}); ok && len(containers) > 0 {
-		container, ok := containers[0].(map[string]interface{})
-		if !ok {
-			t.Error("container should be a map")
-		} else {
+	} else if containers, ok := containersVal.(map[string]interface{}); !ok || len(containers) == 0 {
+		t.Errorf("containers should be a non-empty map by container name, got %T", containersVal)
+	} else {
+		for name, c := range containers {
+			container, ok := c.(map[string]interface{})
+			if !ok {
+				t.Errorf("container %s should be a map", name)
+				continue
+			}
 			imageVal, ok := container["image"].(map[string]interface{})
 			if !ok {
-				t.Error("container.image should be a map")
-			} else {
-				if _, ok := imageVal["repository"]; !ok {
-					t.Error("container.image.repository missing")
-				}
-				if _, ok := imageVal["tag"]; !ok {
-					t.Error("container.image.tag missing")
-				}
+				t.Errorf("container %s: image should be a map", name)
+				continue
+			}
+			if _, ok := imageVal["repository"]; !ok {
+				t.Errorf("container %s: image.repository missing", name)
+			}
+			if _, ok := imageVal["tag"]; !ok {
+				t.Errorf("container %s: image.tag missing", name)
 			}
 		}
 	}
 
 	// ── Port is numeric ──
-	portsVal, hasPorts := findNestedKey(webapp, "ports")
+	svc, _ := webapp["service"].(map[string]interface{})
+	portsVal, hasPorts := findNestedKey(svc, "ports")
 	if !hasPorts {
 		t.Error("ports not found in values")
 	} else if ports, ok := portsVal.([]interface{}); ok && len(ports) > 0 {

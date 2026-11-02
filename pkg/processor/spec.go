@@ -15,10 +15,13 @@ import (
 // keys still win when set. It uses set rather than mergeOverwrite, which
 // would ignore overrides holding zero values such as false or 0.
 //
+// References in the spec to objects of the chart (scaleTargetRef, backendRefs,
+// secret names, ...) get global.namePrefix, see <chart>.refs.
+//
 // dot is the template expression holding the values map, e.g. "." inside a
 // with block or "$svc.moduleConfig".
-func SpecOverlay(dot string, keys ...string) string {
-	return SpecOverlayVars(dot, keys...) + "spec:\n  {{- toYaml $dhgSpec | nindent 2 }}\n"
+func SpecOverlay(chartName, dot string, keys ...string) string {
+	return SpecOverlayVars(dot, keys...) + "spec:\n  {{- include \"" + chartName + ".refs\" (list $ $dhgSpec) | nindent 2 }}\n"
 }
 
 // SpecOverlayVars returns the part of SpecOverlay that builds $dhgSpec

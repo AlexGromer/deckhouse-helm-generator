@@ -85,8 +85,8 @@ func groupWorkloads(group *ServiceGroup) []quotaWorkload {
 		w := quotaWorkload{
 			kind:           kind,
 			name:           name,
-			containers:     containerSpecs(r.Values["containers"]),
-			initContainers: containerSpecs(r.Values["initContainers"]),
+			containers:     containerSpecs(r.Values, "containers", "containerOrder"),
+			initContainers: containerSpecs(r.Values, "initContainers", "initContainerOrder"),
 		}
 		if len(w.containers) == 0 {
 			continue
@@ -222,17 +222,28 @@ func deploymentSurge(values map[string]interface{}, replicas int64) int64 {
 	return int64(n)
 }
 
-// containerSpecs reads the containers stored in values (a slice of maps).
-func containerSpecs(raw interface{}) []containerSpec {
-	var list []map[string]interface{}
-	switch v := raw.(type) {
-	case []map[string]interface{}:
-		list = v
-	case []interface{}:
-		for _, item := range v {
-			if m, ok := item.(map[string]interface{}); ok {
-				list = append(list, m)
+// containerSpecs reads the containers stored in values under key
+// ("containers" or "initContainers"): a map by name, in the order of the list
+// under orderKey (the names sorted when it is missing).
+func containerSpecs(values map[string]interface{}, key, orderKey string) []containerSpec {
+	byName, _ := values[key].(map[string]interface{})
+	var names []string
+	if order, ok := values[orderKey].([]interface{}); ok {
+		for _, n := range order {
+			if name, ok := n.(string); ok {
+				names = append(names, name)
 			}
+		}
+	} else {
+		for name := range byName {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+	}
+	var list []map[string]interface{}
+	for _, name := range names {
+		if c, ok := byName[name].(map[string]interface{}); ok {
+			list = append(list, c)
 		}
 	}
 	out := make([]containerSpec, 0, len(list))

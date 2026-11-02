@@ -232,7 +232,11 @@ func generateGenericTemplate(ctx Context, obj *unstructured.Unstructured, servic
 	// The name from the input, verbatim: other objects refer to it, and some
 	// kinds (CRD: <plural>.<group>, APIService: <version>.<group>) are only
 	// accepted under the name dictated by their content.
-	b.WriteString("  name: " + ObjectName(name) + "\n")
+	if Prefixable(kind) {
+		b.WriteString("  name: " + ObjName(ctx.ChartName, name) + "\n")
+	} else {
+		b.WriteString("  name: " + ObjectName(name) + "\n")
+	}
 	if namespace != "" {
 		b.WriteString("  namespace: {{ .Release.Namespace }}\n")
 	}
@@ -284,6 +288,11 @@ func generateGenericTemplate(ctx Context, obj *unstructured.Unstructured, servic
 			}
 			values[key] = runtime.DeepCopyJSONValue(obj.Object[field])
 			b.WriteString(field + ":\n")
+			if field == "webhooks" && strings.HasSuffix(kind, "WebhookConfiguration") {
+				// The services the webhooks call may be in the chart.
+				b.WriteString("  {{- include \"" + ctx.ChartName + ".refs\" (list $ " + ref + ") | nindent 2 }}\n")
+				continue
+			}
 			b.WriteString("  {{- toYaml " + ref + " | nindent 2 }}\n")
 		}
 	}

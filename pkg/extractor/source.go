@@ -40,6 +40,9 @@ func (e *SourceExtractor) Validate(_ context.Context, opts Options) error {
 	if len(opts.Images) > 0 && len(opts.Images) != len(opts.Paths) {
 		return fmt.Errorf("give one --image per project directory (%d directories, %d images)", len(opts.Paths), len(opts.Images))
 	}
+	if err := validateSynthProfile(opts); err != nil {
+		return err
+	}
 	for _, p := range opts.Paths {
 		info, err := os.Stat(p)
 		if err != nil {
@@ -54,6 +57,10 @@ func (e *SourceExtractor) Validate(_ context.Context, opts Options) error {
 
 // Extract implements Extractor.
 func (e *SourceExtractor) Extract(ctx context.Context, opts Options) (<-chan *types.ExtractedResource, <-chan error) {
+	opts, err := e.withSynthProfile(opts)
+	if err != nil {
+		return failed(err)
+	}
 	var client *registry.Client
 	var creds *registry.DockerCredentials
 	if opts.ImageConfig {
@@ -66,7 +73,7 @@ func (e *SourceExtractor) Extract(ctx context.Context, opts Options) (<-chan *ty
 		if i < len(opts.Images) {
 			images[i] = opts.Images[i]
 		}
-		s, err := synth.ReadSource(dir, &e.notes)
+		s, err := synth.ReadSourceWith(dir, &e.notes, opts.profile)
 		if err != nil {
 			return failed(err)
 		}

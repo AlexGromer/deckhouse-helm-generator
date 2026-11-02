@@ -111,6 +111,9 @@ var (
 	reFullname  = regexp.MustCompile(`include "([^"]+)\.fullname"`)
 	reDefFullnm = regexp.MustCompile(`define "([^"]+)\.fullname"`)
 	reIncludeNm = regexp.MustCompile(`^\{\{ include "([^"]+)" \$ \}\}([A-Za-z0-9.-]*)$`)
+	// reObjNm is processor.ObjName: the name with global.namePrefix, quoted
+	// when YAML would read the plain name as another type.
+	reObjNm     = regexp.MustCompile(`^"?\{\{ include "([^"]+\.objname)" \(list \$ ("[^"]*")\) \}\}([A-Za-z0-9.-]*)"?$`)
 	reLiteralNm = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`)
 )
 
@@ -565,6 +568,11 @@ func nameExpressions(templates []*resourceTemplate) []string {
 		var expr string
 		if m := reIncludeNm.FindStringSubmatch(rt.name); m != nil {
 			expr = fmt.Sprintf(`(printf "%%s%s" (include %q $))`, m[2], m[1])
+		} else if m := reObjNm.FindStringSubmatch(rt.name); m != nil {
+			expr = fmt.Sprintf(`(include %q (list $ %s))`, m[1], m[2])
+			if m[3] != "" {
+				expr = fmt.Sprintf(`(printf "%%s%s" %s)`, m[3], expr)
+			}
 		} else if reLiteralNm.MatchString(rt.name) {
 			expr = strconv.Quote(rt.name)
 		} else if name, err := strconv.Unquote(rt.name); err == nil && strings.HasPrefix(rt.name, `"`) {

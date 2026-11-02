@@ -391,9 +391,18 @@ func TestNameExpressions(t *testing.T) {
 		{name: `{{ .Values.weird }}`},
 		{name: `{{ include "app.fullname" $ }}-web`},
 		{name: `"123"`},
+		// processor.ObjName, plain and quoted, with and without a suffix.
+		{name: `{{ include "app.objname" (list $ "db") }}`},
+		{name: `"{{ include "app.objname" (list $ "true") }}"`},
+		{name: `{{ include "app.objname" (list $ "api") }}-v2`},
 	}
 	got := nameExpressions(templates)
-	want := []string{`(printf "%s-web" (include "app.fullname" $))`, `"literal-name"`, `"123"`}
+	want := []string{
+		`(printf "%s-web" (include "app.fullname" $))`, `"literal-name"`, `"123"`,
+		`(include "app.objname" (list $ "db"))`,
+		`(include "app.objname" (list $ "true"))`,
+		`(printf "%s-v2" (include "app.objname" (list $ "api")))`,
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("nameExpressions = %q, want %q", got, want)
 	}

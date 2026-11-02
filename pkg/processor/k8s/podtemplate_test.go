@@ -26,23 +26,25 @@ func TestPodTemplateParses(t *testing.T) {
 			got := podTemplate(tt.chartName, tt.indent, tt.restartPolicy, tt.workloadKey)
 
 			tmpl := template.New("test").Option("missingkey=error").Funcs(template.FuncMap{
-				"nindent":  func() string { return "" },
-				"include":  func() string { return "" },
-				"fromYaml": func() string { return "" },
-				"merge":    func() string { return "" },
-				"dict":     func() string { return "" },
-				"default":  func() string { return "" },
-				"concat":   func() string { return "" },
-				"list":     func() string { return "" },
-				"toYaml":   func() string { return "" },
-				"quote":    func() string { return "" },
-				"tpl":      func() string { return "" },
-				"kindIs":   func() string { return "" },
-				"get":      func() string { return "" },
-				"set":      func() string { return "" },
-				"deepCopy": func() string { return "" },
-				"hasKey":   func() string { return "" },
-				"int64":    func() string { return "" },
+				"nindent":   func() string { return "" },
+				"include":   func() string { return "" },
+				"fromYaml":  func() string { return "" },
+				"merge":     func() string { return "" },
+				"dict":      func() string { return "" },
+				"default":   func() string { return "" },
+				"concat":    func() string { return "" },
+				"list":      func() string { return "" },
+				"toYaml":    func() string { return "" },
+				"quote":     func() string { return "" },
+				"tpl":       func() string { return "" },
+				"kindIs":    func() string { return "" },
+				"get":       func() string { return "" },
+				"set":       func() string { return "" },
+				"deepCopy":  func() string { return "" },
+				"hasKey":    func() string { return "" },
+				"int64":     func() string { return "" },
+				"keys":      func() string { return "" },
+				"sortAlpha": func() string { return "" },
 			})
 
 			_, err := tmpl.Parse(got)
@@ -62,7 +64,7 @@ func TestPodTemplateInjectionKey(t *testing.T) {
 }
 
 func TestContainerTemplateConcat(t *testing.T) {
-	got := containerTemplate(6)
+	got := containerTemplate("app", 6)
 
 	checks := []string{
 		`concat (.env | default list) ($dhgInj.env | default list)`,
@@ -213,7 +215,7 @@ func TestPodTemplateSecurityContextDefaults(t *testing.T) {
 		t.Errorf("podTemplate missing merge with global.securityContextDefaults.pod. Got:\n%s", podTmpl)
 	}
 
-	containerTmpl := containerTemplate(6)
+	containerTmpl := containerTemplate("app", 6)
 	if !strings.Contains(containerTmpl, "securityContextDefaults).container") {
 		t.Errorf("containerTemplate missing merge with global.securityContextDefaults.container. Got:\n%s", containerTmpl)
 	}

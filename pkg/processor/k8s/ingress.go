@@ -261,7 +261,7 @@ metadata:
   {{- end }}
 spec:
   {{- with .className }}
-  ingressClassName: {{ . }}
+  ingressClassName: {{ include "%[7]s.ref" (list $ "IngressClass" .) }}
   {{- end }}
   {{- if .tls }}
   tls:
@@ -270,12 +270,12 @@ spec:
         {{- range .hosts }}
         - {{ . | quote }}
         {{- end }}
-      secretName: {{ .secretName }}
+      secretName: {{ include "%[3]s.ref" (list $ "Secret" .secretName) }}
     {{- end }}
   {{- end }}
   {{- with .defaultBackend }}
   defaultBackend:
-%s  {{- end }}
+%[5]s  {{- end }}
   {{- with .rules }}
   rules:
     {{- range . }}
@@ -286,15 +286,15 @@ spec:
           - path: {{ .path }}
             pathType: {{ .pathType | default "Prefix" }}
             backend:
-%s          {{- end }}
+%[6]s          {{- end }}
     {{- end }}
   {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(obj.GetName()),
+`, serviceName, processor.ObjName(ctx.ChartName, obj.GetName()),
 		ctx.ChartName, serviceName,
-		ingressBackendTemplate(4), ingressBackendTemplate(14))
+		ingressBackendTemplate(ctx.ChartName, 4), ingressBackendTemplate(ctx.ChartName, 14), ctx.ChartName)
 
 	return template
 }
@@ -302,12 +302,12 @@ spec:
 // ingressBackendTemplate renders an Ingress backend (service or resource)
 // from values at the given indentation. The service name is the name from
 // the input, which is also the name the chart gives the Service.
-func ingressBackendTemplate(indent int) string {
+func ingressBackendTemplate(chartName string, indent int) string {
 	pad := strings.Repeat(" ", indent)
 	lines := []string{
 		`{{- with .service }}`,
 		`service:`,
-		`  name: {{ .name }}`,
+		fmt.Sprintf(`  name: {{ include "%s.ref" (list $ "Service" .name) }}`, chartName),
 		`  {{- if .portName }}`,
 		`  port:`,
 		`    name: {{ .portName }}`,

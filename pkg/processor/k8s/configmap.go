@@ -164,7 +164,7 @@ binaryData:
 {{- end }}
 {{- end }}
 `, serviceName, sanitizedName,
-		processor.ObjectName(configMapName),
+		processor.ObjName(ctx.ChartName, configMapName),
 		ctx.ChartName, serviceName)
 
 	return template

@@ -45,6 +45,7 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	// Add global values
 	valuesBuilder.SetGlobal("imageRegistry", "")
 	valuesBuilder.SetGlobal("imagePullSecrets", []interface{}{})
+	valuesBuilder.SetGlobal("namePrefix", "")
 
 	// Place every resource's values exactly where its template reads them
 	// (processor.Result.ValuesPath); resources without a ValuesPath fall back
@@ -114,7 +115,7 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	}
 
 	// Generate _helpers.tpl
-	helpers := helm.GenerateHelpers(opts.ChartName)
+	helpers := helm.GenerateHelpersWithRefs(opts.ChartName, inChartNames(graph))
 
 	// CRDs go to crds/; collect external files from ExternalFileManager
 	externalFiles := crdFiles(allResources)

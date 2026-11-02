@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -67,8 +68,12 @@ func TestProcessors_KeepInputNames(t *testing.T) {
 	for _, tc := range cases {
 		res := processYAML(t, tc.p, tc.manifest)
 		tpl := res.TemplateContent
-		if !strings.Contains(tpl, "\n  name: "+tc.name+"\n") {
-			t.Errorf("%s: metadata.name must be %s:\n%s", tc.p.Name(), tc.name, tpl)
+		name, err := strconv.Unquote(tc.name)
+		if err != nil {
+			name = tc.name // plain
+		}
+		if !strings.Contains(tpl, "\n  name: "+processor.ObjName("app", name)+"\n") {
+			t.Errorf("%s: metadata.name must be %s behind global.namePrefix:\n%s", tc.p.Name(), tc.name, tpl)
 		}
 		if strings.Contains(tpl, ".fullname") {
 			t.Errorf("%s: the name must not get the release prefix:\n%s", tc.p.Name(), tpl)
@@ -78,7 +83,8 @@ func TestProcessors_KeepInputNames(t *testing.T) {
 
 func TestHPAProcessor_ScaleTargetKeepsInputName(t *testing.T) {
 	res := processYAML(t, NewHPAProcessor(), "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata: {name: web-hpa}\nspec: {scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: web-api}, maxReplicas: 3}\n")
-	assertContainsAll(t, res.TemplateContent, "    name: {{ .scaleTargetRef.name }}\n")
+	// The target is passed through global.namePrefix when the chart renders it.
+	assertContainsAll(t, res.TemplateContent, `    name: {{ include "app.ref" (list $ (.scaleTargetRef.kind | default "Deployment") .scaleTargetRef.name) }}`+"\n")
 }
 
 func TestWorkloads_SelectorAndPodLabelsFromInput(t *testing.T) {
@@ -138,7 +144,7 @@ func TestWorkloads_SelectorFallbacks(t *testing.T) {
 
 func TestServiceProcessor_SelectorFromInput(t *testing.T) {
 	res := processYAML(t, NewServiceProcessor(), "apiVersion: v1\nkind: Service\nmetadata: {name: web}\nspec: {selector: {app.kubernetes.io/name: web}, ports: [{port: 80}]}\n")
-	assertContainsAll(t, res.TemplateContent, "  {{- if .selector }}\n  selector:\n    {{- toYaml .selector | nindent 4 }}\n  {{- end }}\n")
+	assertContainsAll(t, res.TemplateContent, "  {{- if .selector }}\n  selector:\n    {{- toYaml (merge (dict) (deepCopy .selector) (ternary (dict \"app.kubernetes.io/instance\" $.Release.Name) (dict) (ne (include \"app.namePrefix\" $) \"\"))) | nindent 4 }}\n  {{- end }}\n")
 	if strings.Contains(res.TemplateContent, "selectorLabels") {
 		t.Errorf("chart selector labels must not replace the input's selector:\n%s", res.TemplateContent)
 	}
@@ -221,7 +227,7 @@ func TestPodTemplate_SchedulingAndContainersForEveryWorkload(t *testing.T) {
 				t.Errorf("%s: values miss %s", kind, key)
 			}
 		}
-		c := v["containers"].([]map[string]interface{})[0]
+		c := v["containers"].(map[string]interface{})["main"].(map[string]interface{})
 		if img := c["image"].(map[string]interface{}); img["repository"] != "registry.example.com:5000/x" || img["tag"] != "1.2" || img["pullPolicy"] != "Always" {
 			t.Errorf("%s: image = %v", kind, img)
 		}
@@ -231,7 +237,7 @@ func TestPodTemplate_SchedulingAndContainersForEveryWorkload(t *testing.T) {
 			}
 		}
 		tpl := res.TemplateContent
-		for _, field := range []string{"nodeSelector", "tolerations", "affinity", "topologySpreadConstraints", "volumes", "initContainers"} {
+		for _, field := range []string{"nodeSelector", "tolerations", "affinity", "topologySpreadConstraints", "volumes"} {
 			if !strings.Contains(tpl, "{{- with ."+field+" }}\n") && !strings.Contains(tpl, "{{- with concat (."+field+" | default list) ($dhgInjVolumes | default list) }}\n") && !strings.Contains(tpl, "{{- with concat (."+field+" | default list) $dhgInjVolumes }}\n") && !strings.Contains(tpl, "{{- with concat (."+field+" | default list) ($dhgInj."+field+" | default list) }}\n") {
 				t.Errorf("%s: template does not render %s:\n%s", kind, field, tpl)
 			}
@@ -241,6 +247,8 @@ func TestPodTemplate_SchedulingAndContainersForEveryWorkload(t *testing.T) {
 				t.Errorf("%s: template does not render container %s", kind, field)
 			}
 		}
+		// Containers are maps by name, rendered in the order of the order lists.
+		assertContainsAll(t, tpl, "    initContainers:\n", ".initContainerOrder", ".containerOrder", "index $dhgInitCs $dhgName", "index $dhgCs $dhgName")
 		assertContainsAll(t, tpl, "{{- with .podAnnotations }}", "(.podLabels | default dict)", "{{- with .serviceAccountName }}")
 	}
 }

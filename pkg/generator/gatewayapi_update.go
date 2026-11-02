@@ -12,6 +12,7 @@ func finishApplyGatewayAPIFeature(chart *types.GeneratedChart, fc FeatureContext
 	}
 
 	out := cloneChart(chart)
+	helpers := newSecChartHelpers(chart)
 
 	ingresses := resourceTemplates(chart, isKind("Ingress"))
 
@@ -31,7 +32,7 @@ func finishApplyGatewayAPIFeature(chart *types.GeneratedChart, fc FeatureContext
 
 		trans := translateIngress(*fact, opts, fc.Param("gateway-name"), fc.Param("gateway-namespace"))
 
-		tmplStr := gatewayAPITemplate(rt, fact.Name, trans)
+		tmplStr := gatewayAPITemplate(rt, fact.Name, trans, helpers)
 
 		path := featureTemplatePath("gateway-api", rt.path)
 		if err := addTemplate(out, path, tmplStr); err != nil {

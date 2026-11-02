@@ -218,12 +218,17 @@ func TestProcessJob_ExtractsPodTemplate(t *testing.T) {
 	result, err := p.Process(ctx, obj)
 	testutil.AssertNoError(t, err)
 
-	containers, ok := result.Values["containers"].([]map[string]interface{})
+	containerMap, ok := result.Values["containers"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("Expected containers to be []map[string]interface{}, got %T", result.Values["containers"])
+		t.Fatalf("Expected containers to be map[string]interface{}, got %T", result.Values["containers"])
 	}
-	testutil.AssertEqual(t, 1, len(containers))
-	testutil.AssertEqual(t, "processor", containers[0]["name"])
+	testutil.AssertEqual(t, 1, len(containerMap))
+	testutil.AssertEqual(t, []interface{}{"processor"}, result.Values["containerOrder"])
+	processor, ok := containerMap["processor"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected containers.processor to be a map, got %T", containerMap["processor"])
+	}
+	containers := []map[string]interface{}{processor}
 
 	img, ok := containers[0]["image"].(map[string]interface{})
 	if !ok {

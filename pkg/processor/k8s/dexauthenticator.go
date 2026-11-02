@@ -78,6 +78,6 @@ metadata:
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
-`, sanitized, apiVersion, processor.ObjectName(name), ctx.ChartName,
-		processor.SpecOverlay(".", "applicationDomain", "sendAuthorizationHeader", "applicationIngressClassName", "applicationIngressCertificateSecretName", "keepUsersLoggedInFor", "allowedGroups", "whitelistSourceRanges", "nodeSelector", "tolerations", "applications"))
+`, sanitized, apiVersion, processor.ObjName(ctx.ChartName, name), ctx.ChartName,
+		processor.SpecOverlay(ctx.ChartName, ".", "applicationDomain", "sendAuthorizationHeader", "applicationIngressClassName", "applicationIngressCertificateSecretName", "keepUsersLoggedInFor", "allowedGroups", "whitelistSourceRanges", "nodeSelector", "tolerations", "applications"))
 }

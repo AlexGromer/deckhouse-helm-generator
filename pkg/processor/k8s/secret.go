@@ -208,7 +208,12 @@ metadata:
     app.kubernetes.io/component: %s
   {{- with $secret.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- /* A service account token belongs to a service account of the chart: it gets the name prefix. */}}
+    {{- $ann := deepCopy . }}
+    {{- if kindIs "string" (get $ann "kubernetes.io/service-account.name") }}
+    {{- $_ := set $ann "kubernetes.io/service-account.name" (include "%[6]s.ref" (list $ "ServiceAccount" (get $ann "kubernetes.io/service-account.name"))) }}
+    {{- end }}
+    {{- toYaml $ann | nindent 4 }}
   {{- end }}
 type: {{ $secret.type | default "Opaque" }}
 {{- with $secret.immutable }}
@@ -237,8 +242,8 @@ stringData:
 {{- end }}
 {{- end }}
 `, serviceName, sanitizedName,
-		processor.ObjectName(secretName),
-		ctx.ChartName, serviceName)
+		processor.ObjName(ctx.ChartName, secretName),
+		ctx.ChartName, serviceName, ctx.ChartName)
 
 	return template
 }

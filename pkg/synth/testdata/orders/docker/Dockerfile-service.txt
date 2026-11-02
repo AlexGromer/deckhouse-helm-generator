@@ -1,0 +1,7 @@
+FROM registry.example.com/base/jre-alpine:17
+
+COPY service/target/orders*.jar /app.jar
+
+EXPOSE 8080
+USER 10001:10001
+ENTRYPOINT ["java", "-jar", "/app.jar"]

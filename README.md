@@ -134,6 +134,29 @@ helm upgrade --install shop ./charts/shop --set database.enabled=false
 
 В `library`-режиме библиотека уже лежит в `charts/library` каждого chart'а, `helm dependency build` не нужен.
 
+#### Library chart из реестра
+
+Если общие helpers публикуются один раз и версионируются отдельно, укажите их OCI-адрес. Библиотека тогда не копируется в сервисные chart'ы, а объявляется зависимостью:
+
+```bash
+dhg generate -f ./manifests -o ./charts --chart-name shop --mode library \
+  --library-ref oci://registry.example.com/platform/platform-lib \
+  --library-version "1.2.0"
+```
+
+В `Chart.yaml` каждого сервисного chart'а появится:
+
+```yaml
+dependencies:
+  - name: platform-lib                              # последний элемент --library-ref
+    version: 1.2.0                                  # --library-version (обязателен с --library-ref)
+    repository: oci://registry.example.com/platform # ссылка без имени chart'а
+```
+
+- `--library-ref` принимает только `oci://<реестр>/<путь>/<chart>` без тега и digest и только с `--mode library`; `--library-version` — версия или диапазон Helm, без `--library-ref` он не допускается.
+- Верхнеуровневый library chart всё равно пишется (`./charts/platform-lib`), под именем из ссылки: его `define` называются `platform-lib.*`, как и `include` в шаблонах. При точной `--library-version` chart получает эту версию, при диапазоне (`^1.2.0`) — `--chart-version`, тогда опубликуйте версию, подходящую под диапазон. Опубликуйте его в реестр (`helm package` и `helm push`), затем выполните `helm dependency update` в каждом сервисном chart'е.
+- Оба параметра можно держать в `.dhg.yaml` (`library-ref`, `library-version`; версию берите в кавычки, иначе YAML прочтёт `1.20` как число); флаг командной строки перекрывает файл.
+
 ---
 
 ## Что генерируется

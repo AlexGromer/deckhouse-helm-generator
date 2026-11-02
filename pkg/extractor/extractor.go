@@ -5,6 +5,7 @@ package extractor
 import (
 	"context"
 
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/synth"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
@@ -66,6 +67,13 @@ type Options struct {
 	// ImageConfig makes source extraction read the configuration of each
 	// project's --image from the registry and prefer it to the Dockerfile.
 	ImageConfig bool
+
+	// SynthProfile is the path of a platform profile (YAML) for the
+	// synthesizing sources: image, compose and source.
+	SynthProfile string
+
+	// profile is SynthProfile, loaded by the extractor that uses it.
+	profile *synth.Profile
 }
 
 // Reporter is implemented by extractors that synthesize manifests: Notes

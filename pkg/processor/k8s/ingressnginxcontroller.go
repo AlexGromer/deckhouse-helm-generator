@@ -94,6 +94,6 @@ metadata:
   labels:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
-`, sanitized, processor.ObjectName(obj.GetName()), ctx.ChartName,
-		processor.SpecOverlay(".", "ingressClass", "inlet", "controllerVersion", "resourcesRequests"))
+`, sanitized, processor.ObjName(ctx.ChartName, obj.GetName()), ctx.ChartName,
+		processor.SpecOverlay(ctx.ChartName, ".", "ingressClass", "inlet", "controllerVersion", "resourcesRequests"))
 }

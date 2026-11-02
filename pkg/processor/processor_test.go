@@ -365,10 +365,10 @@ func TestGenerateGenericTemplate_HasEnabledCheck(t *testing.T) {
 
 func TestGenerateGenericTemplate_KeepsInputName(t *testing.T) {
 	for name, want := range map[string]string{
-		"my-widget":       "  name: my-widget\n",
-		"system:auth":     "  name: \"system:auth\"\n",
-		"1st-widget":      "  name: \"1st-widget\"\n",
-		"widgets.example": "  name: widgets.example\n",
+		"my-widget":       "  name: {{ include \"app.objname\" (list $ \"my-widget\") }}\n",
+		"system:auth":     "  name: \"{{ include \"app.objname\" (list $ \"system:auth\") }}\"\n",
+		"1st-widget":      "  name: \"{{ include \"app.objname\" (list $ \"1st-widget\") }}\"\n",
+		"widgets.example": "  name: {{ include \"app.objname\" (list $ \"widgets.example\") }}\n",
 	} {
 		obj := makeObj("Widget", name, "default")
 		tpl, _ := generateGenericTemplate(Context{ChartName: "app"}, obj, "w")
@@ -547,5 +547,35 @@ func TestRegistry_PriorityOrdering(t *testing.T) {
 	}
 	if got := r.GetProcessors(schema.GroupVersionKind{Kind: "Missing"}); got != nil {
 		t.Errorf("expected nil for a missing GVK, got %v", got)
+	}
+}
+
+func TestObjName(t *testing.T) {
+	for name, want := range map[string]string{
+		"web":         `{{ include "app.objname" (list $ "web") }}`,
+		"web.example": `{{ include "app.objname" (list $ "web.example") }}`,
+		// YAML would read these as a bool and a number: the result stays quoted.
+		"true":        `"{{ include "app.objname" (list $ "true") }}"`,
+		"1st":         `"{{ include "app.objname" (list $ "1st") }}"`,
+		"system:auth": `"{{ include "app.objname" (list $ "system:auth") }}"`,
+	} {
+		if got := ObjName("app", name); got != want {
+			t.Errorf("ObjName(app, %q) = %s, want %s", name, got, want)
+		}
+	}
+}
+
+func TestPrefixable(t *testing.T) {
+	for kind, want := range map[string]bool{
+		"Deployment": true, "Service": true, "ConfigMap": true, "Secret": true, "ClusterRole": true,
+		"PriorityClass": true, "ClusterIssuer": true,
+		// The name is part of the object's meaning.
+		"CustomResourceDefinition": false, "APIService": false, "Namespace": false,
+		"ModuleConfig": false, "User": false, "Group": false, "NodeGroup": false,
+		"StaticInstanceClass": false, "YandexInstanceClass": false,
+	} {
+		if got := Prefixable(kind); got != want {
+			t.Errorf("Prefixable(%s) = %v, want %v", kind, got, want)
+		}
 	}
 }

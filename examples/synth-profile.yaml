@@ -1,0 +1,91 @@
+# Example platform profile for `dhg generate -s source|compose|image --synth-profile`.
+# All names are neutral: replace them with the objects of your platform.
+# Schema and semantics: docs/SYNTH_PROFILE.md
+#
+#   dhg generate -s source -f ./orders --image registry.example.com/shop/orders:1.4.0 \
+#       --chart-name orders --synth-profile examples/synth-profile.yaml
+#
+# The same file can be set once for a project: a .dhg.yaml next to the sources with
+#   synth-profile: ./platform/synth-profile.yaml
+vars:
+  prefix: shop-dev-                       # environment prefix of the platform objects
+  toolbox: registry.example.com/platform/toolbox:2.3.0
+  dbRegistry: registry.example.com/shop/db
+
+# Added to the container's envFrom, before the app's own ConfigMap/Secret.
+envFrom:
+  - secretRef: "{{ .Vars.prefix }}platform-secret"
+  - configMapRef: "{{ .Vars.prefix }}platform-config"
+  - configMapRef: "{{ .Vars.prefix }}{{ .Name }}-config"
+
+# Copies the platform's scripts into a shared volume before the app starts.
+initContainers:
+  - name: init-toolbox
+    image: "{{ .Vars.toolbox }}"
+    command: ["/bin/sh", "-c"]
+    args: ["cp -R /opt/toolbox/. /home/toolbox && echo prepared {{ .Name }}"]
+    envFrom:
+      - configMapRef: {name: "{{ .Vars.prefix }}platform-config"}
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities: {drop: [ALL]}
+    volumeMounts:
+      - {name: toolbox, mountPath: /home/toolbox}
+
+volumes:
+  - {name: toolbox, emptyDir: {}}
+  - {name: scratch, emptyDir: {}}
+volumeMounts:                              # application container
+  - {name: toolbox, mountPath: /opt/toolbox}
+  - {name: scratch, mountPath: /tmp}
+
+podLabels:
+  app: "{{ .Name }}"
+podAnnotations:
+  platform.example.com/managed: "true"
+deploymentLabels:
+  app: "{{ .Name }}"
+  tier: backend
+
+# What the platform runs with when the sources say nothing; the probes replace
+# the ones derived from the sources.
+defaults:
+  port: 8080
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: "2", memory: 2Gi}
+  probes:
+    startup: {tcp: true, periodSeconds: 10, failureThreshold: 60}
+    liveness: {path: "/{{ .Name }}/actuator/health", periodSeconds: 30, failureThreshold: 5}
+    readiness: {tcp: true, periodSeconds: 10}
+
+# Credentials: variable names matching one of these (case-insensitive) go to the Secret.
+# The list REPLACES the built-in rule (PASSWORD, SECRET, TOKEN, CREDENTIAL, PRIVATE_KEY, API_KEY).
+secretKeyPatterns:
+  - 'PASSWORD'
+  - 'SECRET'
+  - 'TOKEN'
+  - 'PRIVATE_?KEY'
+  - 'API_?KEY'
+  - '_PIN$'
+
+# Where this organisation keeps what the conventions do not find.
+dockerfileGlobs: ["build/docker/*.dockerfile"]
+envTemplateFiles: ["ops/defaults/*.env.properties"]
+
+# Helm hooks. when: liquibase | flyway (the build has such a module) | always.
+jobs:
+  - when: liquibase
+    name: "{{ .Vars.prefix }}migrate-{{ .Name }}"
+    manifest:
+      spec:
+        backoffLimit: 0
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: migrate
+                image: "{{ .Vars.dbRegistry }}/{{ .Name }}-db:latest"
+                envFrom:
+                  - secretRef: {name: "{{ .Vars.prefix }}platform-secret"}
+                  - configMapRef: {name: "{{ .Vars.prefix }}{{ .Name }}-config"}

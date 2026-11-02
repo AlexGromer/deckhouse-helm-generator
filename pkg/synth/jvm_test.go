@@ -73,7 +73,8 @@ func TestNoStartupProbeWithoutHealth(t *testing.T) {
 }
 
 // A value with a placeholder that only the runtime resolves must not be
-// copied half resolved: the variable is listed empty and counted in one note.
+// copied half resolved: its placeholders become the variables, listed empty
+// in one note.
 func TestUnresolvedPlaceholdersAreNotCopiedPartially(t *testing.T) {
 	dir := writeFiles(t, map[string]string{
 		"pom.xml": pom,
@@ -91,11 +92,15 @@ spring:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, ok := envValue(app, "SPRING_DATASOURCE_URL"); !ok || v != "" {
-		t.Errorf("SPRING_DATASOURCE_URL = %q, %v: a partially resolved value must be empty", v, ok)
+	for _, name := range []string{"SPRING_DATASOURCE_URL", "SPRING_KAFKA_BOOTSTRAP_SERVERS"} {
+		if v, ok := envValue(app, name); ok {
+			t.Errorf("%s = %q: a partially resolved value must not be emitted", name, v)
+		}
 	}
-	if v, ok := envValue(app, "SPRING_KAFKA_BOOTSTRAP_SERVERS"); !ok || v != "" {
-		t.Errorf("SPRING_KAFKA_BOOTSTRAP_SERVERS = %q, %v", v, ok)
+	for _, name := range []string{"DB_HOST", "DB_NAME", "KAFKA_HOST"} {
+		if v, ok := envValue(app, name); !ok || v != "" {
+			t.Errorf("%s = %q, %v: the placeholder must be an empty variable", name, v, ok)
+		}
 	}
 	if v, _ := envValue(app, "SPRING_DATASOURCE_USERNAME"); v != "orders" {
 		t.Errorf("a fully resolved value must be kept, got %q", v)
@@ -106,14 +111,14 @@ spring:
 			aggregated = append(aggregated, n)
 		}
 	}
-	if len(aggregated) != 1 || !strings.Contains(aggregated[0], "2 environment variables") ||
-		!strings.Contains(aggregated[0], "SPRING_DATASOURCE_URL") || !strings.Contains(aggregated[0], "DB_HOST, DB_NAME") {
+	if len(aggregated) != 1 || !strings.Contains(aggregated[0], "3 environment variables") ||
+		!strings.Contains(aggregated[0], "DB_HOST, DB_NAME, KAFKA_HOST") {
 		t.Errorf("want one aggregated note, got %q\nall notes:\n%s", aggregated, strings.Join(notes.Items(), "\n"))
 	}
 }
 
-// Placeholders the chart does not map to a variable are not dropped silently.
-func TestUnmappedPlaceholdersAreCounted(t *testing.T) {
+// Placeholders the chart does not map to a derived variable are not dropped.
+func TestUnmappedPlaceholdersAreVariables(t *testing.T) {
 	dir := writeFiles(t, map[string]string{
 		"pom.xml": pom,
 		"src/main/resources/application.yml": `
@@ -127,11 +132,17 @@ spring:
 `,
 	})
 	var notes Notes
-	if _, err := FromSource(dir, "x:1", &notes); err != nil {
+	app, err := FromSource(dir, "x:1", &notes)
+	if err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range []string{"ONE_URL", "TWO_HOST", "DB_HOST"} {
+		if v, ok := envValue(app, name); !ok || v != "" {
+			t.Errorf("%s = %q, %v", name, v, ok)
+		}
+	}
 	all := strings.Join(notes.Items(), "\n")
-	if !strings.Contains(all, "2 other environment variables") || !strings.Contains(all, "ONE_URL") || !strings.Contains(all, "TWO_HOST") {
-		t.Errorf("notes lack the unmapped placeholders:\n%s", all)
+	if !strings.Contains(all, "3 environment variables are empty and required (DB_HOST, ONE_URL, TWO_HOST)") {
+		t.Errorf("notes lack the required placeholders:\n%s", all)
 	}
 }

@@ -62,6 +62,16 @@ type Options struct {
 	// IncludeHooks generates Helm lifecycle hook Job templates
 	// (pre-upgrade, post-install, pre-delete).
 	IncludeHooks bool
+
+	// LibraryRef (library mode) is the OCI reference of the library chart in a
+	// registry, e.g. oci://registry.example.com/platform/platform-lib. When set,
+	// the library is not vendored into the service charts: they declare it as a
+	// dependency on that repository, at LibraryVersion.
+	LibraryRef string
+
+	// LibraryVersion is the version or version range of the library dependency.
+	// Required with LibraryRef.
+	LibraryVersion string
 }
 
 // Generator generates Helm charts from a resource graph.

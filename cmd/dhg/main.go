@@ -116,6 +116,7 @@ func newGenerateCmd() *cobra.Command {
 		platform           string
 		insecureRegistry   bool
 		imageConfig        bool
+		synthProfile       string
 		includeTests       bool
 		includeREADME      bool
 		includeSchema      bool
@@ -150,6 +151,8 @@ func newGenerateCmd() *cobra.Command {
 		noState            bool
 		bump               string
 		baseDir            string
+		libraryRef         string
+		libraryVersion     string
 	)
 
 	cmd := &cobra.Command{
@@ -195,6 +198,7 @@ Examples:
 				platform:           platform,
 				insecureRegistry:   insecureRegistry,
 				imageConfig:        imageConfig,
+				synthProfile:       synthProfile,
 				includeTests:       includeTests,
 				includeREADME:      includeREADME,
 				includeSchema:      includeSchema,
@@ -228,6 +232,8 @@ Examples:
 				noState:            noState,
 				bump:               bump,
 				baseDir:            baseDir,
+				libraryRef:         libraryRef,
+				libraryVersion:     libraryVersion,
 			})
 		},
 	}
@@ -244,6 +250,7 @@ Examples:
 	cmd.Flags().StringVar(&platform, "platform", "linux/amd64", "Platform of multi-platform images for --source image (os/arch[/variant])")
 	cmd.Flags().BoolVar(&insecureRegistry, "insecure-registry", false, "Talk plain HTTP to the registry (--source image, --image-config)")
 	cmd.Flags().BoolVar(&imageConfig, "image-config", false, "With --source source, read each --image's config from the registry and prefer it to the Dockerfile (ports, user, volumes, health check)")
+	cmd.Flags().StringVar(&synthProfile, "synth-profile", "", "Platform profile (YAML) for --source image, compose or source: init containers, shared envFrom, labels, probes, resources, Jobs (see docs/SYNTH_PROFILE.md)")
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
 	cmd.Flags().StringSliceVar(&namespaces, "namespaces", []string{}, "Filter by multiple namespaces")
 	cmd.Flags().StringVarP(&labelSelector, "selector", "l", "", "Label selector filter")
@@ -291,6 +298,8 @@ Examples:
 	cmd.Flags().BoolVar(&noState, "no-state", false, "Do not save the regeneration state next to the chart")
 	cmd.Flags().StringVar(&bump, "bump", "", "With --update, bump the version of changed charts: patch, minor, major or none")
 	cmd.Flags().StringVar(&baseDir, "base-dir", "", "With --update, read the saved state from this directory instead of --output")
+	cmd.Flags().StringVar(&libraryRef, "library-ref", "", "With --mode library, take the library chart from an OCI registry instead of vendoring it, e.g. oci://registry.example.com/platform/platform-lib (needs --library-version)")
+	cmd.Flags().StringVar(&libraryVersion, "library-version", "", "Version or version range of the library chart for --library-ref (quote it in the config file)")
 
 	// chart-name may come from the config file, so it is checked after loading it.
 	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
@@ -331,6 +340,7 @@ type generateOptions struct {
 	platform           string
 	insecureRegistry   bool
 	imageConfig        bool
+	synthProfile       string
 	includeTests       bool
 	includeREADME      bool
 	includeSchema      bool
@@ -364,6 +374,29 @@ type generateOptions struct {
 	noState            bool
 	bump               string
 	baseDir            string
+	libraryRef         string
+	libraryVersion     string
+}
+
+// validateLibraryRef checks the --library-ref / --library-version pair before
+// any input is read.
+func validateLibraryRef(opts generateOptions) error {
+	if opts.libraryRef == "" {
+		if opts.libraryVersion != "" {
+			return fmt.Errorf("--library-version requires --library-ref")
+		}
+		return nil
+	}
+	if opts.mode != "library" {
+		return fmt.Errorf("--library-ref only applies to --mode library (got %q)", opts.mode)
+	}
+	if _, _, err := generator.ParseLibraryRef(opts.libraryRef); err != nil {
+		return err
+	}
+	if opts.libraryVersion == "" {
+		return fmt.Errorf("--library-version is required with --library-ref")
+	}
+	return nil
 }
 
 func runGenerate(ctx context.Context, opts generateOptions) error {
@@ -389,6 +422,10 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		return fmt.Errorf("invalid mode: %s (must be universal, separate, library, or umbrella)", opts.mode)
 	}
 
+	if err := validateLibraryRef(opts); err != nil {
+		return err
+	}
+
 	// Validate source
 	var sourceType types.Source
 	switch opts.source {
@@ -409,6 +446,10 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		sourceType = types.SourceCode
 	default:
 		return fmt.Errorf("invalid source: %s (must be file, cluster, gitops, image, compose or source)", opts.source)
+	}
+
+	if opts.synthProfile != "" && sourceType != types.SourceImage && sourceType != types.SourceCompose && sourceType != types.SourceCode {
+		return fmt.Errorf("--synth-profile applies to the synthesizing sources (--source image, compose or source), not to --source %s", opts.source)
 	}
 
 	// Validate mutually exclusive flags
@@ -451,6 +492,7 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		Platform:         opts.platform,
 		InsecureRegistry: opts.insecureRegistry,
 		ImageConfig:      opts.imageConfig,
+		SynthProfile:     opts.synthProfile,
 	}
 	if opts.sshKey != "" {
 		extractOpts.GitAuth = &extractor.GitAuthOptions{SSHKeyPath: opts.sshKey}
@@ -504,6 +546,8 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		DeckhouseModule:     opts.deckhouseModule,
 		IncludeHooks:        opts.includeHooks,
 		ValuesFlat:          opts.valuesFlat,
+		LibraryRef:          opts.libraryRef,
+		LibraryVersion:      opts.libraryVersion,
 	}
 
 	charts, err := gen.Generate(ctx, graph, genOpts)
@@ -1029,6 +1073,10 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	installNS := opts.namespace
 	if installNS == "" && len(opts.namespaces) == 1 {
 		installNS = opts.namespaces[0]
+	}
+	if opts.libraryRef != "" {
+		fmt.Printf("\nThe library is not vendored: publish the library chart to %s (version %s) and run \"helm dependency update\" in each service chart.\n",
+			opts.libraryRef, opts.libraryVersion)
 	}
 	fmt.Println()
 	printInstallHint(os.Stdout, opts.outputDir, charts, opts.chartName, installNS)

@@ -51,6 +51,9 @@ func applyGoldenSignalsFeature(chart *types.GeneratedChart, fc FeatureContext) (
 	otelCollectorEnabled := fc.Param("otel-collector") == "true"
 
 	out := cloneChart(chart)
+	// The objects are named by the feature: they get global.namePrefix, so
+	// that two releases in one namespace do not collide.
+	helpers := newSecChartHelpers(chart)
 
 	values := map[string]interface{}{
 		"enabled":          true,
@@ -75,7 +78,7 @@ func applyGoldenSignalsFeature(chart *types.GeneratedChart, fc FeatureContext) (
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: golden-signals-rules
+  name: ` + helpers.objNameValue("golden-signals-rules") + `
   namespace: {{ .Release.Namespace }}
 spec:
   groups:
@@ -120,7 +123,7 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: golden-signals-dashboard
+  name: ` + helpers.objNameValue("golden-signals-dashboard") + `
   namespace: {{ .Release.Namespace }}
   labels:
     grafana_dashboard: "1"
@@ -158,7 +161,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: otel-collector-config
+  name: ` + helpers.objNameValue("otel-collector-config") + `
   namespace: {{ .Release.Namespace }}
 data:
   otel-collector-config.yaml: |

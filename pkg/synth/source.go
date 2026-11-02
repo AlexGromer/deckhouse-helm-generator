@@ -22,6 +22,21 @@ type SourceProject struct {
 	// replaces the Dockerfile as the source of ports, user, volumes and
 	// health check: the image also carries what its base image sets.
 	ImageConfig *registry.ImageConfig
+
+	// profile is the platform profile, if any; root the build root of the
+	// project (Dir itself for a single project).
+	profile *Profile
+	root    string
+	// dockerfiles are the Dockerfiles found, best first; Dockerfile is their
+	// merged facts and dockerNotes say where they differ.
+	dockerfiles []dockerfileCandidate
+	dockerNotes []string
+	env         envTemplate
+	rules       *SecretRules
+	// siblingMigrations are Liquibase or Flyway modules next to the
+	// application, ownMigrations the tools its own module uses.
+	siblingMigrations []migration
+	ownMigrations     []migration
 }
 
 // ReadSource reads a project directory. It fails when the directory holds
@@ -32,11 +47,32 @@ type SourceProject struct {
 // framework project. ReadSource reads that module and says so in notes; with
 // several such modules it fails and lists them.
 func ReadSource(dir string, notes *Notes) (*SourceProject, error) {
-	s := &SourceProject{Dir: dir}
-	if data, err := os.ReadFile(filepath.Join(dir, "Dockerfile")); err == nil {
-		d := ParseDockerfile(string(data))
-		s.Dockerfile = &d
+	return ReadSourceWith(dir, notes, nil)
+}
+
+// ReadSourceWith is ReadSource with a platform profile (which may be nil):
+// its globs add places to look for Dockerfiles and environment templates,
+// its patterns decide which variables are secrets.
+//
+// The Dockerfile of a module is dir/Dockerfile, but a project may keep it as
+// docker/Dockerfile-<name>.txt in the module or at the build root; the
+// facts (USER, EXPOSE, VOLUME, HEALTHCHECK) come from the best of them, and
+// variants that disagree are reported.
+func ReadSourceWith(dir string, notes *Notes, prof *Profile) (*SourceProject, error) {
+	return readSource(dir, buildRoot(dir), notes, prof)
+}
+
+func readSource(dir, root string, notes *Notes, prof *Profile) (*SourceProject, error) {
+	rules, err := profileRules(prof)
+	if err != nil {
+		return nil, err
 	}
+	s := &SourceProject{Dir: dir, profile: prof, root: root, rules: rules}
+	s.dockerfiles = findDockerfiles(dir, root, prof)
+	s.Dockerfile, s.dockerNotes = mergeDockerfiles(s.dockerfiles)
+	// Only a Dockerfile in the module itself makes it the application when
+	// the module is also a build root: docker/ variants are mere facts.
+	ownDockerfile := isFile(filepath.Join(dir, "Dockerfile"))
 	p, err := DetectProject(dir, notes)
 	if err != nil {
 		return nil, err
@@ -44,7 +80,7 @@ func ReadSource(dir string, notes *Notes) (*SourceProject, error) {
 	s.Project = p
 	// A root with a framework project of its own (a Gradle app with library
 	// subprojects) is the application; a Maven parent pom is not.
-	if s.Dockerfile == nil && (p == nil || isParentPom(dir)) {
+	if !ownDockerfile && (p == nil || isParentPom(dir)) {
 		apps := appModules(dir, 0)
 		switch {
 		case len(apps) > 1 && p != nil:
@@ -54,13 +90,22 @@ func ReadSource(dir string, notes *Notes) (*SourceProject, error) {
 			return nil, fmt.Errorf("%s: several modules could be the application (%s); pass one of them, e.g. -f %s", dir, strings.Join(apps, ", "), filepath.Join(dir, apps[0]))
 		case len(apps) == 1:
 			notes.Addf("%s: no Dockerfile at the build root; using module %s", filepath.Base(filepath.Clean(dir)), apps[0])
-			return ReadSource(filepath.Join(dir, apps[0]), notes)
+			return readSource(filepath.Join(dir, apps[0]), root, notes, prof)
 		}
 	}
 	if s.Dockerfile == nil && p == nil {
 		return nil, fmt.Errorf("%s: neither a Dockerfile nor a Spring Boot, Quarkus or Micronaut project (pom.xml or build.gradle)", dir)
 	}
+	s.env = readEnvTemplates(dir, root, prof)
+	s.siblingMigrations, s.ownMigrations = findMigrations(root, dir)
 	return s, nil
+}
+
+func profileRules(prof *Profile) (*SecretRules, error) {
+	if prof == nil || len(prof.SecretKeyPatterns) == 0 {
+		return nil, nil
+	}
+	return NewSecretRules(prof.SecretKeyPatterns)
 }
 
 // maxModuleDepth bounds the search through nested modules.
@@ -208,7 +253,7 @@ func FromSource(dir, image string, notes *Notes) (App, error) {
 // App describes the app with profile active ("" for the default
 // configuration).
 func (s *SourceProject) App(image, profile string, notes *Notes) App {
-	app := App{Name: s.Name(), Image: image}
+	app := App{Name: s.Name(), Image: image, secrets: s.rules}
 	if app.Image == "" {
 		tag := "latest"
 		if s.Project != nil && s.Project.Version != "" {
@@ -218,6 +263,9 @@ func (s *SourceProject) App(image, profile string, notes *Notes) App {
 		notes.Addf("%s: no --image given; image set to %q, set the pushed image in values", app.Name, app.Image)
 	}
 
+	for _, n := range s.dockerNotes {
+		notes.Addf("%s: %s", app.Name, n)
+	}
 	switch {
 	case s.ImageConfig != nil:
 		f := imageFacts(s.ImageConfig)
@@ -234,8 +282,22 @@ func (s *SourceProject) App(image, profile string, notes *Notes) App {
 		notes.Addf("%s: no Dockerfile, so the container user is unknown; set runAsUser/runAsNonRoot in values", app.Name)
 	}
 
+	var debugTexts []string
+	for _, d := range s.dockerfiles {
+		debugTexts = append(debugTexts, d.raw)
+	}
+	for _, v := range s.env.values {
+		debugTexts = append(debugTexts, v)
+	}
+
 	if p := s.Project; p != nil {
-		c := &config{app: &app, props: p.properties(profile), notes: notes}
+		c := &config{
+			app: &app, props: p.properties(profile), notes: notes,
+			fallback: s.env.fallbackFor(app.secrets), fallbackFrom: strings.Join(s.env.files, ", "),
+		}
+		for _, v := range c.props {
+			debugTexts = append(debugTexts, v)
+		}
 		switch p.Framework {
 		case Spring:
 			applySpring(c, p)
@@ -269,6 +331,14 @@ func (s *SourceProject) App(image, profile string, notes *Notes) App {
 			notes.Addf("%s: the container exposes %s, which the %s configuration does not use; the chart keeps the port, drop it if nothing listens there", app.Name, strings.Join(exposed, ", "), p.Framework)
 		}
 	}
+	if ports := debugPorts(debugTexts); len(ports) > 0 {
+		list := make([]string, len(ports))
+		for i, port := range ports {
+			list[i] = strconv.FormatInt(port, 10)
+		}
+		notes.Addf("%s: a JDWP debug agent listens on port %s (-agentlib:jdwp in the Dockerfile, environment template or configuration); the chart does not expose it, remove the option for production or expose the port only where debugging is wanted", app.Name, strings.Join(list, ", "))
+	}
+	s.noteMigrations(&app, notes)
 	if app.Liveness == nil {
 		notes.Addf("%s: no health endpoint found (no health dependency, no HEALTHCHECK); add liveness and readiness probes", app.Name)
 	}
@@ -276,4 +346,18 @@ func (s *SourceProject) App(image, profile string, notes *Notes) App {
 		notes.Addf("%s: no port found, so no Service was created", app.Name)
 	}
 	return app
+}
+
+// noteMigrations records the database migration tools of the build. A tool
+// in a sibling module is run by a Job (a profile may attach one, see
+// ProfileJob); one in the application's own module runs at start-up.
+func (s *SourceProject) noteMigrations(app *App, notes *Notes) {
+	label := map[string]string{"liquibase": "Liquibase", "flyway": "Flyway"}
+	for _, m := range s.siblingMigrations {
+		app.Migrations = append(app.Migrations, m.tool)
+		notes.Addf("%s: %s migrations found in module %s (%s); the chart does not run them. Run them in the pipeline, or add a Job with --synth-profile (jobs: when: %s)", app.Name, label[m.tool], m.module, m.evidence, m.tool)
+	}
+	for _, m := range s.ownMigrations {
+		notes.Addf("%s: %s is part of the application module (%s); migrations may run at start-up, check that the database user may change the schema", app.Name, label[m.tool], m.evidence)
+	}
 }

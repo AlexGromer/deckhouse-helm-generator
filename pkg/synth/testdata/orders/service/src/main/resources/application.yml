@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: orders
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_LOGIN}
+    password: ${DB_PASSWORD}
+  kafka:
+    bootstrap-servers: ${KAFKA_HOST}:${KAFKA_PORT}
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            client-secret: ${KEYCLOAK_CLIENT_SECRET}
+        provider:
+          keycloak:
+            issuer-uri: ${KEYCLOAK_URL}/realms/shop
+            token-uri: ${TOKEN_URL}
+server:
+  port: ${SERVICE_PORT}
+  servlet:
+    context-path: /${SERVICE_NAME:orders}
+logging:
+  level:
+    root: ${LOGGING_LEVEL}

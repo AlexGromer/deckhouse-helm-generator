@@ -108,6 +108,6 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
 {{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName,
-		processor.SpecOverlay(".", "endpoints", "namespaceSelector", "selector"))
+`, sanitized, processor.ObjName(ctx.ChartName, name), ctx.ChartName,
+		processor.SpecOverlay(ctx.ChartName, ".", "endpoints", "namespaceSelector", "selector"))
 }

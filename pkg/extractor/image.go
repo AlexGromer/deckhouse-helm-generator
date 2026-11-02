@@ -35,11 +35,15 @@ func (e *ImageExtractor) Validate(_ context.Context, opts Options) error {
 			return err
 		}
 	}
-	return nil
+	return validateSynthProfile(opts)
 }
 
 // Extract implements Extractor.
 func (e *ImageExtractor) Extract(ctx context.Context, opts Options) (<-chan *types.ExtractedResource, <-chan error) {
+	opts, err := e.withSynthProfile(opts)
+	if err != nil {
+		return failed(err)
+	}
 	client, creds := registryClient(e.client, opts)
 
 	var apps []synth.App

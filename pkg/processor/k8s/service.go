@@ -257,16 +257,16 @@ spec:
       nodePort: {{ .nodePort }}
       {{- end }}
     {{- end }}
-  {{- /* The selector of the input Service: it selects the pods by their labels from the input. */}}
+  {{- /* The selector of the input Service: it selects the pods by their labels from the input. With global.namePrefix (several releases in one namespace) it also selects the release: the pods carry app.kubernetes.io/instance. */}}
   {{- if .selector }}
   selector:
-    {{- toYaml .selector | nindent 4 }}
+    {{- toYaml (merge (dict) (deepCopy .selector) (ternary (dict "app.kubernetes.io/instance" $.Release.Name) (dict) (ne (include "%s.namePrefix" $) ""))) | nindent 4 }}
   {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(obj.GetName()),
+`, serviceName, processor.ObjName(ctx.ChartName, obj.GetName()),
 		ctx.ChartName, serviceName,
-		serviceName)
+		serviceName, ctx.ChartName)
 
 	return template
 }

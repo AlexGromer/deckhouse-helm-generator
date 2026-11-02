@@ -74,5 +74,5 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
 `, sanitized, processor.ObjectName(name), ctx.ChartName,
-		processor.SpecOverlay(".", "members"))
+		processor.SpecOverlay(ctx.ChartName, ".", "members"))
 }

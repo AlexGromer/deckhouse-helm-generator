@@ -248,3 +248,44 @@ func TestGenerateCmd_SynthesizedSources(t *testing.T) {
 		t.Errorf("unknown source: %v", err)
 	}
 }
+
+func TestGenerateCmd_SynthProfile(t *testing.T) {
+	profile := filepath.Join(t.TempDir(), "platform.yaml")
+	content := "vars: {prefix: acme-dev-}\n" +
+		"envFrom:\n  - configMapRef: \"{{ .Vars.prefix }}system-config\"\n" +
+		"initContainers:\n  - {name: init-utils, image: \"registry.example.com/platform/utils:1\", command: [/bin/sh]}\n" +
+		"jobs:\n  - when: liquibase\n    name: \"database-{{ .Name }}\"\n    manifest:\n      spec:\n        template:\n          spec:\n            restartPolicy: Never\n" +
+		"            containers:\n              - {name: migrate, image: \"registry.example.com/db/{{ .Name }}:1\"}\n"
+	if err := os.WriteFile(profile, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	project := "../../pkg/synth/testdata/orders"
+
+	out := t.TempDir()
+	if _, err := executeCmd(t, "generate", "-s", "source", "-f", project, "--image", "registry.example.com/orders:1", "--synth-profile", profile,
+		"-o", out, "--chart-name", "orders"); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	var all strings.Builder
+	_ = filepath.WalkDir(out, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			data, _ := os.ReadFile(path)
+			all.WriteString(string(data))
+		}
+		return nil
+	})
+	for _, want := range []string{"init-utils", "acme-dev-system-config", "database-orders", "pre-install,pre-upgrade"} {
+		if !strings.Contains(all.String(), want) {
+			t.Errorf("chart lacks %q", want)
+		}
+	}
+
+	if _, err := executeCmd(t, "generate", "-s", "source", "-f", project, "--synth-profile", filepath.Join(t.TempDir(), "none.yaml"),
+		"-o", t.TempDir(), "--chart-name", "orders"); err == nil {
+		t.Error("a missing profile must fail")
+	}
+	if _, err := executeCmd(t, "generate", "-f", exampleFullStack, "--synth-profile", profile, "-o", t.TempDir(), "--chart-name", "x"); err == nil ||
+		!strings.Contains(err.Error(), "synth-profile") {
+		t.Errorf("--synth-profile with a file source: %v", err)
+	}
+}

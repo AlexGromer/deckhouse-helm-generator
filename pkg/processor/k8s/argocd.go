@@ -163,8 +163,8 @@ metadata:
 %s
 %s{{- end }}
 {{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName, annotationsPart,
-		processor.SpecOverlay(".", "project", "source", "destination", "syncPolicy"))
+`, sanitized, processor.ObjName(ctx.ChartName, name), ctx.ChartName, annotationsPart,
+		processor.SpecOverlay(ctx.ChartName, ".", "project", "source", "destination", "syncPolicy"))
 }
 
 // ArgoCDApplicationSetProcessor processes argoproj.io/v1alpha1 ApplicationSet resources.
@@ -247,6 +247,6 @@ metadata:
 %s
 %s{{- end }}
 {{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName, annotationsPart,
-		processor.SpecOverlay(".", "project", "source", "destination", "syncPolicy", "generators", "template"))
+`, sanitized, processor.ObjName(ctx.ChartName, name), ctx.ChartName, annotationsPart,
+		processor.SpecOverlay(ctx.ChartName, ".", "project", "source", "destination", "syncPolicy", "generators", "template"))
 }

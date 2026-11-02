@@ -122,13 +122,13 @@ metadata:
     app.kubernetes.io/component: %s
 {{- with .roleRef }}
 roleRef:
-  {{- toYaml . | nindent 2 }}
+  {{- include "%[3]s.refs" (list $ . "roleRef") | nindent 2 }}
 {{- end }}
 {{- with .subjects }}
 subjects:
-  {{- toYaml . | nindent 2 }}
+  {{- include "%[3]s.refs" (list $ . "subjects") | nindent 2 }}
 {{- end }}
 {{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName)
+`, serviceName, processor.ObjName(ctx.ChartName, name), ctx.ChartName, serviceName)
 }

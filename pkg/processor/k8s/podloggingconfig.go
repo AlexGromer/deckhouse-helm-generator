@@ -64,7 +64,7 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
 {{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName, processor.SpecOverlay(".", "clusterDestinationRefs"))
+`, sanitized, processor.ObjName(ctx.ChartName, name), ctx.ChartName, processor.SpecOverlay(ctx.ChartName, ".", "clusterDestinationRefs"))
 
 	return &processor.Result{
 		Processed:       true,
@@ -158,7 +158,7 @@ metadata:
     {{- include "%s.labels" $ | nindent 4 }}
 %s{{- end }}
 {{- end }}
-`, sanitized, processor.ObjectName(name), ctx.ChartName, processor.SpecOverlay(".", "destinationRefs"))
+`, sanitized, processor.ObjName(ctx.ChartName, name), ctx.ChartName, processor.SpecOverlay(ctx.ChartName, ".", "destinationRefs"))
 
 	return &processor.Result{
 		Processed:       true,

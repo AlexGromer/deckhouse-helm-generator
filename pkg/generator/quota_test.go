@@ -38,11 +38,32 @@ func qContainer(name string, resources map[string]interface{}) map[string]interf
 	return c
 }
 
+// qSetContainers stores containers in values under key ("containers" or
+// "initContainers") the way the workload processors do: a map by name plus
+// the order list.
+func qSetContainers(values map[string]interface{}, key string, containers ...map[string]interface{}) {
+	byName := map[string]interface{}{}
+	order := make([]interface{}, 0, len(containers))
+	for _, c := range containers {
+		name, _ := c["name"].(string)
+		cv := map[string]interface{}{}
+		for k, v := range c {
+			if k != "name" {
+				cv[k] = v
+			}
+		}
+		byName[name] = cv
+		order = append(order, name)
+	}
+	values[key] = byName
+	values[key[:len(key)-len("Containers")]+"ContainerOrder"] = order
+}
+
 func qWorkload(kind, name string, values map[string]interface{}, containers ...map[string]interface{}) *types.ProcessedResource {
 	if values == nil {
 		values = map[string]interface{}{}
 	}
-	values["containers"] = containers
+	qSetContainers(values, "containers", containers...)
 	return makeResourceWithValues(kind, name, "default", nil, values)
 }
 
@@ -118,13 +139,12 @@ func TestQuota_NumericQuantities(t *testing.T) {
 }
 
 func TestQuota_InitContainersMaxRule(t *testing.T) {
-	values := map[string]interface{}{
-		"initContainers": []map[string]interface{}{
-			// Larger than the app containers for cpu, smaller for memory.
-			qContainer("migrate", qRes("2", "64Mi", "2", "64Mi")),
-			qContainer("warmup", qRes("100m", "1Gi", "100m", "1Gi")),
-		},
-	}
+	values := map[string]interface{}{}
+	qSetContainers(values, "initContainers",
+		// Larger than the app containers for cpu, smaller for memory.
+		qContainer("migrate", qRes("2", "64Mi", "2", "64Mi")),
+		qContainer("warmup", qRes("100m", "1Gi", "100m", "1Gi")),
+	)
 	group := makeGroup("app", "default", []*types.ProcessedResource{
 		qWorkload("StatefulSet", "web", values,
 			qContainer("a", qRes("500m", "256Mi", "500m", "256Mi")),
@@ -141,12 +161,11 @@ func TestQuota_InitContainersMaxRule(t *testing.T) {
 func TestQuota_NativeSidecarAddsToApp(t *testing.T) {
 	sidecar := qContainer("mesh", qRes("100m", "64Mi", "100m", "64Mi"))
 	sidecar["restartPolicy"] = "Always"
-	values := map[string]interface{}{
-		"initContainers": []interface{}{
-			sidecar,
-			qContainer("migrate", qRes("1", "64Mi", "1", "64Mi")),
-		},
-	}
+	values := map[string]interface{}{}
+	qSetContainers(values, "initContainers",
+		sidecar,
+		qContainer("migrate", qRes("1", "64Mi", "1", "64Mi")),
+	)
 	group := makeGroup("app", "default", []*types.ProcessedResource{
 		qWorkload("StatefulSet", "web", values, qContainer("app", qRes("200m", "128Mi", "200m", "128Mi"))),
 	})
@@ -303,13 +322,30 @@ func TestLimitRange_FallbackWithoutValues(t *testing.T) {
 	}
 }
 
-func TestContainerSpecs_AcceptsInterfaceSlices(t *testing.T) {
-	specs := containerSpecs([]interface{}{qContainer("a", qRes("1", "", "", "")), "not-a-map"})
-	if len(specs) != 1 || !hasAmount(specs[0].requests, "cpu") {
-		t.Errorf("containerSpecs = %+v", specs)
+func TestContainerSpecs_FollowsOrderList(t *testing.T) {
+	values := map[string]interface{}{
+		"containers": map[string]interface{}{
+			"a": map[string]interface{}{"resources": qRes("1", "", "", "")},
+			"b": map[string]interface{}{"resources": qRes("2", "", "", "")},
+		},
+		"containerOrder": []interface{}{"b", "gone", "a"},
 	}
-	if len(containerSpecs("garbage")) != 0 || len(containerSpecs(nil)) != 0 {
-		t.Error("containerSpecs of a non-slice must be empty")
+	cpu := func(c containerSpec) string {
+		q := c.requests["cpu"]
+		return q.String()
+	}
+	specs := containerSpecs(values, "containers", "containerOrder")
+	if len(specs) != 2 || cpu(specs[0]) != "2" || cpu(specs[1]) != "1" {
+		t.Errorf("containerSpecs = %+v, want b then a", specs)
+	}
+	// Without an order list the names are sorted.
+	delete(values, "containerOrder")
+	specs = containerSpecs(values, "containers", "containerOrder")
+	if len(specs) != 2 || cpu(specs[0]) != "1" {
+		t.Errorf("containerSpecs without order = %+v, want a then b", specs)
+	}
+	if len(containerSpecs(map[string]interface{}{"containers": "garbage"}, "containers", "containerOrder")) != 0 || len(containerSpecs(nil, "containers", "containerOrder")) != 0 {
+		t.Error("containerSpecs of a non-map must be empty")
 	}
 }
 

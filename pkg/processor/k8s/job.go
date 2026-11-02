@@ -43,7 +43,8 @@ func (p *JobProcessor) Process(ctx processor.Context, obj *unstructured.Unstruct
 	name := obj.GetName()
 	namespace := obj.GetNamespace()
 
-	values, deps := p.extractValues(obj)
+	values, deps := p.extractValues(obj, finishedJobState(ctx, obj))
+	setHookEvents(ctx, values, deps)
 
 	// Get annotations for inline embedding in template
 	annotations := obj.GetAnnotations()
@@ -65,9 +66,76 @@ func (p *JobProcessor) Process(ctx processor.Context, obj *unstructured.Unstruct
 	}, nil
 }
 
-func (p *JobProcessor) extractValues(obj *unstructured.Unstructured) (map[string]interface{}, []types.ResourceKey) {
+// Defaults of the Job hook switches (values <job>.hook.*).
+const (
+	jobHookEvents = "pre-install,pre-upgrade"
+	// jobHookEventsAfter is the default for a Job that uses objects of the
+	// chart: a pre-install hook runs before any of them exists.
+	jobHookEventsAfter  = "post-install,post-upgrade"
+	jobHookDeletePolicy = "before-hook-creation"
+	jobHookWeight       = "0"
+)
+
+// setHookEvents makes a Job that reads an object of the chart (a Secret,
+// ConfigMap, ServiceAccount or claim in the input) run after the install and
+// the upgrade, not before: a pre-install hook runs before any object of the
+// chart exists and would hang on the missing object until the timeout.
+func setHookEvents(ctx processor.Context, values map[string]interface{}, deps []types.ResourceKey) {
+	hook, ok := values["hook"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	for _, dep := range deps {
+		if _, inChart := ctx.AllResources[dep]; inChart {
+			hook["events"] = jobHookEventsAfter
+			return
+		}
+	}
+}
+
+// finishedJobState returns "succeeded" or "failed" when the cluster extractor
+// found obj already run to its end, and "" for any other Job.
+func finishedJobState(ctx processor.Context, obj *unstructured.Unstructured) string {
+	r := ctx.AllResources[types.ResourceKey{
+		GVK:       obj.GroupVersionKind(),
+		Namespace: obj.GetNamespace(),
+		Name:      obj.GetName(),
+	}]
+	if r == nil {
+		return ""
+	}
+	return r.FinishedState
+}
+
+// hasHookAnnotation reports whether the input already carries a Helm hook
+// annotation (helm.sh/hook, helm.sh/hook-weight, ...). Such a Job keeps its
+// own hook annotations and gets no hook switch, so no key is rendered twice.
+func hasHookAnnotation(annotations map[string]string) bool {
+	for k := range annotations {
+		if strings.HasPrefix(k, "helm.sh/hook") {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *JobProcessor) extractValues(obj *unstructured.Unstructured, finished string) (map[string]interface{}, []types.ResourceKey) {
 	values := make(map[string]interface{})
 	var deps []types.ResourceKey
+
+	// Switches: the whole Job can be turned off, and a Job that finished
+	// successfully in the cluster is rendered as a Helm hook by default, so it
+	// does not rerun on every install. A failed Job is not: a hook that fails
+	// aborts the install and every upgrade.
+	values["enabled"] = true
+	if !hasHookAnnotation(obj.GetAnnotations()) {
+		values["hook"] = map[string]interface{}{
+			"enabled":      finished == "succeeded",
+			"events":       jobHookEvents,
+			"deletePolicy": jobHookDeletePolicy,
+			"weight":       jobHookWeight,
+		}
+	}
 
 	// Extract completions
 	if completions, ok := nestedInt64(obj.Object, "spec", "completions"); ok {
@@ -129,14 +197,14 @@ func (p *JobProcessor) extractValues(obj *unstructured.Unstructured) (map[string
 }
 
 // buildAnnotationsBlock generates inline annotation YAML for the template.
-// Helm hook annotations are embedded directly; regular annotations use toYaml from values.
+// Helm annotations of the input are embedded directly; regular annotations use
+// toYaml from values. A Job whose input has no hook annotation also renders
+// the helm.sh/hook* annotations from the hook switches of its values.
 func buildAnnotationsBlock(annotations map[string]string) string {
-	if len(annotations) == 0 {
-		return ""
-	}
+	switchHook := !hasHookAnnotation(annotations)
 
-	// Collect Helm hook annotations
-	var helmHooks []string
+	// Collect Helm annotations of the input
+	var helmLines []string
 	keys := make([]string, 0, len(annotations))
 	for k := range annotations {
 		if strings.HasPrefix(k, "helm.sh/") {
@@ -146,10 +214,10 @@ func buildAnnotationsBlock(annotations map[string]string) string {
 	sort.Strings(keys)
 
 	for _, k := range keys {
-		helmHooks = append(helmHooks, fmt.Sprintf("    %s: %q", k, annotations[k]))
+		helmLines = append(helmLines, fmt.Sprintf("    %s: %q", k, annotations[k]))
 	}
 
-	if len(helmHooks) == 0 {
+	if len(helmLines) == 0 && !switchHook {
 		// Only regular annotations — use toYaml from values
 		return `  {{- with .annotations }}
   annotations:
@@ -159,14 +227,30 @@ func buildAnnotationsBlock(annotations map[string]string) string {
 
 	// Build combined annotations block
 	var sb strings.Builder
+	closeIf := false
+	if len(helmLines) == 0 {
+		// Nothing literal: emit the key only when something goes under it.
+		sb.WriteString("  {{- if or $hook.enabled .annotations }}\n")
+		closeIf = true
+	}
 	sb.WriteString("  annotations:\n")
-	for _, line := range helmHooks {
+	for _, line := range helmLines {
 		sb.WriteString(line)
 		sb.WriteString("\n")
+	}
+	if switchHook {
+		sb.WriteString("    {{- if $hook.enabled }}\n")
+		sb.WriteString("    helm.sh/hook: {{ default \"" + jobHookEvents + "\" $hook.events | quote }}\n")
+		sb.WriteString("    helm.sh/hook-weight: {{ default \"" + jobHookWeight + "\" $hook.weight | quote }}\n")
+		sb.WriteString("    helm.sh/hook-delete-policy: {{ default \"" + jobHookDeletePolicy + "\" $hook.deletePolicy | quote }}\n")
+		sb.WriteString("    {{- end }}\n")
 	}
 	sb.WriteString("    {{- with .annotations }}\n")
 	sb.WriteString("    {{- toYaml . | nindent 4 }}\n")
 	sb.WriteString("    {{- end }}")
+	if closeIf {
+		sb.WriteString("\n  {{- end }}")
+	}
 
 	return sb.String()
 }
@@ -183,6 +267,8 @@ func (p *JobProcessor) generateTemplate(ctx processor.Context, serviceName, name
 	return fmt.Sprintf(`{{- $svc := .Values.services.%s -}}
 {{- if $svc.enabled }}
 {{- with $svc.job }}
+{{- if (hasKey . "enabled" | ternary .enabled true) }}
+{{- $hook := default (dict) .hook }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -215,6 +301,7 @@ spec:
   {{- end }}
 %s{{- end }}
 {{- end }}
-`, serviceName, processor.ObjectName(name), ctx.ChartName, serviceName, annotationsPart,
+{{- end }}
+`, serviceName, processor.ObjName(ctx.ChartName, name), ctx.ChartName, serviceName, annotationsPart,
 		podTemplate(ctx.ChartName, 2, "Never", "Job/"+name))
 }

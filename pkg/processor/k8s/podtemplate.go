@@ -46,17 +46,29 @@ func extractPodTemplateValues(obj *unstructured.Unstructured, values map[string]
 		if len(list) == 0 {
 			continue
 		}
-		containers := make([]map[string]interface{}, 0, len(list))
-		for _, c := range list {
+		// Containers are a map by name, so `--set <path>.containers.<name>.image.tag=X`
+		// reaches one container; the order list keeps the input order, which
+		// the rendered pod spec must keep (init containers run in it).
+		containers := make(map[string]interface{}, len(list))
+		order := make([]interface{}, 0, len(list))
+		for i, c := range list {
 			container, ok := c.(map[string]interface{})
 			if !ok {
 				continue
 			}
 			cv, cdeps := extractContainerValues(container, ns)
-			containers = append(containers, cv)
+			name, _ := container["name"].(string)
+			if name == "" {
+				name = fmt.Sprintf("container-%d", i)
+			}
+			if _, dup := containers[name]; !dup {
+				order = append(order, name)
+			}
+			containers[name] = cv
 			deps = append(deps, cdeps...)
 		}
 		values[field] = containers
+		values[containerOrderKey(field)] = order
 	}
 
 	if volumes, ok := podSpec["volumes"].([]interface{}); ok && len(volumes) > 0 {
@@ -143,14 +155,21 @@ func extractPodSpecSettings(podSpec, values map[string]interface{}) {
 	}
 }
 
-// extractContainerValues returns the values of one container.
+// containerOrderKey returns the values key of the order list of the containers
+// stored under field ("containers" or "initContainers").
+func containerOrderKey(field string) string {
+	if field == "initContainers" {
+		return "initContainerOrder"
+	}
+	return "containerOrder"
+}
+
+// extractContainerValues returns the values of one container. The name is not
+// part of them: the container is stored under it.
 func extractContainerValues(container map[string]interface{}, namespace string) (map[string]interface{}, []types.ResourceKey) {
 	var deps []types.ResourceKey
 	cv := make(map[string]interface{})
 
-	if name, ok := container["name"].(string); ok {
-		cv["name"] = name
-	}
 	if image, ok := container["image"].(string); ok {
 		repo, tag, digest := parseImage(image)
 		img := map[string]interface{}{"repository": repo}
@@ -283,25 +302,36 @@ func podTemplate(chartName string, indent int, restartPolicy string, workloadKey
 	w(`      {{- toYaml . | nindent %d }}`, n(6))
 	w(`    {{- end }}`)
 	w(`    {{- with .serviceAccountName }}`)
-	w(`    serviceAccountName: {{ . }}`)
+	w(`    serviceAccountName: {{ include "%s.ref" (list $ "ServiceAccount" .) }}`, chartName)
 	w(`    {{- end }}`)
 	w(`    {{- with merge (deepCopy (.podSecurityContext | default dict)) (deepCopy ((($.Values.global).securityContextDefaults).pod | default dict)) }}`)
 	w(`    securityContext:`)
 	w(`      {{- toYaml . | nindent %d }}`, n(6))
 	w(`    {{- end }}`)
-	w(`    {{- with .initContainers }}`)
+	// Containers are a map by name; the order list gives the rendered order
+	// (without it, the names sorted). A name left out of the map renders
+	// nothing, so an overlay can drop a container with `null`.
+	w(`    {{- $dhgInitCs := .initContainers | default dict }}`)
+	w(`    {{- $dhgCs := .containers | default dict }}`)
+	w(`    {{- with .initContainerOrder | default (keys $dhgInitCs | sortAlpha) }}`)
 	w(`    initContainers:`)
 	w(`      {{- range . }}`)
-	b.WriteString(containerTemplate(indent + 6))
+	w(`      {{- $dhgName := . }}`)
+	w(`      {{- with index $dhgInitCs $dhgName }}`)
+	b.WriteString(containerTemplate(chartName, indent+6))
+	w(`      {{- end }}`)
 	w(`      {{- end }}`)
 	w(`    {{- end }}`)
 	w(`    containers:`)
-	w(`      {{- range .containers }}`)
-	b.WriteString(containerTemplate(indent + 6))
+	w(`      {{- range .containerOrder | default (keys $dhgCs | sortAlpha) }}`)
+	w(`      {{- $dhgName := . }}`)
+	w(`      {{- with index $dhgCs $dhgName }}`)
+	b.WriteString(containerTemplate(chartName, indent+6))
+	w(`      {{- end }}`)
 	w(`      {{- end }}`)
 	w(`    {{- with concat (.volumes | default list) $dhgInjVolumes }}`)
 	w(`    volumes:`)
-	w(`      {{- toYaml . | nindent %d }}`, n(6))
+	w(`      {{- include "%s.refs" (list $ .) | nindent %d }}`, chartName, n(6))
 	w(`    {{- end }}`)
 	for _, field := range []string{"nodeSelector", "affinity", "tolerations", "topologySpreadConstraints", "hostAliases", "dnsConfig"} {
 		w(`    {{- with .%s }}`, field)
@@ -311,7 +341,11 @@ func podTemplate(chartName string, indent int, restartPolicy string, workloadKey
 	}
 	for _, field := range []string{"hostname", "subdomain", "priorityClassName", "runtimeClassName", "dnsPolicy"} {
 		w(`    {{- with .%s }}`, field)
-		w(`    %s: {{ . | quote }}`, field)
+		if field == "priorityClassName" {
+			w(`    %s: {{ include "%s.ref" (list $ "PriorityClass" .) | quote }}`, field, chartName)
+		} else {
+			w(`    %s: {{ . | quote }}`, field)
+		}
 		w(`    {{- end }}`)
 	}
 	for _, field := range []string{"shareProcessNamespace", "hostNetwork", "hostPID", "hostIPC"} {
@@ -340,12 +374,13 @@ func podTemplate(chartName string, indent int, restartPolicy string, workloadKey
 
 // containerTemplate renders one entry of a containers list from the values
 // written by extractContainerValues; indent is the indentation of the "- ".
-func containerTemplate(indent int) string {
+// The dot is the container's values, $dhgName its name (the map key).
+func containerTemplate(chartName string, indent int) string {
 	pad := strings.Repeat(" ", indent)
 	var b strings.Builder
 	w := func(s string) { b.WriteString(pad + s + "\n") }
-	w(`{{- $dhgInj := get $dhgInjContainers .name | default dict }}`)
-	w(`- name: {{ .name }}`)
+	w(`{{- $dhgInj := get $dhgInjContainers $dhgName | default dict }}`)
+	w(`- name: {{ $dhgName }}`)
 	w(`  image: "{{ .image.repository }}{{ with .image.tag }}:{{ . }}{{ end }}{{ with .image.digest }}@{{ . }}{{ end }}"`)
 	w(`  {{- with .image.pullPolicy }}`)
 	w(`  imagePullPolicy: {{ . }}`)
@@ -358,7 +393,11 @@ func containerTemplate(indent int) string {
 		if field == "env" || field == "envFrom" || field == "volumeMounts" {
 			w(`  {{- with concat (.` + field + ` | default list) ($dhgInj.` + field + ` | default list) }}`)
 			w(`  ` + field + `:`)
-			w(fmt.Sprintf(`    {{- toYaml . | nindent %d }}`, indent+4))
+			if field == "volumeMounts" {
+				w(fmt.Sprintf(`    {{- toYaml . | nindent %d }}`, indent+4))
+			} else {
+				w(fmt.Sprintf(`    {{- include "%s.refs" (list $ .) | nindent %d }}`, chartName, indent+4))
+			}
 			w(`  {{- end }}`)
 			continue
 		}
