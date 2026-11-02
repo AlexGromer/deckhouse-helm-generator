@@ -19,14 +19,84 @@ func makeTestChart(name string) *types.GeneratedChart {
 	}
 }
 
-func TestModuleScaffold_ChartYAML_HasHelmLibDep(t *testing.T) {
-	chart := makeTestChart("mymodule")
-	values := map[string]interface{}{"enabled": true}
+// makeHelmLibChart is a chart whose template really includes a helm_lib helper.
+func makeHelmLibChart(name string) *types.GeneratedChart {
+	chart := makeTestChart(name)
+	chart.Templates = map[string]string{
+		"templates/deployment.yaml": "metadata:\n  labels:\n    {{- include \"helm_lib_module_labels\" (list . (dict \"app\" \"x\")) | nindent 4 }}\n",
+	}
+	return chart
+}
 
-	result := GenerateDeckhouseModule(chart, values)
+func TestModuleScaffold_ChartYAML_HasHelmLibDep(t *testing.T) {
+	result := GenerateDeckhouseModule(makeHelmLibChart("mymodule"), map[string]interface{}{"enabled": true})
 
 	if !strings.Contains(result.ChartYAML, "name: deckhouse_lib_helm") {
-		t.Error("Expected deckhouse_lib_helm dependency in Chart.yaml")
+		t.Error("Expected deckhouse_lib_helm dependency in Chart.yaml when a template includes helm_lib_*")
+	}
+}
+
+// S2-app-F4: the dependency made helm lint/template fail until "helm dependency
+// build" although no template used helm_lib_*.
+func TestModuleScaffold_ChartYAML_NoDepWhenHelmLibUnused(t *testing.T) {
+	chart := makeTestChart("mymodule")
+	result := GenerateDeckhouseModule(chart, map[string]interface{}{"enabled": true})
+
+	if strings.Contains(result.ChartYAML, "deckhouse_lib_helm") || strings.Contains(result.ChartYAML, "dependencies:") {
+		t.Errorf("Chart.yaml must not declare deckhouse_lib_helm when no template uses helm_lib_*:\n%s", result.ChartYAML)
+	}
+	if result.ChartYAML != chart.ChartYAML {
+		t.Errorf("Chart.yaml changed without a dependency to add:\n%s", result.ChartYAML)
+	}
+	if result.Notes != chart.Notes {
+		t.Errorf("Notes changed without a dependency to add: %q", result.Notes)
+	}
+}
+
+func TestModuleScaffold_HelmLibInCommentOnly_NoDep(t *testing.T) {
+	chart := makeTestChart("mymodule")
+	chart.Templates["templates/deployment.yaml"] = "{{- /* TODO: {{ include \"helm_lib_module_labels\" . }} */ -}}\nkind: Deployment\n"
+	result := GenerateDeckhouseModule(chart, nil)
+
+	if strings.Contains(result.ChartYAML, "deckhouse_lib_helm") {
+		t.Errorf("a helm_lib_* mention in a template comment is not a use:\n%s", result.ChartYAML)
+	}
+}
+
+func TestModuleScaffold_HelmLibInHelpers_HasDep(t *testing.T) {
+	chart := makeTestChart("mymodule")
+	chart.Helpers = "{{- define \"mymodule.labels\" -}}{{ include \"helm_lib_module_labels\" (list .) }}{{- end -}}\n"
+	result := GenerateDeckhouseModule(chart, nil)
+
+	if !strings.Contains(result.ChartYAML, "name: deckhouse_lib_helm") {
+		t.Errorf("a helm_lib_* include in _helpers.tpl needs the dependency:\n%s", result.ChartYAML)
+	}
+}
+
+// With the dependency, Chart.yaml cannot be linted or rendered before
+// "helm dependency update": the user is told so in NOTES.
+func TestModuleScaffold_NotesMentionDependencyUpdate(t *testing.T) {
+	chart := makeHelmLibChart("mymodule")
+	chart.Notes = "Installed {{ .Chart.Name }}.\n"
+	result := GenerateDeckhouseModule(chart, nil)
+
+	if !strings.HasPrefix(result.Notes, chart.Notes) {
+		t.Errorf("existing NOTES must be kept:\n%s", result.Notes)
+	}
+	if !strings.Contains(result.Notes, "helm dependency update") {
+		t.Errorf("NOTES must mention 'helm dependency update':\n%s", result.Notes)
+	}
+	if again := GenerateDeckhouseModule(result, nil); again.Notes != result.Notes {
+		t.Errorf("second application changed NOTES:\n%s", again.Notes)
+	}
+}
+
+func TestModuleScaffold_DoesNotMutateInput(t *testing.T) {
+	chart := makeHelmLibChart("mymodule")
+	chartYAML, templates := chart.ChartYAML, chart.Templates["templates/deployment.yaml"]
+	GenerateDeckhouseModule(chart, nil)
+	if chart.ChartYAML != chartYAML || chart.Templates["templates/deployment.yaml"] != templates {
+		t.Error("input chart was modified")
 	}
 }
 
@@ -132,35 +202,16 @@ func TestModuleScaffold_HooksDir(t *testing.T) {
 	}
 }
 
-func TestModuleScaffold_Templates_HelmLib(t *testing.T) {
+// The templates are passed through: advertising helpers of a library chart that is
+// not a dependency would only mislead.
+func TestModuleScaffold_Templates_Unchanged(t *testing.T) {
 	chart := makeTestChart("mymodule")
 	result := GenerateDeckhouseModule(chart, map[string]interface{}{})
 
-	found := false
-	for _, content := range result.Templates {
-		if strings.Contains(content, "helm_lib_module_labels") {
-			found = true
-			break
+	for path, content := range chart.Templates {
+		if result.Templates[path] != content {
+			t.Errorf("template %s changed:\n%s", path, result.Templates[path])
 		}
-	}
-	if !found {
-		t.Error("Expected helm_lib_module_labels in at least one template")
-	}
-}
-
-func TestModuleScaffold_Templates_ModuleImage(t *testing.T) {
-	chart := makeTestChart("mymodule")
-	result := GenerateDeckhouseModule(chart, map[string]interface{}{})
-
-	found := false
-	for _, content := range result.Templates {
-		if strings.Contains(content, "helm_lib_module_image") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("Expected helm_lib_module_image in at least one template")
 	}
 }
 
@@ -175,7 +226,7 @@ func TestGenerateDeckhouseModule_MergesIntoExistingDependencies(t *testing.T) {
 	chart := &types.GeneratedChart{
 		Name:      "app",
 		ChartYAML: "apiVersion: v2\nname: app\nversion: 0.1.0\ndependencies:\n  - name: redis\n    version: 1.0.0\n    repository: https://example.com\n",
-		Templates: map[string]string{},
+		Templates: map[string]string{"templates/a.yaml": "{{ include \"helm_lib_module_labels\" . }}"},
 	}
 	result := GenerateDeckhouseModule(chart, nil)
 

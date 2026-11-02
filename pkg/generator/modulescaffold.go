@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -11,8 +12,11 @@ import (
 )
 
 // GenerateDeckhouseModule transforms a standard Helm chart into a Deckhouse module structure.
-// It adds the deckhouse_lib_helm dependency, OpenAPI schemas, images/ and hooks/ directories,
-// and injects helm_lib helpers into templates.
+// It adds OpenAPI schemas and images/ and hooks/ directories. The deckhouse_lib_helm
+// dependency is added only when a template or helper includes a helm_lib_* helper:
+// the dependency makes helm lint/template fail until "helm dependency update" has
+// run, which is pointless for a chart that does not use the library. In that case
+// the NOTES say to run it.
 // When values is nil, the config schema is derived from the chart's values.yaml.
 func GenerateDeckhouseModule(chart *types.GeneratedChart, values map[string]interface{}) *types.GeneratedChart {
 	result := *chart
@@ -21,11 +25,10 @@ func GenerateDeckhouseModule(chart *types.GeneratedChart, values map[string]inte
 		_ = yaml.Unmarshal([]byte(chart.ValuesYAML), &values)
 	}
 
-	// Modify Chart.yaml to add the deckhouse_lib_helm dependency
-	result.ChartYAML = injectHelmLibDep(chart.ChartYAML)
-
-	// Inject helm_lib includes into templates
-	result.Templates = injectHelmLibIncludes(chart.Templates)
+	if usesHelmLib(chart) {
+		result.ChartYAML = injectHelmLibDep(chart.ChartYAML)
+		result.Notes = addDependencyUpdateNote(chart.Notes)
+	}
 
 	// Generate external files
 	result.ExternalFiles = append(append([]types.ExternalFileInfo{}, chart.ExternalFiles...),
@@ -42,6 +45,30 @@ var helmLib = helm.Dependency{
 	Repository: "https://deckhouse.github.io/lib-helm",
 }
 
+var (
+	// templateComment matches a Go-template comment, {{/* ... */}} with optional trim markers.
+	templateComment = regexp.MustCompile(`(?s)\{\{-?\s*/\*.*?\*/\s*-?\}\}`)
+	// helmLibCall matches an include/template call of a helm_lib_* helper.
+	helmLibCall = regexp.MustCompile(`\b(?:include|template)\s+"helm_lib_[A-Za-z0-9_]+"`)
+)
+
+// usesHelmLib reports whether a template or the helpers include a helm_lib_* helper.
+// Mentions inside template comments do not count.
+func usesHelmLib(chart *types.GeneratedChart) bool {
+	uses := func(content string) bool {
+		return helmLibCall.MatchString(templateComment.ReplaceAllString(content, ""))
+	}
+	if uses(chart.Helpers) {
+		return true
+	}
+	for _, content := range chart.Templates {
+		if uses(content) {
+			return true
+		}
+	}
+	return false
+}
+
 func injectHelmLibDep(chartYAML string) string {
 	for _, d := range declaredDependencies(chartYAML) {
 		if d.Name == helmLib.Name {
@@ -51,25 +78,18 @@ func injectHelmLibDep(chartYAML string) string {
 	return addChartDependencies(chartYAML, []helm.Dependency{helmLib})
 }
 
-func injectHelmLibIncludes(templates map[string]string) map[string]string {
-	result := make(map[string]string, len(templates))
+// dependencyUpdateNote tells how to fetch the library chart the module depends on.
+const dependencyUpdateNote = "This chart depends on deckhouse_lib_helm: run \"helm dependency update\" in the chart directory\n" +
+	"before helm lint, helm template or helm install.\n"
 
-	for path, content := range templates {
-		if !strings.Contains(content, "helm_lib_module_labels") {
-			content = addHelmLibComment(content)
-		}
-		result[path] = content
+func addDependencyUpdateNote(notes string) string {
+	if strings.Contains(notes, "helm dependency update") {
+		return notes
 	}
-
-	return result
-}
-
-func addHelmLibComment(content string) string {
-	header := `{{- /* Deckhouse module: use helm_lib helpers */ -}}
-{{- /* {{ include "helm_lib_module_labels" . }} for labels */ -}}
-{{- /* {{ include "helm_lib_module_image" (list . "imageName") }} for images */ -}}
-`
-	return header + content
+	if notes != "" && !strings.HasSuffix(notes, "\n") {
+		notes += "\n"
+	}
+	return notes + dependencyUpdateNote
 }
 
 func generateModuleExternalFiles(chartName string, values map[string]interface{}) []types.ExternalFileInfo {

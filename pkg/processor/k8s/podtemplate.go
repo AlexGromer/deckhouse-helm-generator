@@ -100,7 +100,43 @@ func extractPodTemplateValues(obj *unstructured.Unstructured, values map[string]
 	if tsc, ok := podSpec["topologySpreadConstraints"].([]interface{}); ok && len(tsc) > 0 {
 		values["topologySpreadConstraints"] = tsc
 	}
+	extractPodSpecSettings(podSpec, values)
 	return deps
+}
+
+// extractPodSpecSettings stores the pod-level settings the user set, under the
+// pod spec field names. Fields at their API default are left out, so the chart
+// stays as small as the input.
+func extractPodSpecSettings(podSpec, values map[string]interface{}) {
+	for _, field := range []string{"hostname", "subdomain", "priorityClassName", "runtimeClassName"} {
+		if v, ok := podSpec[field].(string); ok && v != "" {
+			values[field] = v
+		}
+	}
+	// ClusterFirst is the default policy.
+	if v, ok := podSpec["dnsPolicy"].(string); ok && v != "" && v != "ClusterFirst" {
+		values["dnsPolicy"] = v
+	}
+	if v, ok := podSpec["dnsConfig"].(map[string]interface{}); ok && len(v) > 0 {
+		values["dnsConfig"] = v
+	}
+	if v, ok := podSpec["hostAliases"].([]interface{}); ok && len(v) > 0 {
+		values["hostAliases"] = v
+	}
+	// 0 is a real grace period (kill at once), so presence counts, not truth.
+	// 30 is the server default on every pod template, so it is left out.
+	if v, ok := podSpec["terminationGracePeriodSeconds"]; ok && v != nil {
+		if n, isNum := toInt64(v); !isNum || n != 30 {
+			values["terminationGracePeriodSeconds"] = v
+		}
+	}
+	if v, ok := podSpec["shareProcessNamespace"].(bool); ok && v {
+		values["shareProcessNamespace"] = v
+	}
+	// true is the default.
+	if v, ok := podSpec["enableServiceLinks"].(bool); ok && !v {
+		values["enableServiceLinks"] = v
+	}
 }
 
 // extractContainerValues returns the values of one container.
@@ -263,12 +299,36 @@ func podTemplate(chartName string, indent int, restartPolicy string, workloadKey
 	w(`    volumes:`)
 	w(`      {{- toYaml . | nindent %d }}`, n(6))
 	w(`    {{- end }}`)
-	for _, field := range []string{"nodeSelector", "affinity", "tolerations", "topologySpreadConstraints"} {
+	for _, field := range []string{"nodeSelector", "affinity", "tolerations", "topologySpreadConstraints", "hostAliases", "dnsConfig"} {
 		w(`    {{- with .%s }}`, field)
 		w(`    %s:`, field)
 		w(`      {{- toYaml . | nindent %d }}`, n(6))
 		w(`    {{- end }}`)
 	}
+	for _, field := range []string{"hostname", "subdomain", "priorityClassName", "runtimeClassName", "dnsPolicy"} {
+		w(`    {{- with .%s }}`, field)
+		w(`    %s: {{ . | quote }}`, field)
+		w(`    {{- end }}`)
+	}
+	w(`    {{- with .shareProcessNamespace }}`)
+	w(`    shareProcessNamespace: {{ . }}`)
+	w(`    {{- end }}`)
+	// false is stored, and with would skip it.
+	w(`    {{- if hasKey . "enableServiceLinks" }}`)
+	w(`    enableServiceLinks: {{ .enableServiceLinks }}`)
+	w(`    {{- end }}`)
+	// Spot injection writes terminationGracePeriodSeconds into Deployments
+	// and StatefulSets when spot is enabled; a second key would be invalid.
+	// 0 is stored, so hasKey, not with. int64: a float from values.yaml
+	// would print as 1e+06 for large numbers.
+	spot := strings.HasPrefix(workloadKey, "Deployment/") || strings.HasPrefix(workloadKey, "StatefulSet/")
+	cond := `hasKey . "terminationGracePeriodSeconds"`
+	if spot {
+		cond = `and (hasKey . "terminationGracePeriodSeconds") (not (and $.Values.spot $.Values.spot.enabled))`
+	}
+	w(`    {{- if %s }}`, cond)
+	w(`    terminationGracePeriodSeconds: {{ .terminationGracePeriodSeconds | int64 }}`)
+	w(`    {{- end }}`)
 	return b.String()
 }
 

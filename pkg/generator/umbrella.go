@@ -70,9 +70,11 @@ func (g *UmbrellaGenerator) Generate(ctx context.Context, graph *types.ResourceG
 
 		// Add dependency for parent Chart.yaml.
 		deps = append(deps, helm.Dependency{
-			Name:      group.Name,
-			Version:   opts.ChartVersion,
-			Condition: fmt.Sprintf("%s.enabled", group.Name),
+			Name:    group.Name,
+			Version: opts.ChartVersion,
+			// Subcharts are written to this chart's charts/ directory.
+			Repository: "file://charts/" + group.Name,
+			Condition:  fmt.Sprintf("%s.enabled", group.Name),
 		})
 
 		// Collect flat values for parent values.yaml (with enabled flag).

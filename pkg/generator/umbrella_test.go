@@ -451,3 +451,33 @@ func chartNamesList(charts []*types.GeneratedChart) []string {
 	}
 	return names
 }
+
+// Subcharts live in the parent's charts/ directory, so the dependency must
+// point there (an empty "repository:" is rejected by helm dependency).
+func TestUmbrellaGenerator_ParentChartYAML_DependencyRepository(t *testing.T) {
+	resources := []*types.ProcessedResource{
+		makeProcessedResourceWithValues("Deployment", "frontend", "default",
+			map[string]string{"app.kubernetes.io/name": "frontend"},
+			map[string]interface{}{"replicaCount": int64(2)}, "# fe"),
+		makeProcessedResourceWithValues("Deployment", "backend", "default",
+			map[string]string{"app.kubernetes.io/name": "backend"},
+			map[string]interface{}{"replicaCount": int64(3)}, "# be"),
+	}
+	gen := NewUmbrellaGenerator()
+	charts, err := gen.Generate(context.Background(), buildGraph(resources, nil), Options{ChartVersion: "1.0.0"})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	parent := findParentChart(charts)
+	if parent == nil {
+		t.Fatal("parent umbrella chart not found")
+	}
+	for _, name := range []string{"frontend", "backend"} {
+		if want := "repository: file://charts/" + name + "\n"; !strings.Contains(parent.ChartYAML, want) {
+			t.Errorf("missing %q in parent Chart.yaml:\n%s", want, parent.ChartYAML)
+		}
+	}
+	if strings.Contains(parent.ChartYAML, "repository: \n") {
+		t.Errorf("empty repository in parent Chart.yaml:\n%s", parent.ChartYAML)
+	}
+}

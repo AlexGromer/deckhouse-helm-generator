@@ -13,14 +13,15 @@ func init() {
 		Name:        "workload-scaling",
 		Description: "Scale workloads with KEDA, generate PDBs and manage PVC retention policies",
 		Params: map[string]string{
-			"pvc-when-deleted":  "Retain",
-			"pvc-when-scaled":   "Retain",
-			"pdb":               "true",
-			"pdb-min-available": "1",
-			"keda":              "false",
-			"keda-min-replicas": "1",
-			"keda-max-replicas": "10",
-			"keda-cpu-target":   "80",
+			"pvc-when-deleted":    "Retain",
+			"pvc-when-scaled":     "Retain",
+			"pdb":                 "true",
+			"pdb-min-available":   "",
+			"pdb-max-unavailable": "1",
+			"keda":                "false",
+			"keda-min-replicas":   "1",
+			"keda-max-replicas":   "10",
+			"keda-cpu-target":     "80",
 		},
 		Apply: applyWorkloadScalingFeature,
 	})
@@ -29,9 +30,24 @@ func init() {
 func applyWorkloadScalingFeature(chart *types.GeneratedChart, fc FeatureContext) (*types.GeneratedChart, error) {
 	out := cloneChart(chart)
 
-	pdbMinAvailable, err := strconv.Atoi(fc.Param("pdb-min-available"))
-	if err != nil {
-		return nil, fmt.Errorf("invalid pdb-min-available %q: %w", fc.Param("pdb-min-available"), err)
+	// minAvailable is opt-in: minAvailable: 1 on a single-replica workload
+	// leaves no pod to evict and blocks node drains, so the PDB defaults to
+	// maxUnavailable.
+	pdbMinAvailable := -1
+	if raw := fc.Param("pdb-min-available"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pdb-min-available %q: %w", raw, err)
+		}
+		pdbMinAvailable = n
+	}
+	pdbMaxUnavailable := 1
+	if raw := fc.Param("pdb-max-unavailable"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pdb-max-unavailable %q: %w", raw, err)
+		}
+		pdbMaxUnavailable = n
 	}
 	kedaMinReplicas, err := strconv.Atoi(fc.Param("keda-min-replicas"))
 	if err != nil {
@@ -42,16 +58,21 @@ func applyWorkloadScalingFeature(chart *types.GeneratedChart, fc FeatureContext)
 		return nil, fmt.Errorf("invalid keda-max-replicas %q: %w", fc.Param("keda-max-replicas"), err)
 	}
 
+	pdbValues := map[string]interface{}{
+		"enabled":        fc.BoolParam("pdb"),
+		"maxUnavailable": pdbMaxUnavailable,
+	}
+	if pdbMinAvailable >= 0 {
+		pdbValues["minAvailable"] = pdbMinAvailable
+	}
+
 	valuesBlock := map[string]interface{}{
 		"enabled": true,
 		"pvcRetentionPolicy": map[string]interface{}{
 			"whenDeleted": fc.Param("pvc-when-deleted"),
 			"whenScaled":  fc.Param("pvc-when-scaled"),
 		},
-		"pdb": map[string]interface{}{
-			"enabled":      fc.BoolParam("pdb"),
-			"minAvailable": pdbMinAvailable,
-		},
+		"pdb": pdbValues,
 		"keda": map[string]interface{}{
 			"enabled":         fc.BoolParam("keda"),
 			"minReplicaCount": kedaMinReplicas,
@@ -102,7 +123,9 @@ func applyWorkloadScalingFeature(chart *types.GeneratedChart, fc FeatureContext)
 	if hasWorkload {
 		helperPrefix := opsHelperPrefix(out)
 
-		pdbContent := fmt.Sprintf(`{{- if and (.Values.workloadScaling).enabled ((.Values.workloadScaling).pdb).enabled }}
+		pdbContent := fmt.Sprintf(`{{- $ws := .Values.workloadScaling | default dict }}
+{{- $pdb := $ws.pdb | default dict }}
+{{- if and $ws.enabled $pdb.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -110,13 +133,20 @@ metadata:
   labels:
     {{- include "%s.labels" . | nindent 4 }}
 spec:
-  minAvailable: {{ ((.Values.workloadScaling).pdb).minAvailable | default 1 }}
+  {{- if hasKey $pdb "minAvailable" }}
+  minAvailable: {{ $pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ $pdb.maxUnavailable | default 1 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "%s.selectorLabels" . | nindent 6 }}
 {{- end }}
 `, helperPrefix, helperPrefix, helperPrefix)
 		out.Templates["templates/workload-scaling-pdb.yaml"] = pdbContent
+		if fc.BoolParam("pdb") && pdbMinAvailable < 0 {
+			fc.Note("workload-scaling: the PodDisruptionBudget uses maxUnavailable (default 1) so single-replica workloads can still be drained; set workloadScaling.pdb.minAvailable to require availability (it must stay below the replica count)")
+		}
 
 		kedaContent := fmt.Sprintf(`{{- if and (.Values.workloadScaling).enabled ((.Values.workloadScaling).keda).enabled }}
 apiVersion: keda.sh/v1alpha1

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"text/template/parse"
@@ -25,7 +26,7 @@ func newValidateCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "validate",
+		Use:   "validate [chart-dir...]",
 		Short: "Validate Helm chart structure, templates and Kubernetes API compatibility",
 		Long: `Validate Helm charts without a cluster:
   - Chart.yaml presence and required fields
@@ -34,9 +35,20 @@ func newValidateCmd() *cobra.Command {
   - Kubernetes API compatibility: APIs removed in, or not yet available in,
     any version of --kube-versions are errors; deprecated APIs are warnings
 
+Chart directories are passed as arguments (dhg validate ./chart) or with -f.
+A removed API inside a version-gated branch ({{ if semverCompare ...
+.Capabilities.KubeVersion ... }}) is a warning: the branch may be unreachable.
+
 For rendering and schema validation against a real cluster version, also run
 ` + "`helm lint`" + ` and ` + "`helm template | kubeconform`" + `.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				if cmd.Flags().Changed("file") {
+					return fmt.Errorf("chart directories are given both with -f/--file and as positional arguments; use one of them")
+				}
+				paths = args
+			}
 			return runValidate(cmd.Context(), validateOptions{
 				paths:        paths,
 				verbose:      verbose,
@@ -230,8 +242,27 @@ func parseTemplate(name, text string, treeSet map[string]*parse.Tree) error {
 }
 
 func validateAPIs(r *validationReport, chartPath string, templates map[string]string, opts generator.K8sVersionOptions) {
-	chart := &types.GeneratedChart{Name: filepath.Base(chartPath), Templates: templates}
+	// A template whose apiVersion sits in a version-gated branch is checked
+	// apart: the branch may be unreachable on the target cluster, so its
+	// findings are warnings.
+	plain := map[string]string{}
+	gated := map[string]string{}
+	for p, content := range templates {
+		if apiVersionGated(content) {
+			gated[p] = content
+		} else {
+			plain[p] = content
+		}
+	}
+	name := filepath.Base(chartPath)
+	checkAPIs(r, &types.GeneratedChart{Name: name, Templates: plain}, opts, false)
+	if len(gated) > 0 {
+		checkAPIs(r, &types.GeneratedChart{Name: name, Templates: gated}, opts, true)
+	}
+}
 
+// checkAPIs reports API compatibility findings; with gated they are warnings.
+func checkAPIs(r *validationReport, chart *types.GeneratedChart, opts generator.K8sVersionOptions, gated bool) {
 	matrix := generator.ValidateK8sVersionMatrix(chart, opts)
 	versions := make([]string, 0, len(matrix.Compatibility))
 	for v := range matrix.Compatibility {
@@ -241,7 +272,11 @@ func validateAPIs(r *validationReport, chartPath string, templates map[string]st
 	for _, v := range versions {
 		c := matrix.Compatibility[v]
 		for _, issue := range c.Issues {
-			r.errorf("Kubernetes %s: %s", v, issue)
+			if gated {
+				r.warnf("version-gated branch, Kubernetes %s: %s", v, issue)
+			} else {
+				r.errorf("Kubernetes %s: %s", v, issue)
+			}
 		}
 		if c.Compatible {
 			r.okf("Kubernetes %s: compatible", v)
@@ -250,8 +285,70 @@ func validateAPIs(r *validationReport, chartPath string, templates map[string]st
 
 	deprecations := generator.CheckDeprecatedAPIs(chart, generator.PlutoCheckOptions{})
 	for _, d := range deprecations.Deprecations {
-		r.warnf("%s: %s/%s is deprecated: %s", d.TemplatePath, d.APIVersion, d.Kind, d.Message)
+		suffix := ""
+		if gated {
+			suffix = " (version-gated branch)"
+		}
+		r.warnf("%s: %s/%s is deprecated: %s%s", d.TemplatePath, d.APIVersion, d.Kind, d.Message, suffix)
 	}
+}
+
+// templateAction matches a Go template control action; group 1 is the
+// keyword (longest first so "else if" wins over "else"), group 2 the rest.
+var templateAction = regexp.MustCompile(`\{\{-?\s*(else if|else|end|if|with|range|define|block)\b([^}]*?)-?\}\}`)
+
+// apiVersionGated reports whether the apiVersion line of a template sits
+// inside a branch whose condition depends on the cluster (.Capabilities
+// .KubeVersion or .Capabilities.APIVersions), or in the else-branch of one.
+// Static text scan: "keep it minimal", the chart is not rendered.
+func apiVersionGated(content string) bool {
+	var own []bool // per open block: some condition so far was cluster-dependent
+	gatedNow := func() bool {
+		for _, g := range own {
+			if g {
+				return true
+			}
+		}
+		return false
+	}
+	apply := func(kw, cond string) {
+		switch kw {
+		case "if", "with", "range", "block", "define":
+			own = append(own, clusterDependent(cond))
+		case "else if":
+			if len(own) > 0 && clusterDependent(cond) {
+				own[len(own)-1] = true
+			}
+		case "end":
+			if len(own) > 0 {
+				own = own[:len(own)-1]
+			}
+		}
+	}
+
+	gated := false
+	found := false
+	for _, line := range strings.Split(content, "\n") {
+		idx := strings.Index(line, "apiVersion:")
+		matches := templateAction.FindAllStringSubmatchIndex(line, -1)
+		// Actions before the apiVersion text (all of them when the line has none).
+		i := 0
+		for ; i < len(matches) && (idx < 0 || matches[i][0] < idx); i++ {
+			apply(line[matches[i][2]:matches[i][3]], line[matches[i][4]:matches[i][5]])
+		}
+		if idx >= 0 {
+			// The last apiVersion line wins, as in extractAPIVersionAndKind.
+			gated, found = gatedNow(), true
+			for ; i < len(matches); i++ {
+				apply(line[matches[i][2]:matches[i][3]], line[matches[i][4]:matches[i][5]])
+			}
+		}
+	}
+	return found && gated
+}
+
+func clusterDependent(cond string) bool {
+	return strings.Contains(cond, ".Capabilities.KubeVersion") || strings.Contains(cond, ".Capabilities.APIVersions")
 }
 
 func minorOf(v string) int {

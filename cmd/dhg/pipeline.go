@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -14,6 +16,84 @@ import (
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor/value"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
+
+// workloadKinds are the kinds with a pod template, whose references to
+// ConfigMaps, Secrets, ServiceAccounts and PVCs must be satisfied at install.
+var workloadKinds = map[string]bool{
+	"Deployment": true, "StatefulSet": true, "DaemonSet": true,
+	"Job": true, "CronJob": true, "Pod": true, "ReplicaSet": true,
+}
+
+// referencedKinds are the dependency kinds missingReferenceNotes reports.
+var referencedKinds = map[string]bool{
+	"ConfigMap": true, "Secret": true, "ServiceAccount": true, "PersistentVolumeClaim": true,
+}
+
+// missingReferenceNotes lists what workloads reference (envFrom, volumes,
+// ServiceAccount, imagePullSecrets) but the chart does not contain. Objects
+// every namespace gets on its own are not reported.
+func missingReferenceNotes(processed []*types.ProcessedResource, all map[types.ResourceKey]*types.ExtractedResource, source types.Source, clusterSecrets string) []string {
+	secretsSkipped := source == types.SourceCluster && clusterSecrets != "mask" && clusterSecrets != "include"
+	var notes []string
+	seen := map[string]bool{}
+	for _, p := range processed {
+		owner := p.Original.ResourceKey()
+		if !workloadKinds[owner.GVK.Kind] {
+			continue
+		}
+		for _, dep := range p.Dependencies {
+			kind := dep.GVK.Kind
+			if !referencedKinds[kind] {
+				continue
+			}
+			if (kind == "ServiceAccount" && dep.Name == "default") || (kind == "ConfigMap" && dep.Name == "kube-root-ca.crt") {
+				continue
+			}
+			if _, ok := all[dep]; ok {
+				continue
+			}
+			// A definition written without a namespace applies to the workload's.
+			unscoped := dep
+			unscoped.Namespace = ""
+			if _, ok := all[unscoped]; ok {
+				continue
+			}
+			note := fmt.Sprintf("%s %s is referenced by %s %s but is not in the chart (create it before install", kind, dep.Name, owner.GVK.Kind, owner.Name)
+			if kind == "Secret" && secretsSkipped {
+				note += "; Secrets are skipped by --cluster-secrets skip"
+			}
+			note += ")"
+			if !seen[note] {
+				seen[note] = true
+				notes = append(notes, note)
+			}
+		}
+	}
+	return notes
+}
+
+// printExtractWarning reports an error the extractor sent without failing:
+// notes as "Note:", the aggregated permission errors as one summary line
+// (with the per-kind detail under -v), anything else as "Warning:".
+func printExtractWarning(w io.Writer, err error, verbose bool) {
+	var note *extractor.NoteError
+	var forbidden *extractor.ForbiddenKindsError
+	switch {
+	case errors.As(err, &note):
+		fmt.Fprintf(w, "Note: %s\n", note.Msg)
+	case errors.As(err, &forbidden):
+		if verbose {
+			fmt.Fprintf(w, "Warning: %v\n", forbidden)
+			for _, d := range forbidden.Details {
+				fmt.Fprintf(w, "  %s\n", d)
+			}
+		} else {
+			fmt.Fprintf(w, "Warning: %v (use -v for details)\n", forbidden)
+		}
+	default:
+		fmt.Fprintf(w, "Warning: %v\n", err)
+	}
+}
 
 // pipelineOptions configures the extract → process → analyze stages shared
 // by generate, analyze, graph, migrate and fix.
@@ -126,6 +206,13 @@ func processResources(ctx context.Context, opts pipelineOptions, extracted []*ty
 		}
 	}
 
+	for _, note := range missingReferenceNotes(processed, all, opts.source, opts.extract.ClusterSecrets) {
+		if !seenNotes[note] {
+			seenNotes[note] = true
+			allNotes = append(allNotes, note)
+		}
+	}
+
 	for _, note := range processor.ResolveCollisions(processed) {
 		if !opts.quiet {
 			fmt.Fprintf(os.Stderr, "Note: %s\n", note)
@@ -192,7 +279,7 @@ func extractResources(ctx context.Context, opts pipelineOptions) ([]*types.Extra
 			if synthesizes {
 				return nil, nil, err
 			}
-			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+			printExtractWarning(os.Stderr, err, opts.verbose)
 		case <-ctx.Done():
 			return nil, nil, ctx.Err()
 		}

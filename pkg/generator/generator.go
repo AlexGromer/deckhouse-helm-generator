@@ -51,7 +51,8 @@ type Options struct {
 	ExternalFileManager *value.ExternalFileManager
 
 	// DeckhouseModule enables Deckhouse module scaffold generation
-	// (openapi/, images/, hooks/, deckhouse_lib_helm dependency).
+	// (openapi/, images/, hooks/). The deckhouse_lib_helm dependency is added
+	// only when a template or helper uses a helm_lib_* helper.
 	DeckhouseModule bool
 
 	// ValuesFlat generates values.yaml with inline dot-notation path comments

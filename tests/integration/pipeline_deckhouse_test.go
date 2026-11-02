@@ -1538,9 +1538,10 @@ spec:
 	// Apply Deckhouse module scaffold
 	result := generator.GenerateDeckhouseModule(chart, nil)
 
-	// Verify ChartYAML contains deckhouse_lib_helm dependency
-	if !strings.Contains(result.ChartYAML, "deckhouse_lib_helm") {
-		t.Error("Expected result.ChartYAML to contain 'deckhouse_lib_helm' dependency")
+	// The generated templates do not use helm_lib_*, so the chart must not depend on
+	// deckhouse_lib_helm (it would break helm lint/template until "helm dependency update").
+	if strings.Contains(result.ChartYAML, "deckhouse_lib_helm") {
+		t.Error("Expected result.ChartYAML not to declare the unused deckhouse_lib_helm dependency")
 	}
 
 	// Verify ExternalFiles contains the required paths
@@ -1562,16 +1563,11 @@ spec:
 		}
 	}
 
-	// Verify templates contain helm_lib comment
-	helmLibFoundInTemplates := false
-	for _, content := range result.Templates {
+	// The generated templates do not use helm_lib_*: they stay as they are.
+	for path, content := range result.Templates {
 		if strings.Contains(content, "helm_lib") {
-			helmLibFoundInTemplates = true
-			break
+			t.Errorf("template %s unexpectedly mentions helm_lib", path)
 		}
-	}
-	if !helmLibFoundInTemplates {
-		t.Error("Expected at least one template to contain 'helm_lib' comment")
 	}
 }
 

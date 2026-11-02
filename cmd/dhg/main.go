@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -43,9 +45,21 @@ func main() {
 
 	// Execute root command
 	if err := newRootCmd().ExecuteContext(ctx); err != nil {
+		var ec exitCodeError
+		if errors.As(err, &ec) {
+			os.Exit(ec.code)
+		}
 		os.Exit(1)
 	}
 }
+
+// exitCodeError makes main exit with a specific code (dhg diff --exit-code).
+type exitCodeError struct {
+	code int
+	msg  string
+}
+
+func (e exitCodeError) Error() string { return e.msg }
 
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
@@ -503,6 +517,10 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		}
 		for i, chart := range charts {
 			charts[i] = generator.GenerateDeckhouseModule(chart, nil)
+			if strings.Contains(charts[i].ChartYAML, "deckhouse_lib_helm") {
+				fmt.Printf("Chart %s depends on deckhouse_lib_helm: run \"helm dependency update\" in %s before helm lint/template\n",
+					chart.Name, filepath.Join(opts.outputDir, chart.Name))
+			}
 		}
 	}
 
@@ -896,20 +914,22 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		for _, chart := range charts {
 			var envFiles map[string][]byte
 
+			// The overrides are keyed on the value paths of this chart's values.yaml.
+			var baseValues map[string]interface{}
+			if chart.ValuesYAML != "" {
+				_ = yaml.Unmarshal([]byte(chart.ValuesYAML), &baseValues)
+			}
+
 			if group, ok := groupsByName[chart.Name]; ok {
-				// Workload-aware path: detect workload type and parse base values.
+				// Workload-aware path: detect the workload type.
 				workloadType := generator.DetectWorkloadType(group)
-				var baseValues map[string]interface{}
-				if chart.ValuesYAML != "" {
-					_ = yaml.Unmarshal([]byte(chart.ValuesYAML), &baseValues)
-				}
 				envFiles = generator.GenerateEnvValuesForWorkload(baseValues, workloadType)
 				if opts.verbose {
 					fmt.Printf("  Chart %s: workload=%s (workload-aware profiles)\n", chart.Name, workloadType)
 				}
 			} else {
 				// Fallback: no matching group — use static profiles.
-				envFiles = generator.GenerateEnvValues(nil)
+				envFiles = generator.GenerateEnvValues(baseValues)
 				if opts.verbose {
 					fmt.Printf("  Chart %s: using default profiles (no group match)\n", chart.Name)
 				}
@@ -1001,10 +1021,55 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	}
 
 	fmt.Printf("\n✓ Successfully generated %d chart(s) in %s\n", len(charts), opts.outputDir)
-	fmt.Printf("\nTo install the chart, run:\n")
-	fmt.Printf("  helm install my-release %s/%s\n", opts.outputDir, opts.chartName)
+	installNS := opts.namespace
+	if installNS == "" && len(opts.namespaces) == 1 {
+		installNS = opts.namespaces[0]
+	}
+	fmt.Println()
+	printInstallHint(os.Stdout, opts.outputDir, charts, opts.chartName, installNS)
 
 	return nil
+}
+
+// installHintMax is how many chart paths the install hint lists.
+const installHintMax = 3
+
+// printInstallHint prints how to install the generated charts. In separate
+// and library modes <outputDir>/<chartName> does not exist, so the hint lists
+// the charts that were written (first installHintMax and a count of the rest);
+// library charts and umbrella subcharts are not installable on their own.
+func printInstallHint(w io.Writer, outputDir string, charts []*types.GeneratedChart, chartName, namespace string) {
+	var paths []string
+	for _, c := range charts {
+		if strings.Contains(c.Name, "/") || strings.Contains(c.ChartYAML, "type: library") {
+			continue
+		}
+		paths = append(paths, filepath.Join(outputDir, c.Name))
+	}
+	if len(paths) == 0 {
+		paths = []string{filepath.Join(outputDir, chartName)}
+	}
+	if namespace == "" {
+		namespace = "<namespace>"
+	}
+
+	if len(paths) == 1 {
+		fmt.Fprintf(w, "To install the chart, run:\n")
+	} else {
+		fmt.Fprintf(w, "To install the charts, run (one command per chart):\n")
+	}
+	for i, p := range paths {
+		if i == installHintMax {
+			fmt.Fprintf(w, "  ... and %d more in %s\n", len(paths)-installHintMax, outputDir)
+			break
+		}
+		// Several charts go to one namespace: each needs its own release name.
+		release := "my-release"
+		if len(paths) > 1 {
+			release = filepath.Base(p)
+		}
+		fmt.Fprintf(w, "  helm install %s %s --namespace %s\n", release, p, namespace)
+	}
 }
 
 func newAnalyzeCmd() *cobra.Command {
@@ -1400,30 +1465,77 @@ func loadChartFromDir(dir string) (*types.GeneratedChart, error) {
 
 func newDiffCmd() *cobra.Command {
 	var (
-		color    bool
-		exitCode bool
+		colorMode string
+		exitCode  bool
 	)
+
+	// With --exit-code every error except "differences" is trouble (2), so a CI
+	// script can tell them apart, as with diff(1).
+	trouble := func(err error) error {
+		var ec exitCodeError
+		if err == nil || !exitCode || errors.As(err, &ec) {
+			return err
+		}
+		return exitCodeError{code: 2, msg: err.Error()}
+	}
 
 	cmd := &cobra.Command{
 		Use:   "diff <dir1> <dir2>",
 		Short: "Show differences between two chart directories",
 		Long: `Compare two Helm chart directories and show differences.
 Useful for comparing generated charts before and after changes.`,
-		Args: cobra.ExactArgs(2),
+		Args: func(cmd *cobra.Command, args []string) error {
+			return trouble(cobra.ExactArgs(2)(cmd, args))
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDiff(cmd.Context(), diffOptions{
+			color, err := resolveColor(colorMode, stdoutIsTerminal())
+			if err != nil {
+				return trouble(err)
+			}
+			err = runDiff(cmd.Context(), diffOptions{
 				dir1:     args[0],
 				dir2:     args[1],
 				color:    color,
 				exitCode: exitCode,
 			})
+			// Differences are a result, not an error to print. Silencing here,
+			// after argument and flag checks, keeps those errors printed.
+			var ec exitCodeError
+			if errors.As(err, &ec) && ec.code == 1 {
+				cmd.SilenceErrors = true
+			}
+			return err
 		},
 	}
 
-	cmd.Flags().BoolVar(&color, "color", true, "Enable colored output")
-	cmd.Flags().BoolVar(&exitCode, "exit-code", false, "Exit with code 1 if there are differences")
+	cmd.Flags().StringVar(&colorMode, "color", "auto", "Colored output: auto (terminal only, honors NO_COLOR), always or never")
+	cmd.Flags().Lookup("color").NoOptDefVal = "always"
+	cmd.Flags().BoolVar(&exitCode, "exit-code", false, "Exit with code 1 if there are differences and 2 on an error (like diff(1))")
+	// A flag error stops parsing, so --exit-code counts only when it came first.
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return trouble(err) })
 
 	return cmd
+}
+
+// resolveColor turns the --color value into a decision; tty tells whether
+// stdout is a terminal (used by "auto").
+func resolveColor(mode string, tty bool) (bool, error) {
+	switch strings.ToLower(mode) {
+	case "auto", "":
+		_, noColor := os.LookupEnv("NO_COLOR")
+		return tty && !noColor, nil
+	case "always", "true":
+		return true, nil
+	case "never", "false":
+		return false, nil
+	}
+	return false, fmt.Errorf("invalid --color %q (want auto, always or never)", mode)
+}
+
+// stdoutIsTerminal reports whether stdout is a character device.
+func stdoutIsTerminal() bool {
+	fi, err := os.Stdout.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 type diffOptions struct {
@@ -1433,7 +1545,18 @@ type diffOptions struct {
 	exitCode bool
 }
 
-func runDiff(_ context.Context, opts diffOptions) error {
+// runDiff compares two directories. With opts.exitCode a real error is an
+// exitCodeError with code 2, so that "differences" (1) stays distinguishable.
+func runDiff(ctx context.Context, opts diffOptions) error {
+	err := diffDirs(ctx, opts)
+	var ec exitCodeError
+	if err != nil && opts.exitCode && !errors.As(err, &ec) {
+		return exitCodeError{code: 2, msg: err.Error()}
+	}
+	return err
+}
+
+func diffDirs(_ context.Context, opts diffOptions) error {
 	// Validate directories exist
 	for _, dir := range []string{opts.dir1, opts.dir2} {
 		info, err := os.Stat(dir)
@@ -1492,8 +1615,10 @@ func runDiff(_ context.Context, opts diffOptions) error {
 
 		if content1 != content2 {
 			hasDiff = true
-			lines1 := strings.Split(content1, "\n")
-			lines2 := strings.Split(content2, "\n")
+			// Unified wants lines with their "\n" so that it marks only a
+			// real missing newline at end of file.
+			lines1 := merge.SplitLines(content1)
+			lines2 := merge.SplitLines(content2)
 			diff := merge.Unified(filepath.Join(opts.dir1, relPath), filepath.Join(opts.dir2, relPath), lines1, lines2, 3)
 			if opts.color {
 				// simple colorize
@@ -1517,8 +1642,11 @@ func runDiff(_ context.Context, opts diffOptions) error {
 
 	if !hasDiff {
 		fmt.Println("No differences found.")
+		return nil
 	}
-
+	if opts.exitCode {
+		return exitCodeError{code: 1, msg: "differences found"}
+	}
 	return nil
 }
 
@@ -1562,7 +1690,7 @@ func printDiffHeader(dir1, dir2, relPath, status string, color bool) {
 }
 
 func printLines(content, prefix string, color bool) {
-	lines := strings.Split(content, "\n")
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
 	for _, line := range lines {
 		if color && prefix == "+" {
 			fmt.Printf("\033[32m%s%s\033[0m\n", prefix, line)

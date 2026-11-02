@@ -93,7 +93,7 @@ func (g *LibraryGenerator) generateWrapperChart(group *ServiceGroup, libraryName
 		Name:        group.Name,
 		Version:     opts.ChartVersion,
 		AppVersion:  opts.AppVersion,
-		Description: fmt.Sprintf("Helm chart for %s (uses the %s library chart)", group.Name, libraryName),
+		Description: fmt.Sprintf("Helm chart for %s (helpers from the %s chart)", group.Name, libraryName),
 		APIVersion:  "v2",
 		Type:        "application",
 		Keywords:    []string{"kubernetes", "deckhouse"},

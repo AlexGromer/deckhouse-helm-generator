@@ -1,9 +1,11 @@
 package synth
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -24,6 +26,11 @@ type SourceProject struct {
 
 // ReadSource reads a project directory. It fails when the directory holds
 // neither a Dockerfile nor a supported framework project.
+//
+// The root of a Maven or Gradle multi-module build has no Dockerfile of its
+// own: the application is the one module that has a Dockerfile or a
+// framework project. ReadSource reads that module and says so in notes; with
+// several such modules it fails and lists them.
 func ReadSource(dir string, notes *Notes) (*SourceProject, error) {
 	s := &SourceProject{Dir: dir}
 	if data, err := os.ReadFile(filepath.Join(dir, "Dockerfile")); err == nil {
@@ -35,10 +42,138 @@ func ReadSource(dir string, notes *Notes) (*SourceProject, error) {
 		return nil, err
 	}
 	s.Project = p
+	// A root with a framework project of its own (a Gradle app with library
+	// subprojects) is the application; a Maven parent pom is not.
+	if s.Dockerfile == nil && (p == nil || isParentPom(dir)) {
+		apps := appModules(dir, 0)
+		switch {
+		case len(apps) > 1 && p != nil:
+			// The root is a project itself: keep it, and say how to pick a module.
+			notes.Addf("%s: several modules could be the application (%s); using the root project, pass one of them to choose, e.g. -f %s", filepath.Base(filepath.Clean(dir)), strings.Join(apps, ", "), filepath.Join(dir, apps[0]))
+		case len(apps) > 1:
+			return nil, fmt.Errorf("%s: several modules could be the application (%s); pass one of them, e.g. -f %s", dir, strings.Join(apps, ", "), filepath.Join(dir, apps[0]))
+		case len(apps) == 1:
+			notes.Addf("%s: no Dockerfile at the build root; using module %s", filepath.Base(filepath.Clean(dir)), apps[0])
+			return ReadSource(filepath.Join(dir, apps[0]), notes)
+		}
+	}
 	if s.Dockerfile == nil && p == nil {
 		return nil, fmt.Errorf("%s: neither a Dockerfile nor a Spring Boot, Quarkus or Micronaut project (pom.xml or build.gradle)", dir)
 	}
 	return s, nil
+}
+
+// maxModuleDepth bounds the search through nested modules.
+const maxModuleDepth = 3
+
+var (
+	gradleInclude = regexp.MustCompile(`(?m)^\s*include\b\s*\(?([^\n)]*)`)
+	quoted        = regexp.MustCompile(`["']([^"']+)["']`)
+)
+
+// modules lists the module directories of the Maven or Gradle build in dir,
+// relative to it.
+func modules(dir string) []string {
+	var out []string
+	if data, err := os.ReadFile(filepath.Join(dir, "pom.xml")); err == nil {
+		var m struct {
+			Modules []string `xml:"modules>module"`
+		}
+		if xml.Unmarshal(data, &m) == nil {
+			for _, name := range m.Modules {
+				out = append(out, strings.TrimSpace(name))
+			}
+		}
+	}
+	for _, f := range []string{"settings.gradle", "settings.gradle.kts"} {
+		data, err := os.ReadFile(filepath.Join(dir, f))
+		if err != nil {
+			continue
+		}
+		for _, inc := range gradleInclude.FindAllSubmatch(data, -1) {
+			for _, q := range quoted.FindAllSubmatch(inc[1], -1) {
+				// ":libs:common" is the directory libs/common.
+				out = append(out, strings.ReplaceAll(strings.Trim(string(q[1]), ":"), ":", "/"))
+			}
+		}
+	}
+	return out
+}
+
+// isParentPom reports whether dir holds a Maven pom with packaging "pom".
+func isParentPom(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "pom.xml"))
+	if err != nil {
+		return false
+	}
+	var m struct {
+		Packaging string `xml:"packaging"`
+	}
+	return xml.Unmarshal(data, &m) == nil && strings.TrimSpace(m.Packaging) == "pom"
+}
+
+// Build-file markers of an executable application: the framework packaging
+// plugin. A starter dependency is no signal, a library module has one too.
+var (
+	pomAppPlugin    = regexp.MustCompile(`spring-boot-maven-plugin|quarkus-maven-plugin|micronaut-maven-plugin`)
+	gradleAppPlugin = regexp.MustCompile(`["'](org\.springframework\.boot|io\.quarkus|io\.micronaut\.application)["']`)
+)
+
+// isAppModule reports whether the framework project in dir is an executable
+// application: a packaging plugin in its build file or an application
+// configuration file.
+func isAppModule(dir string) bool {
+	if data, err := os.ReadFile(filepath.Join(dir, "pom.xml")); err == nil && pomAppPlugin.Match(data) {
+		return true
+	}
+	for _, f := range []string{"build.gradle", "build.gradle.kts"} {
+		if data, err := os.ReadFile(filepath.Join(dir, f)); err == nil && gradleAppPlugin.Match(data) {
+			return true
+		}
+	}
+	for _, name := range []string{"application.yml", "application.yaml", "application.properties"} {
+		if _, err := os.Stat(filepath.Join(dir, "src", "main", "resources", name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// appModules returns the modules below dir (relative paths, in build order)
+// that are an application: a Dockerfile, or a framework project with an
+// executable-app signal (see isAppModule). A module that has application
+// modules itself is searched, not counted.
+func appModules(dir string, depth int) []string {
+	if depth >= maxModuleDepth {
+		return nil
+	}
+	var apps []string
+	seen := map[string]bool{}
+	for _, m := range modules(dir) {
+		sub := filepath.Join(dir, filepath.FromSlash(m))
+		if m == "" || seen[m] || !filepath.IsLocal(filepath.FromSlash(m)) {
+			continue
+		}
+		seen[m] = true
+		if info, err := os.Stat(sub); err != nil || !info.IsDir() {
+			continue
+		}
+		if nested := appModules(sub, depth+1); len(nested) > 0 {
+			for _, n := range nested {
+				apps = append(apps, filepath.ToSlash(filepath.Join(m, n)))
+			}
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(sub, "Dockerfile")); err == nil {
+			apps = append(apps, m)
+			continue
+		}
+		// A module that cannot be read is no candidate; the notes of this probe are dropped.
+		if p, err := DetectProject(sub, &Notes{}); err == nil && p != nil && isAppModule(sub) {
+			apps = append(apps, m)
+		}
+	}
+	return apps
 }
 
 // Name is the application name: from the framework configuration or the
@@ -109,6 +244,7 @@ func (s *SourceProject) App(image, profile string, notes *Notes) App {
 		case Micronaut:
 			applyMicronaut(c, p)
 		}
+		c.flush()
 
 		if profile != "" {
 			app.SetEnv(p.fw.profileEnv, profile)

@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -220,10 +221,24 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 		}
 
 		namespace := e.effectiveNamespace(opts)
+		var forbidden ForbiddenKindsError
+		forbidden.Namespace = namespace
+		defer func() {
+			if len(forbidden.Kinds) > 0 {
+				errors <- &forbidden
+			}
+		}()
 
 		for _, ar := range apiResources {
 			if ctx.Err() != nil {
 				return
+			}
+
+			// A namespace filter means "this namespace's objects": listing a
+			// cluster-scoped kind would pull in the whole cluster (and, with
+			// namespace-scoped RBAC, only produce permission errors).
+			if namespace != "" && !ar.Namespaced && !kindRequested(ar.Kind, opts) {
+				continue
 			}
 
 			// Skip secrets unless explicitly included.
@@ -240,8 +255,15 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 				if e.isExcludedNamespace(obj.GetNamespace()) {
 					return
 				}
+				finished := finishedJobState(obj)
 				if !prepareClusterObject(obj) {
 					return
+				}
+				if finished != "" {
+					select {
+					case errors <- &NoteError{Msg: fmt.Sprintf("Job %s has already finished (%s); it is kept in the chart and will run again on install. Consider a Helm hook or excluding it", obj.GetName(), finished)}:
+					case <-ctx.Done():
+					}
 				}
 
 				// Apply secret strategy.
@@ -262,6 +284,12 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 				}
 			})
 			if err != nil {
+				var status *httpStatusError
+				if stderrors.As(err, &status) && status.Code == http.StatusForbidden {
+					forbidden.Kinds = append(forbidden.Kinds, ar.Kind)
+					forbidden.Details = append(forbidden.Details, fmt.Sprintf("error listing %s: %v", ar.Kind, err))
+					continue
+				}
 				errors <- fmt.Errorf("error listing %s: %w", ar.Kind, err)
 			}
 		}
@@ -342,6 +370,43 @@ var skipClusterKinds = map[string]bool{
 	"Pod": true, "ReplicaSet": true,
 }
 
+// kindRequested reports whether --include-kinds names kind explicitly.
+func kindRequested(kind string, opts Options) bool {
+	for _, k := range opts.IncludeKinds {
+		if strings.EqualFold(k, kind) {
+			return true
+		}
+	}
+	return false
+}
+
+// NoteError is an observation about the extracted objects, sent on the error
+// channel of Extract; it is not a failure.
+type NoteError struct {
+	Msg string
+}
+
+func (e *NoteError) Error() string { return e.Msg }
+
+// ForbiddenKindsError is the one error Extract sends for every kind the
+// API server refused to list (HTTP 403), e.g. with namespace-scoped RBAC.
+type ForbiddenKindsError struct {
+	// Namespace is the namespace that was listed ("" for the whole cluster).
+	Namespace string
+	// Kinds are the refused kinds, in discovery order.
+	Kinds []string
+	// Details has the full error of each kind, in the order of Kinds.
+	Details []string
+}
+
+func (e *ForbiddenKindsError) Error() string {
+	where := "the cluster"
+	if e.Namespace != "" {
+		where = e.Namespace
+	}
+	return fmt.Sprintf("no permission to list %d kinds in %s: %s", len(e.Kinds), where, strings.Join(e.Kinds, ", "))
+}
+
 // matchesKinds applies --include-kinds / --exclude-kinds.
 func matchesKinds(kind string, opts Options) bool {
 	if len(opts.IncludeKinds) > 0 {
@@ -387,6 +452,9 @@ func prepareClusterObject(obj *unstructured.Unstructured) bool {
 		unstructured.RemoveNestedField(obj.Object, "metadata", field)
 	}
 	unstructured.RemoveNestedField(obj.Object, "status")
+	if obj.GetKind() == "Job" {
+		stripJobControllerFields(obj)
+	}
 	if annotations := obj.GetAnnotations(); annotations != nil {
 		for _, key := range []string{"kubectl.kubernetes.io/last-applied-configuration", "deployment.kubernetes.io/revision", "meta.helm.sh/release-name", "meta.helm.sh/release-namespace"} {
 			delete(annotations, key)
@@ -406,6 +474,71 @@ func prepareClusterObject(obj *unstructured.Unstructured) bool {
 		}
 	}
 	return true
+}
+
+// jobControllerLabels are set by the Job controller on the Job and its pod
+// template; a new Job gets new values and the API server rejects stale ones.
+var jobControllerLabels = []string{
+	"controller-uid", "job-name",
+	"batch.kubernetes.io/controller-uid", "batch.kubernetes.io/job-name",
+}
+
+// stripJobControllerFields removes what the Job controller generated: its
+// labels and the selector built from them (unless spec.manualSelector says
+// the selector is the user's own).
+func stripJobControllerFields(job *unstructured.Unstructured) {
+	for _, path := range [][]string{{"metadata", "labels"}, {"spec", "template", "metadata", "labels"}} {
+		labels, found, _ := unstructured.NestedStringMap(job.Object, path...)
+		if !found {
+			continue
+		}
+		for _, key := range jobControllerLabels {
+			delete(labels, key)
+		}
+		if len(labels) == 0 {
+			unstructured.RemoveNestedField(job.Object, path...)
+		} else {
+			_ = unstructured.SetNestedStringMap(job.Object, labels, path...)
+		}
+	}
+	if manual, _, _ := unstructured.NestedBool(job.Object, "spec", "manualSelector"); !manual {
+		unstructured.RemoveNestedField(job.Object, "spec", "selector")
+	}
+}
+
+// finishedJobState reports "succeeded" or "failed" for a Job that has run to
+// its end, "" for any other object. It reads status, so it must run before
+// prepareClusterObject strips it.
+func finishedJobState(obj *unstructured.Unstructured) string {
+	if obj.GetKind() != "Job" {
+		return ""
+	}
+	if n, found, _ := unstructured.NestedFieldNoCopy(obj.Object, "status", "succeeded"); found {
+		switch v := n.(type) {
+		case int64:
+			if v > 0 {
+				return "succeeded"
+			}
+		case float64:
+			if v > 0 {
+				return "succeeded"
+			}
+		}
+	}
+	conditions, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	for _, c := range conditions {
+		cond, ok := c.(map[string]interface{})
+		if !ok || cond["status"] != "True" {
+			continue
+		}
+		switch cond["type"] {
+		case "Complete":
+			return "succeeded"
+		case "Failed":
+			return "failed"
+		}
+	}
+	return ""
 }
 
 // includeSecrets reports whether Secrets are extracted at all.
@@ -825,10 +958,21 @@ func (c *clusterClient) doGet(ctx context.Context, path string) ([]byte, error) 
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, path, truncateStr(string(body), 200))
+		return nil, &httpStatusError{Code: resp.StatusCode, Path: path, Body: truncateStr(string(body), 200)}
 	}
 
 	return body, nil
+}
+
+// httpStatusError is a non-2xx answer of the API server.
+type httpStatusError struct {
+	Code int
+	Path string
+	Body string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("HTTP %d from %s: %s", e.Code, e.Path, e.Body)
 }
 
 // ── K8s API response types ─────────────────────────────────────────────────

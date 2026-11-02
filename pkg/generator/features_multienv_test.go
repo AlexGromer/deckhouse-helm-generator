@@ -10,8 +10,8 @@ import (
 func TestMultiEnv(t *testing.T) {
 	chart := &types.GeneratedChart{
 		Name:         "test-chart",
-		ValuesYAML:   "replicaCount: 1\n",
-		ValuesSchema: `{"type":"object","properties":{"replicaCount":{"type":"integer"}}}`,
+		ValuesYAML:   "services:\n  web:\n    deployment:\n      replicas: 1\n",
+		ValuesSchema: `{"type":"object","properties":{"services":{"type":"object"}}}`,
 	}
 	var notes []string
 
@@ -58,7 +58,7 @@ func TestMultiEnv(t *testing.T) {
 		if !strings.HasPrefix(qaContent, "# qa environment overrides") {
 			t.Errorf("values-qa.yaml doesn't have the correct override comment: %s", qaContent)
 		}
-		if !strings.Contains(qaContent, "replicaCount: 2") { // staging default
+		if !strings.Contains(qaContent, "replicas: 2") { // staging default, at the path the Deployment template reads
 			t.Errorf("values-qa.yaml does not contain staging defaults: %s", qaContent)
 		}
 	}

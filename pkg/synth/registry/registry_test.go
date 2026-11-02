@@ -49,7 +49,7 @@ func TestParseReference(t *testing.T) {
 func TestClientConfig(t *testing.T) {
 	fake := registrytest.New()
 	defer fake.Close()
-	fake.Token, fake.User, fake.Password = "t0k", "robot", "s3cret"
+	fake.SetAuth("t0k", "robot", "s3cret")
 	fake.Push("team/api", "1.0", map[string]interface{}{
 		"config": map[string]interface{}{
 			"User":         "10001",

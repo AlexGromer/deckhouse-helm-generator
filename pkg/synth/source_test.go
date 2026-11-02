@@ -203,7 +203,7 @@ func TestFromSourceDockerfileAndSpringDetails(t *testing.T) {
 		t.Errorf("liveness = %+v volumes = %+v", app.Liveness, app.Volumes)
 	}
 	all := strings.Join(notes.Items(), "\n")
-	for _, want := range []string{"EXPOSE ${APP_PORT}", "volume /cache", "needs DB_HOST at runtime"} {
+	for _, want := range []string{"EXPOSE ${APP_PORT}", "volume /cache", "needs DB_HOST at runtime", "1 environment variable is empty and required (SPRING_DATASOURCE_URL)"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("notes lack %q:\n%s", want, all)
 		}

@@ -39,9 +39,10 @@ type App struct {
 	RunAsGroup *int64
 	// Volumes are mounted into the container.
 	Volumes []Volume
-	// Liveness and Readiness are the container probes.
+	// Liveness, Readiness and Startup are the container probes.
 	Liveness  *Probe
 	Readiness *Probe
+	Startup   *Probe
 	// Replicas is set only when the input gives it.
 	Replicas *int64
 	// Resources is set only when the input gives it.

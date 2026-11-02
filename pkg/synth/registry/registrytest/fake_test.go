@@ -25,7 +25,7 @@ func get(t *testing.T, url, auth string) (int, string, http.Header) {
 func TestFake(t *testing.T) {
 	s := New()
 	defer s.Close()
-	s.Token, s.User, s.Password = "t", "u", "p"
+	s.SetAuth("t", "u", "p")
 	single := s.Push("a/b", "1", map[string]interface{}{"config": map[string]interface{}{}})
 	s.Push("a/b", "multi", map[string]interface{}{}, "linux/amd64", "linux/arm64/v8")
 

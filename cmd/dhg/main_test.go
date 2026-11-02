@@ -45,7 +45,7 @@ func TestNewRootCmd(t *testing.T) {
 		subNames[sub.Use] = true
 	}
 
-	for _, expected := range []string{"generate", "analyze", "validate", "diff <dir1> <dir2>", "version", "features", "graph"} {
+	for _, expected := range []string{"generate", "analyze", "validate [chart-dir...]", "diff <dir1> <dir2>", "version", "features", "graph"} {
 		if !subNames[expected] {
 			t.Errorf("expected subcommand %q to be registered", expected)
 		}

@@ -133,6 +133,26 @@ func TestMigrationTable_AutoscalingV2Beta1HPA_MigratesCorrectly(t *testing.T) {
 	}
 }
 
+// Upstream removed autoscaling/v2beta1 in 1.25 and autoscaling/v2beta2 in 1.26.
+func TestMigrationTable_HPARemovalVersions(t *testing.T) {
+	cases := []struct {
+		apiVersion, deprecatedIn, removedIn string
+	}{
+		{"autoscaling/v2beta1", "1.22", "1.25"},
+		{"autoscaling/v2beta2", "1.23", "1.26"},
+	}
+	for _, tc := range cases {
+		m := GetMigrationInfo(tc.apiVersion, "HorizontalPodAutoscaler")
+		if m == nil {
+			t.Fatalf("no migration for %s", tc.apiVersion)
+		}
+		if m.DeprecatedIn != tc.deprecatedIn || m.RemovedIn != tc.removedIn {
+			t.Errorf("%s: deprecated/removed = %s/%s, want %s/%s",
+				tc.apiVersion, m.DeprecatedIn, m.RemovedIn, tc.deprecatedIn, tc.removedIn)
+		}
+	}
+}
+
 func TestMigrationTable_RBACv1beta1ClusterRole_MigratesCorrectly(t *testing.T) {
 	newAPI, newKind, migrated := migrateAPIVersion("rbac.authorization.k8s.io/v1beta1", "ClusterRole")
 

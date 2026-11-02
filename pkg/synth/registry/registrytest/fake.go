@@ -16,16 +16,18 @@ import (
 // Server is a fake registry.
 type Server struct {
 	*httptest.Server
-	// Token, when set, is required as a bearer token; it is issued by /token
-	// to clients presenting User/Password (or anyone when User is empty).
-	Token    string
-	User     string
-	Password string
 
-	mu    sync.Mutex
-	blobs map[string][]byte // digest → content
-	tags  map[string]string // "repo:tag" → digest of the manifest or index
-	types map[string]string // digest → media type
+	// mu guards everything below: the server goroutines read it while the
+	// test goroutine pushes images and sets the credentials.
+	mu sync.Mutex
+	// token, when set, is required as a bearer token; it is issued by /token
+	// to clients presenting user/password (or anyone when user is empty).
+	token    string
+	user     string
+	password string
+	blobs    map[string][]byte // digest → content
+	tags     map[string]string // "repo:tag" → digest of the manifest or index
+	types    map[string]string // digest → media type
 }
 
 // New starts a fake registry.
@@ -33,6 +35,15 @@ func New() *Server {
 	s := &Server{blobs: map[string][]byte{}, tags: map[string]string{}, types: map[string]string{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s
+}
+
+// SetAuth requires a bearer token on every request. /token issues it to
+// clients presenting user and password (or to anyone when user is empty).
+// It is safe to call while the server is running.
+func (s *Server) SetAuth(token, user, password string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.token, s.user, s.password = token, user, password
 }
 
 // Host returns host:port to use as the registry in image references.
@@ -94,17 +105,20 @@ func (s *Server) put(data []byte, mediaType string) string {
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	token, user, password := s.token, s.user, s.password
+	s.mu.Unlock()
 	if r.URL.Path == "/token" {
-		if s.User != "" {
-			if u, p, ok := r.BasicAuth(); !ok || u != s.User || p != s.Password {
+		if user != "" {
+			if u, p, ok := r.BasicAuth(); !ok || u != user || p != password {
 				http.Error(w, "bad credentials", http.StatusUnauthorized)
 				return
 			}
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"token": s.Token})
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
 		return
 	}
-	if s.Token != "" && r.Header.Get("Authorization") != "Bearer "+s.Token {
+	if token != "" && r.Header.Get("Authorization") != "Bearer "+token {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="`+s.URL+`/token",service="fake",scope="`+scopeOf(r.URL.Path)+`"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

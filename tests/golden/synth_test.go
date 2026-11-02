@@ -182,7 +182,7 @@ func TestSynthesizeQuarkusAndMicronaut(t *testing.T) {
 func TestSynthesizeImage(t *testing.T) {
 	fake := registrytest.New()
 	defer fake.Close()
-	fake.Token = "t0k"
+	fake.SetAuth("t0k", "", "")
 	fake.Push("team/orders", "2.1.0", map[string]interface{}{
 		"config": map[string]interface{}{
 			"User":         "10001",

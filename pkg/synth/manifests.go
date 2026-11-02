@@ -125,6 +125,9 @@ func Manifests(app App) []*unstructured.Unstructured {
 	if app.Readiness != nil {
 		container["readinessProbe"] = probe(*app.Readiness)
 	}
+	if app.Startup != nil {
+		container["startupProbe"] = probe(*app.Startup)
+	}
 	if app.Resources != nil {
 		res := map[string]interface{}{}
 		if len(app.Resources.Requests) > 0 {

@@ -71,7 +71,7 @@ var apiMigrations = []APIMigration{
 	{
 		OldAPIVersion: "autoscaling/v2beta1", OldKind: "HorizontalPodAutoscaler",
 		NewAPIVersion: "autoscaling/v2", NewKind: "HorizontalPodAutoscaler",
-		DeprecatedIn: "1.23", RemovedIn: "1.26",
+		DeprecatedIn: "1.22", RemovedIn: "1.25",
 	},
 	{
 		OldAPIVersion: "autoscaling/v2beta2", OldKind: "HorizontalPodAutoscaler",

@@ -136,7 +136,9 @@ func GenerateChartYAML(meta ChartMetadata) string {
 		for _, dep := range meta.Dependencies {
 			fmt.Fprintf(&sb, "  - name: %s\n", dep.Name)
 			fmt.Fprintf(&sb, "    version: %s\n", dep.Version)
-			fmt.Fprintf(&sb, "    repository: %s\n", dep.Repository)
+			if dep.Repository != "" {
+				fmt.Fprintf(&sb, "    repository: %s\n", dep.Repository)
+			}
 			if dep.Condition != "" {
 				fmt.Fprintf(&sb, "    condition: %s\n", dep.Condition)
 			}
@@ -239,7 +241,7 @@ func GenerateREADME(meta ChartMetadata, values map[string]interface{}) string {
 
 	sb.WriteString("## Installation\n\n")
 	sb.WriteString("```bash\n")
-	fmt.Fprintf(&sb, "helm install my-release ./%s\n", meta.Name)
+	fmt.Fprintf(&sb, "helm install my-release ./%s --namespace <namespace>\n", meta.Name)
 	sb.WriteString("```\n\n")
 
 	sb.WriteString("## Parameters\n\n")

@@ -111,11 +111,11 @@ func TestImageExtractorCredentialHelpers(t *testing.T) {
 	}
 	private := registrytest.New()
 	defer private.Close()
-	private.Token, private.User, private.Password = "tok", "robot", "pw"
+	private.SetAuth("tok", "robot", "pw")
 	private.Push("team/api", "1", map[string]interface{}{})
 	public := registrytest.New() // tokens for anyone
 	defer public.Close()
-	public.Token = "tok"
+	public.SetAuth("tok", "", "")
 	public.Push("team/api", "1", map[string]interface{}{})
 
 	bin := t.TempDir()

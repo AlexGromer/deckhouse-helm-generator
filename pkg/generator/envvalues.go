@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"sort"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -12,86 +13,251 @@ import (
 // It returns a map of filename → YAML bytes for values-dev.yaml, values-staging.yaml,
 // and values-prod.yaml. Each file contains only the overrides relevant to that environment
 // (override-only principle — no full copy of base values).
+//
+// The overrides are keyed on the values paths the chart's templates actually read
+// (services.<svc>.deployment.replicas, services.<svc>.hpa.minReplicas, ...), found by
+// walking baseValues; settings the base has no slot for are not emitted, because
+// `helm template -f values-prod.yaml` would silently ignore them.
 func GenerateEnvValues(baseValues map[string]interface{}) map[string][]byte {
-	result := make(map[string][]byte, 3)
+	return renderEnvFiles(baseValues, genericEnvProfile, map[string]string{
+		"dev":     "# Dev environment overrides — relaxed settings for local development\n",
+		"staging": "# Staging environment overrides — mirrors prod at reduced scale\n",
+		"prod":    "# Production environment overrides — hardened settings\n",
+	})
+}
 
-	devYAML, _ := yaml.Marshal(devProfile())
-	stagingYAML, _ := yaml.Marshal(stagingProfile())
-	prodYAML, _ := yaml.Marshal(prodProfile())
+// envProfile is the set of per-environment settings. A nil field is left as in the base values.
+type envProfile struct {
+	replicas        *int // deployment / statefulSet replicas
+	backoffLimit    *int // job / cronJob backoffLimit
+	hpaMin          *int // hpa minReplicas
+	hpaMax          *int // hpa maxReplicas
+	pdbMinAvailable *int // pdb minAvailable (numeric only)
+	antiAffinity    bool // preferred pod anti-affinity across nodes
+}
 
-	result["values-dev.yaml"] = append([]byte("# Dev environment overrides — relaxed settings for local development\n"), devYAML...)
-	result["values-staging.yaml"] = append([]byte("# Staging environment overrides — mirrors prod at reduced scale\n"), stagingYAML...)
-	result["values-prod.yaml"] = append([]byte("# Production environment overrides — hardened settings\n"), prodYAML...)
+func ip(n int) *int { return &n }
 
+// genericEnvProfile is the workload-agnostic profile used when the workload type is unknown.
+// Dev: single replica. Staging: 2 replicas, PDB minAvailable=1.
+// Prod: >=3 replicas, PDB minAvailable=2, anti-affinity.
+func genericEnvProfile(env string) envProfile {
+	switch env {
+	case "dev":
+		return envProfile{replicas: ip(1)}
+	case "staging":
+		return envProfile{replicas: ip(2), pdbMinAvailable: ip(1)}
+	default:
+		return envProfile{replicas: ip(3), pdbMinAvailable: ip(2), antiAffinity: true}
+	}
+}
+
+// stagingEnvOverlay is the staging overrides over baseValues, for environments
+// that have no profile of their own (custom environment names).
+func stagingEnvOverlay(baseValues map[string]interface{}) map[string]interface{} {
+	return buildEnvOverlay(findEnvSlots(baseValues), genericEnvProfile("staging"), "staging")
+}
+
+// envEnvironments is the fixed set of generated environments (file values-<env>.yaml).
+var envEnvironments = []string{"dev", "staging", "prod"}
+
+// renderEnvFiles builds values-<env>.yaml for every environment from the profile
+// chosen by profileFor, anchored on the value slots found in baseValues.
+func renderEnvFiles(baseValues map[string]interface{}, profileFor func(env string) envProfile, headers map[string]string) map[string][]byte {
+	slots := findEnvSlots(baseValues)
+	result := make(map[string][]byte, len(envEnvironments))
+	for _, env := range envEnvironments {
+		overlay := buildEnvOverlay(slots, profileFor(env), env)
+		data, _ := yaml.Marshal(overlay)
+		result["values-"+env+".yaml"] = append([]byte(headers[env]), data...)
+	}
 	return result
 }
 
-// devProfile returns override values for the dev environment.
-// Dev: single replica, debug logging, no PDB, no resource limits.
-func devProfile() map[string]interface{} {
-	return map[string]interface{}{
-		"replicaCount": 1,
-		"logLevel":     "debug",
-		"podDisruptionBudget": map[string]interface{}{
-			"enabled": false,
-		},
-	}
+// Value-block kinds that carry overridable settings. The keys are the ones the
+// processors write below services.<svc>. (or at the top level / under the service
+// name in separate and umbrella layouts).
+const (
+	slotDeployment  = "deployment"
+	slotStatefulSet = "statefulSet"
+	slotJob         = "job"
+	slotCronJob     = "cronJob"
+	slotHPA         = "hpa"
+	slotPDB         = "pdb"
+)
+
+// envMaxDepth bounds the search for value blocks: services.<svc>.<kind> is 3 levels,
+// an umbrella parent adds one more.
+const envMaxDepth = 5
+
+// envSlot is a value block of the base values found at path (path ends with kind).
+type envSlot struct {
+	path []string
+	kind string
+	node map[string]interface{}
 }
 
-// stagingProfile returns override values for the staging environment.
-// Staging: 2 replicas, info logging, PDB with minAvailable=1.
-func stagingProfile() map[string]interface{} {
-	return map[string]interface{}{
-		"replicaCount": 2,
-		"logLevel":     "info",
-		"podDisruptionBudget": map[string]interface{}{
-			"enabled":      true,
-			"minAvailable": 1,
-		},
+// findEnvSlots walks baseValues and returns the value blocks of the workload-related
+// kinds in a deterministic order. A block is only taken when it looks like what the
+// processors write (e.g. a "deployment" block with replicas or containers).
+func findEnvSlots(base map[string]interface{}) []envSlot {
+	var slots []envSlot
+	var walk func(node map[string]interface{}, path []string)
+	walk = func(node map[string]interface{}, path []string) {
+		keys := make([]string, 0, len(node))
+		for k := range node {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			child, ok := node[k].(map[string]interface{})
+			if !ok || k == "global" {
+				continue
+			}
+			childPath := append(append([]string{}, path...), k)
+			if looksLikeSlot(k, child) {
+				slots = append(slots, envSlot{path: childPath, kind: k, node: child})
+				continue
+			}
+			if len(childPath) < envMaxDepth {
+				walk(child, childPath)
+			}
+		}
 	}
+	walk(base, nil)
+	return slots
 }
 
-// prodProfile returns override values for the production environment.
-// Prod: >=3 replicas, warn logging, PDB minAvailable=2, resource limits, affinity.
-func prodProfile() map[string]interface{} {
+// looksLikeSlot reports whether the map under key is a value block of that kind.
+func looksLikeSlot(key string, node map[string]interface{}) bool {
+	has := func(names ...string) bool {
+		for _, n := range names {
+			if _, ok := node[n]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	switch key {
+	case slotDeployment, slotStatefulSet:
+		return has("replicas", "containers")
+	case slotJob:
+		return has("containers", "backoffLimit")
+	case slotCronJob:
+		return has("schedule", "jobTemplate")
+	case slotHPA:
+		return has("scaleTargetRef", "minReplicas", "maxReplicas")
+	case slotPDB:
+		return has("minAvailable", "maxUnavailable")
+	}
+	return false
+}
+
+// buildEnvOverlay turns a profile into an override map over the found slots.
+// Prod never lowers what the base already has (replicas, HPA bounds): it only raises.
+func buildEnvOverlay(slots []envSlot, p envProfile, env string) map[string]interface{} {
+	overlay := map[string]interface{}{}
+	prod := env == "prod"
+	// raise returns want, or the base value when prod must not go below it.
+	raise := func(node map[string]interface{}, key string, want int) int {
+		if base, ok := asInt(node[key]); ok && prod && base > want {
+			return base
+		}
+		return want
+	}
+	for _, s := range slots {
+		set := func(key string, val interface{}) { setPath(overlay, append(append([]string{}, s.path...), key), val) }
+		switch s.kind {
+		case slotDeployment, slotStatefulSet:
+			if p.replicas != nil {
+				set("replicas", raise(s.node, "replicas", *p.replicas))
+			}
+			if p.antiAffinity && s.node["affinity"] == nil {
+				if aff := antiAffinityFor(s.node); aff != nil {
+					set("affinity", aff)
+				}
+			}
+		case slotJob:
+			if p.backoffLimit != nil {
+				set("backoffLimit", *p.backoffLimit)
+			}
+		case slotCronJob:
+			if p.backoffLimit != nil {
+				setPath(overlay, append(append([]string{}, s.path...), "jobTemplate", "backoffLimit"), *p.backoffLimit)
+			}
+		case slotHPA:
+			if p.hpaMin != nil {
+				set("minReplicas", raise(s.node, "minReplicas", *p.hpaMin))
+			}
+			if p.hpaMax != nil {
+				set("maxReplicas", raise(s.node, "maxReplicas", *p.hpaMax))
+			}
+		case slotPDB:
+			// Only a numeric minAvailable is overridden: a percentage or maxUnavailable
+			// in the base is left alone (setting both would make the PDB invalid).
+			if _, ok := asInt(s.node["minAvailable"]); ok && p.pdbMinAvailable != nil && s.node["maxUnavailable"] == nil {
+				set("minAvailable", *p.pdbMinAvailable)
+			}
+		}
+	}
+	return overlay
+}
+
+// antiAffinityFor returns a preferred pod anti-affinity (spread over nodes) for the
+// pods selected by node.selector.matchLabels, or nil when the block has no such selector.
+func antiAffinityFor(node map[string]interface{}) map[string]interface{} {
+	selector, _ := node["selector"].(map[string]interface{})
+	labels, _ := selector["matchLabels"].(map[string]interface{})
+	if len(labels) == 0 {
+		return nil
+	}
+	matchLabels := make(map[string]interface{}, len(labels))
+	for k, v := range labels {
+		matchLabels[k] = v
+	}
 	return map[string]interface{}{
-		"replicaCount": 3,
-		"logLevel":     "warn",
-		"podDisruptionBudget": map[string]interface{}{
-			"enabled":      true,
-			"minAvailable": 2,
-		},
-		"resources": map[string]interface{}{
-			"requests": map[string]interface{}{
-				"cpu":    "100m",
-				"memory": "128Mi",
-			},
-			"limits": map[string]interface{}{
-				"cpu":    "500m",
-				"memory": "512Mi",
-			},
-		},
-		"affinity": map[string]interface{}{
-			"podAntiAffinity": map[string]interface{}{
-				"preferredDuringSchedulingIgnoredDuringExecution": []interface{}{
-					map[string]interface{}{
-						"weight": 100,
-						"podAffinityTerm": map[string]interface{}{
-							"labelSelector": map[string]interface{}{
-								"matchExpressions": []interface{}{
-									map[string]interface{}{
-										"key":      "app.kubernetes.io/name",
-										"operator": "Exists",
-									},
-								},
-							},
-							"topologyKey": "kubernetes.io/hostname",
-						},
+		"podAntiAffinity": map[string]interface{}{
+			"preferredDuringSchedulingIgnoredDuringExecution": []interface{}{
+				map[string]interface{}{
+					"weight": 100,
+					"podAffinityTerm": map[string]interface{}{
+						"labelSelector": map[string]interface{}{"matchLabels": matchLabels},
+						"topologyKey":   "kubernetes.io/hostname",
 					},
 				},
 			},
 		},
 	}
+}
+
+// setPath sets m[path[0]][path[1]]... = val, creating the intermediate maps.
+func setPath(m map[string]interface{}, path []string, val interface{}) {
+	for _, k := range path[:len(path)-1] {
+		next, ok := m[k].(map[string]interface{})
+		if !ok {
+			next = map[string]interface{}{}
+			m[k] = next
+		}
+		m = next
+	}
+	m[path[len(path)-1]] = val
+}
+
+// asInt reads a YAML/JSON number (int, int64 or float64 without fraction) as int.
+func asInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int32:
+		return int(n), true
+	case int64:
+		return int(n), true
+	case float64:
+		if n == float64(int(n)) {
+			return int(n), true
+		}
+	}
+	return 0, false
 }
 
 // ============================================================
@@ -275,31 +441,21 @@ func DetectWorkloadType(group *ServiceGroup) WorkloadType {
 // GenerateEnvValuesForWorkload generates environment-specific values files with
 // workload-aware profiles. Returns a map with keys "values-dev.yaml",
 // "values-staging.yaml", and "values-prod.yaml".
-// Note: baseValues is currently unused. Profiles are generated from workload
-// type only. Merging with baseValues is deferred (see HC-11/M-3 history).
+// The profile of workloadType is applied to the value blocks found in baseValues
+// (see GenerateEnvValues); with no baseValues the files are empty overrides.
 func GenerateEnvValuesForWorkload(baseValues map[string]interface{}, workloadType WorkloadType) map[string][]byte {
-	result := make(map[string][]byte, 3)
-
-	devProfile := buildWorkloadProfile(workloadType, "dev")
-	stagingProfile := buildWorkloadProfile(workloadType, "staging")
-	prodProfile := buildWorkloadProfile(workloadType, "prod")
-
-	devData, _ := yaml.Marshal(devProfile)
-	stagingData, _ := yaml.Marshal(stagingProfile)
-	prodData, _ := yaml.Marshal(prodProfile)
-
-	result["values-dev.yaml"] = devData
-	result["values-staging.yaml"] = stagingData
-	result["values-prod.yaml"] = prodData
-
-	return result
+	profileFor := func(env string) envProfile { return buildWorkloadProfile(workloadType, env) }
+	wt := string(workloadType)
+	return renderEnvFiles(baseValues, profileFor, map[string]string{
+		"dev":     "# Dev environment overrides (" + wt + " workload)\n",
+		"staging": "# Staging environment overrides (" + wt + " workload)\n",
+		"prod":    "# Production environment overrides (" + wt + " workload)\n",
+	})
 }
 
-// buildWorkloadProfile returns the values map for a given workload type and environment.
-func buildWorkloadProfile(workloadType WorkloadType, env string) map[string]interface{} {
+// buildWorkloadProfile returns the profile for a given workload type and environment.
+func buildWorkloadProfile(workloadType WorkloadType, env string) envProfile {
 	switch workloadType {
-	case WorkloadWeb:
-		return buildWebProfile(env)
 	case WorkloadWorker:
 		return buildWorkerProfile(env)
 	case WorkloadDatabase:
@@ -313,158 +469,59 @@ func buildWorkloadProfile(workloadType WorkloadType, env string) map[string]inte
 	}
 }
 
-func buildWebProfile(env string) map[string]interface{} {
+// Web: HPA pinned to one replica in dev (an HPA cannot be switched off by values),
+// 3..10 replicas with PDB minAvailable=2 in prod.
+func buildWebProfile(env string) envProfile {
 	switch env {
 	case "dev":
-		return map[string]interface{}{
-			"replicaCount": 1,
-			"logLevel":     "debug",
-			"autoscaling": map[string]interface{}{
-				"enabled": false,
-			},
-		}
+		return envProfile{replicas: ip(1), hpaMin: ip(1), hpaMax: ip(1)}
 	case "staging":
-		return map[string]interface{}{
-			"replicaCount": 2,
-			"logLevel":     "info",
-		}
-	default: // prod
-		return map[string]interface{}{
-			"replicaCount": 3,
-			"logLevel":     "warn",
-			"autoscaling": map[string]interface{}{
-				"enabled":     true,
-				"minReplicas": 3,
-				"maxReplicas": 10,
-			},
-			"podDisruptionBudget": map[string]interface{}{
-				"enabled":      true,
-				"minAvailable": 2,
-			},
-		}
+		return envProfile{replicas: ip(2)}
+	default:
+		return envProfile{replicas: ip(3), hpaMin: ip(3), hpaMax: ip(10), pdbMinAvailable: ip(2), antiAffinity: true}
 	}
 }
 
-func buildWorkerProfile(env string) map[string]interface{} {
+func buildWorkerProfile(env string) envProfile {
 	switch env {
 	case "dev":
-		return map[string]interface{}{
-			"replicaCount": 1,
-			"logLevel":     "debug",
-		}
+		return envProfile{replicas: ip(1)}
 	case "staging":
-		return map[string]interface{}{
-			"replicaCount": 2,
-		}
-	default: // prod
-		return map[string]interface{}{
-			"replicaCount": 3,
-			"podDisruptionBudget": map[string]interface{}{
-				"enabled":      true,
-				"minAvailable": 1,
-			},
-		}
+		return envProfile{replicas: ip(2)}
+	default:
+		return envProfile{replicas: ip(3), pdbMinAvailable: ip(1), antiAffinity: true}
 	}
 }
 
-func buildDatabaseProfile(env string) map[string]interface{} {
+func buildDatabaseProfile(env string) envProfile {
 	switch env {
 	case "dev":
-		return map[string]interface{}{
-			"replicaCount": 1,
-			"logLevel":     "debug",
-		}
+		return envProfile{replicas: ip(1)}
 	case "staging":
-		return map[string]interface{}{
-			"replicaCount": 2,
-		}
-	default: // prod
-		return map[string]interface{}{
-			"replicaCount": 3,
-			"affinity": map[string]interface{}{
-				"podAntiAffinity": map[string]interface{}{
-					"preferredDuringSchedulingIgnoredDuringExecution": []interface{}{
-						map[string]interface{}{
-							"weight": 100,
-							"podAffinityTerm": map[string]interface{}{
-								"topologyKey": "kubernetes.io/hostname",
-							},
-						},
-					},
-				},
-			},
-			"resources": map[string]interface{}{
-				"limits": map[string]interface{}{
-					"cpu":    "2",
-					"memory": "4Gi",
-				},
-				"requests": map[string]interface{}{
-					"cpu":    "500m",
-					"memory": "1Gi",
-				},
-			},
-			"podDisruptionBudget": map[string]interface{}{
-				"enabled":      true,
-				"minAvailable": 2,
-			},
-		}
+		return envProfile{replicas: ip(2)}
+	default:
+		return envProfile{replicas: ip(3), pdbMinAvailable: ip(2), antiAffinity: true}
 	}
 }
 
-func buildBatchProfile(env string) map[string]interface{} {
+func buildBatchProfile(env string) envProfile {
 	switch env {
 	case "dev":
-		return map[string]interface{}{
-			"backoffLimit": 1,
-			"logLevel":     "debug",
-		}
+		return envProfile{backoffLimit: ip(1)}
 	case "staging":
-		return map[string]interface{}{
-			"backoffLimit": 2,
-		}
-	default: // prod
-		return map[string]interface{}{
-			"backoffLimit": 3,
-			"resources": map[string]interface{}{
-				"limits": map[string]interface{}{
-					"cpu":    "1",
-					"memory": "2Gi",
-				},
-				"requests": map[string]interface{}{
-					"cpu":    "250m",
-					"memory": "512Mi",
-				},
-			},
-		}
+		return envProfile{backoffLimit: ip(2)}
+	default:
+		return envProfile{backoffLimit: ip(3)}
 	}
 }
 
-func buildCacheProfile(env string) map[string]interface{} {
+func buildCacheProfile(env string) envProfile {
 	switch env {
 	case "dev":
-		return map[string]interface{}{
-			"replicaCount": 1,
-			"logLevel":     "debug",
-		}
+		return envProfile{replicas: ip(1)}
 	case "staging":
-		return map[string]interface{}{
-			"replicaCount": 2,
-		}
-	default: // prod
-		return map[string]interface{}{
-			"replicaCount": 2,
-			"resources": map[string]interface{}{
-				"limits": map[string]interface{}{
-					"memory": "512Mi",
-				},
-				"requests": map[string]interface{}{
-					"memory": "256Mi",
-				},
-			},
-			"podDisruptionBudget": map[string]interface{}{
-				"enabled":      true,
-				"minAvailable": 1,
-			},
-		}
+		return envProfile{replicas: ip(2)}
+	default:
+		return envProfile{replicas: ip(2), pdbMinAvailable: ip(1), antiAffinity: true}
 	}
 }

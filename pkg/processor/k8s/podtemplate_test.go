@@ -41,6 +41,8 @@ func TestPodTemplateParses(t *testing.T) {
 				"get":      func() string { return "" },
 				"set":      func() string { return "" },
 				"deepCopy": func() string { return "" },
+				"hasKey":   func() string { return "" },
+				"int64":    func() string { return "" },
 			})
 
 			_, err := tmpl.Parse(got)

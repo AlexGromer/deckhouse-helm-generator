@@ -383,3 +383,23 @@ func TestValuesBuilder_BuildFlat(t *testing.T) {
 		t.Errorf("BuildFlat should add inline path comment for global.imageRegistry, got:\n%s", out)
 	}
 }
+
+func TestGenerateChartYAML_OmitsEmptyRepository(t *testing.T) {
+	out := GenerateChartYAML(ChartMetadata{
+		Name:         "parent",
+		Dependencies: []Dependency{{Name: "child", Version: "1.0.0"}},
+	})
+	if strings.Contains(out, "repository:") {
+		t.Errorf("empty repository must be omitted:\n%s", out)
+	}
+	if !strings.Contains(out, "- name: child") {
+		t.Errorf("dependency missing:\n%s", out)
+	}
+}
+
+func TestGenerateREADME_InstallHasNamespace(t *testing.T) {
+	out := GenerateREADME(ChartMetadata{Name: "myapp"}, nil)
+	if !strings.Contains(out, "helm install my-release ./myapp --namespace <namespace>") {
+		t.Errorf("install hint without --namespace:\n%s", out)
+	}
+}

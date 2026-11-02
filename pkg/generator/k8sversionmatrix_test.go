@@ -21,7 +21,7 @@ spec:
   minReplicas: 1
   maxReplicas: 10`
 
-// autoscaling/v2beta1 requires <1.26 and is removed in 1.26.
+// autoscaling/v2beta1 requires <1.25 and is removed in 1.25.
 const hpaV2beta1Template = `apiVersion: autoscaling/v2beta1
 kind: HorizontalPodAutoscaler
 metadata:
@@ -144,7 +144,7 @@ func TestValidateK8sVersionMatrix_MultipleVersions(t *testing.T) {
 // ── Test 5: feature gate warning when using removed API ───────────────────────
 
 func TestValidateK8sVersionMatrix_FeatureGateWarning(t *testing.T) {
-	// autoscaling/v2beta1 removed in 1.26 — should trigger a warning/issue.
+	// autoscaling/v2beta1 removed in 1.25 (so it is gone in 1.26 too) — should trigger a warning/issue.
 	chart := newMatrixChart(map[string]string{
 		"templates/hpa.yaml": hpaV2beta1Template,
 	})
@@ -160,7 +160,7 @@ func TestValidateK8sVersionMatrix_FeatureGateWarning(t *testing.T) {
 		hasWarning = hasWarning || len(compat.Issues) > 0
 	}
 	if !hasWarning {
-		t.Error("expected a warning or issue for autoscaling/v2beta1 removed in 1.26")
+		t.Error("expected a warning or issue for autoscaling/v2beta1 removed in 1.25")
 	}
 }
 

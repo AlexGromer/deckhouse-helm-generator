@@ -49,7 +49,7 @@ func applyMultiEnvFeature(chart *types.GeneratedChart, fc FeatureContext) (*type
 		if val, ok := stdEnvVals["values-"+env+".yaml"]; ok {
 			content = val
 		} else {
-			prof := stagingProfile()
+			prof := stagingEnvOverlay(baseValues)
 			profData, _ := yaml.Marshal(prof)
 			content = append([]byte(fmt.Sprintf("# %s environment overrides\n", env)), profData...)
 		}

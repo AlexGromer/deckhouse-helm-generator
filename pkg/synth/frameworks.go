@@ -1,6 +1,7 @@
 package synth
 
 import (
+	"fmt"
 	"path"
 	"regexp"
 	"sort"
@@ -13,18 +14,52 @@ type config struct {
 	app   *App
 	props map[string]string
 	notes *Notes
+
+	// required are the variables left empty because their value needs a
+	// placeholder only the runtime can resolve; needs are those placeholders.
+	required []string
+	needs    map[string]bool
+	// handled are placeholders of credentials, which a Secret key carries.
+	handled map[string]bool
+}
+
+// bareBrace matches "{NAME}" without the "$": a typo of a placeholder that
+// would otherwise be copied as text.
+var bareBrace = regexp.MustCompile(`\{[A-Z][A-Z0-9_]*\}`)
+
+// lookup returns a property with ${NAME:default} placeholders resolved and
+// the names of those without a default, which only the runtime can resolve.
+func (c *config) lookup(key string) (resolved, unresolved string, ok bool) {
+	v, ok := c.props[key]
+	if !ok {
+		return "", "", false
+	}
+	resolved, unresolved = ResolvePlaceholders(v)
+	if unresolved == "" {
+		if typo := bareBrace.FindAllString(resolved, -1); len(typo) > 0 {
+			unresolved = strings.Join(typo, ", ")
+		}
+	}
+	return resolved, unresolved, true
 }
 
 // get returns a property with ${NAME:default} placeholders resolved and
 // reports placeholders that only the runtime can resolve.
 func (c *config) get(key string) (string, bool) {
-	v, ok := c.props[key]
+	resolved, unresolved, ok := c.lookup(key)
 	if !ok {
 		return "", false
 	}
-	resolved, unresolved := ResolvePlaceholders(v)
+	v := c.props[key]
 	if unresolved != "" {
 		c.notes.Addf("%s: %s = %s needs %s at runtime; set it in values", c.app.Name, key, v, unresolved)
+		// Already reported by name; the note on other placeholders skips it.
+		if c.handled == nil {
+			c.handled = map[string]bool{}
+		}
+		for _, n := range strings.Split(unresolved, ", ") {
+			c.handled[n] = true
+		}
 	}
 	return resolved, true
 }
@@ -53,18 +88,96 @@ func (c *config) port(key string, def int64) int64 {
 }
 
 // env copies a property into an environment variable of the app.
+// A value that still needs a runtime placeholder is not copied partly
+// resolved: the variable is listed empty, as required, and counted in one
+// note (see flush).
 func (c *config) env(key string) {
-	if v, ok := c.get(key); ok {
-		c.app.SetEnv(envName(key), v)
+	v, unresolved, ok := c.lookup(key)
+	if !ok {
+		return
+	}
+	name := envName(key)
+	if unresolved == "" {
+		c.app.SetEnv(name, v)
+		return
+	}
+	c.app.SetEnv(name, "")
+	c.required = append(c.required, name)
+	if c.needs == nil {
+		c.needs = map[string]bool{}
+	}
+	for _, n := range strings.Split(unresolved, ", ") {
+		c.needs[n] = true
+	}
+}
+
+// maxListed caps the names a note lists.
+const maxListed = 20
+
+func listed(names []string) string {
+	if len(names) > maxListed {
+		return strings.Join(names[:maxListed], ", ") + fmt.Sprintf(", ... (%d more)", len(names)-maxListed)
+	}
+	return strings.Join(names, ", ")
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+// flush reports, in two notes, the variables left empty and the
+// placeholders of the configuration no variable of the chart carries.
+func (c *config) flush() {
+	if len(c.required) > 0 {
+		needs := make([]string, 0, len(c.needs))
+		for n := range c.needs {
+			needs = append(needs, n)
+		}
+		sort.Strings(needs)
+		verb := "are"
+		if len(c.required) == 1 {
+			verb = "is"
+		}
+		c.notes.Addf("%s: %s %s empty and required (%s): the value needs %s at runtime; set it in values",
+			c.app.Name, plural(len(c.required), "environment variable", "environment variables"), verb, listed(c.required), listed(needs))
+	}
+	var other []string
+	seen := map[string]bool{}
+	for _, v := range c.props {
+		_, unresolved := ResolvePlaceholders(v)
+		if unresolved == "" {
+			continue
+		}
+		for _, n := range strings.Split(unresolved, ", ") {
+			if !c.needs[n] && !c.handled[n] && !seen[n] {
+				seen[n] = true
+				other = append(other, n)
+			}
+		}
+	}
+	if len(other) > 0 {
+		sort.Strings(other)
+		c.notes.Addf("%s: %s without a default in the configuration, not mapped to the chart: %s; add the ones the app needs to values", c.app.Name, plural(len(other), "other environment variable", "other environment variables"), listed(other))
 	}
 }
 
 // secret adds an empty Secret key for a credential the configuration sets:
 // the value itself never goes into the chart.
 func (c *config) secret(key string) {
-	if _, ok := c.props[key]; ok {
+	if v, ok := c.props[key]; ok {
 		name := envName(key)
 		c.app.SetEnv(name, "")
+		// The credential is a Secret key already; its placeholders are not "other".
+		_, unresolved := ResolvePlaceholders(v)
+		for _, n := range strings.Split(unresolved, ", ") {
+			if c.handled == nil {
+				c.handled = map[string]bool{}
+			}
+			c.handled[n] = true
+		}
 		c.notes.Addf("%s: %s is empty in Secret %s-env; set it (or use --with external-secrets)", c.app.Name, name, c.app.Name)
 	}
 }
@@ -105,9 +218,13 @@ func resolvePath(parent, p string) string {
 	return path.Join(parent, p)
 }
 
+// httpProbes sets the probes of a JVM app. A JVM app can take minutes to
+// start, so liveness and readiness only begin once the startup probe
+// (liveness path, 30 x 10 s) has succeeded.
 func httpProbes(app *App, port int64, liveness, readiness string) {
 	app.Liveness = &Probe{HTTPPath: liveness, Port: port, PeriodSeconds: 10, FailureThreshold: 3}
 	app.Readiness = &Probe{HTTPPath: readiness, Port: port, PeriodSeconds: 10, FailureThreshold: 3}
+	app.Startup = &Probe{HTTPPath: liveness, Port: port, PeriodSeconds: 10, FailureThreshold: 30}
 }
 
 // applySpring adds what the Spring Boot configuration tells: the HTTP port,

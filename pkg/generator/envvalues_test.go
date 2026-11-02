@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -9,18 +10,6 @@ import (
 
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
-
-// baseVals returns a simple base values map for testing.
-func baseVals(replicas int) map[string]interface{} {
-	return map[string]interface{}{
-		"replicaCount": replicas,
-		"image": map[string]interface{}{
-			"repository": "nginx",
-			"tag":        "latest",
-		},
-		"logLevel": "info",
-	}
-}
 
 func parseEnvYAML(t *testing.T, data []byte) map[string]interface{} {
 	t.Helper()
@@ -45,321 +34,6 @@ func toInt(v interface{}) int {
 	return 0
 }
 
-// ============================================================
-// Subtask 1: Dev values profile
-// ============================================================
-
-func TestEnvValues_DevProfile_Replicas(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(3))
-	devData, ok := envVals["values-dev.yaml"]
-	if !ok {
-		t.Fatal("values-dev.yaml not in output")
-	}
-	parsed := parseEnvYAML(t, devData)
-
-	if toInt(parsed["replicaCount"]) != 1 {
-		t.Errorf("dev replicaCount: got %v, want 1", parsed["replicaCount"])
-	}
-}
-
-func TestEnvValues_DevProfile_LogLevel(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(3))
-	parsed := parseEnvYAML(t, envVals["values-dev.yaml"])
-
-	if parsed["logLevel"] != "debug" {
-		t.Errorf("dev logLevel: got %v, want debug", parsed["logLevel"])
-	}
-}
-
-func TestEnvValues_DevProfile_NoPDB(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(3))
-	parsed := parseEnvYAML(t, envVals["values-dev.yaml"])
-
-	// Either no PDB section OR podDisruptionBudget.enabled: false
-	if pdb, ok := parsed["podDisruptionBudget"]; ok {
-		if pdbMap, ok := pdb.(map[string]interface{}); ok {
-			if enabled := pdbMap["enabled"]; enabled == true {
-				t.Error("dev profile should have PDB disabled")
-			}
-		}
-	}
-}
-
-func TestEnvValues_DevProfile_RelaxedResources(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(3))
-	parsed := parseEnvYAML(t, envVals["values-dev.yaml"])
-
-	// Dev should have no resource limits (no resources section, or limits absent)
-	if resources, ok := parsed["resources"]; ok {
-		if resMap, ok := resources.(map[string]interface{}); ok {
-			if _, hasLimits := resMap["limits"]; hasLimits {
-				t.Error("dev profile should not have resource limits")
-			}
-		}
-	}
-}
-
-// ============================================================
-// Subtask 2: Staging values profile
-// ============================================================
-
-func TestEnvValues_StagingProfile_Replicas(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(1))
-	parsed := parseEnvYAML(t, envVals["values-staging.yaml"])
-
-	if toInt(parsed["replicaCount"]) != 2 {
-		t.Errorf("staging replicaCount: got %v, want 2", parsed["replicaCount"])
-	}
-}
-
-func TestEnvValues_StagingProfile_LogLevel(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(1))
-	parsed := parseEnvYAML(t, envVals["values-staging.yaml"])
-
-	if parsed["logLevel"] != "info" {
-		t.Errorf("staging logLevel: got %v, want info", parsed["logLevel"])
-	}
-}
-
-func TestEnvValues_StagingProfile_OptionalPDB(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(3))
-	parsed := parseEnvYAML(t, envVals["values-staging.yaml"])
-
-	pdb, ok := parsed["podDisruptionBudget"]
-	if !ok {
-		t.Error("staging profile missing podDisruptionBudget section")
-		return
-	}
-	pdbMap, ok := pdb.(map[string]interface{})
-	if !ok {
-		t.Error("podDisruptionBudget is not a map")
-		return
-	}
-	if pdbMap["enabled"] != true {
-		t.Error("staging PDB should be enabled")
-	}
-	if toInt(pdbMap["minAvailable"]) != 1 {
-		t.Errorf("staging PDB minAvailable: got %v, want 1", pdbMap["minAvailable"])
-	}
-}
-
-// ============================================================
-// Subtask 3: Prod values profile
-// ============================================================
-
-func TestEnvValues_ProdProfile_Replicas(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(1))
-	parsed := parseEnvYAML(t, envVals["values-prod.yaml"])
-
-	rc := toInt(parsed["replicaCount"])
-	if rc < 3 {
-		t.Errorf("prod replicaCount: got %v, want >=3", parsed["replicaCount"])
-	}
-}
-
-func TestEnvValues_ProdProfile_LogLevel(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(1))
-	parsed := parseEnvYAML(t, envVals["values-prod.yaml"])
-
-	if parsed["logLevel"] != "warn" {
-		t.Errorf("prod logLevel: got %v, want warn", parsed["logLevel"])
-	}
-}
-
-func TestEnvValues_ProdProfile_PDB(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(3))
-	parsed := parseEnvYAML(t, envVals["values-prod.yaml"])
-
-	pdb, ok := parsed["podDisruptionBudget"]
-	if !ok {
-		t.Error("prod profile missing podDisruptionBudget section")
-		return
-	}
-	pdbMap, ok := pdb.(map[string]interface{})
-	if !ok {
-		t.Error("podDisruptionBudget is not a map")
-		return
-	}
-	if pdbMap["enabled"] != true {
-		t.Error("prod PDB should be enabled")
-	}
-	if toInt(pdbMap["minAvailable"]) != 2 {
-		t.Errorf("prod PDB minAvailable: got %v, want 2", pdbMap["minAvailable"])
-	}
-}
-
-func TestEnvValues_ProdProfile_ResourceLimits(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(3))
-	parsed := parseEnvYAML(t, envVals["values-prod.yaml"])
-
-	resources, ok := parsed["resources"]
-	if !ok {
-		t.Error("prod profile missing resources section")
-		return
-	}
-	resMap, ok := resources.(map[string]interface{})
-	if !ok {
-		t.Error("resources is not a map")
-		return
-	}
-	if _, hasLimits := resMap["limits"]; !hasLimits {
-		t.Error("prod resources missing limits")
-	}
-	if _, hasRequests := resMap["requests"]; !hasRequests {
-		t.Error("prod resources missing requests")
-	}
-}
-
-func TestEnvValues_ProdProfile_Affinity(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(3))
-	parsed := parseEnvYAML(t, envVals["values-prod.yaml"])
-
-	// Prod should have affinity or topologySpreadConstraints
-	_, hasAffinity := parsed["affinity"]
-	_, hasTopology := parsed["topologySpreadConstraints"]
-	if !hasAffinity && !hasTopology {
-		t.Error("prod profile missing affinity or topologySpreadConstraints")
-	}
-}
-
-// ============================================================
-// Subtask 4: Environment detection from source resources
-// ============================================================
-
-func TestEnvValues_Detection_HighReplicasIsProdLike(t *testing.T) {
-	// Input: 5 replicas (prod-like) → dev/staging scale DOWN
-	envVals := GenerateEnvValues(baseVals(5))
-
-	devParsed := parseEnvYAML(t, envVals["values-dev.yaml"])
-	if toInt(devParsed["replicaCount"]) != 1 {
-		t.Errorf("dev should scale down from 5 replicas to 1, got %v", devParsed["replicaCount"])
-	}
-
-	stagingParsed := parseEnvYAML(t, envVals["values-staging.yaml"])
-	if toInt(stagingParsed["replicaCount"]) != 2 {
-		t.Errorf("staging should use 2 replicas regardless of base 5, got %v", stagingParsed["replicaCount"])
-	}
-}
-
-func TestEnvValues_Detection_LowReplicasIsDevLike(t *testing.T) {
-	// Input: 1 replica (dev-like) → staging/prod scale UP
-	envVals := GenerateEnvValues(baseVals(1))
-
-	stagingParsed := parseEnvYAML(t, envVals["values-staging.yaml"])
-	if toInt(stagingParsed["replicaCount"]) != 2 {
-		t.Errorf("staging should scale up to 2, got %v", stagingParsed["replicaCount"])
-	}
-
-	prodParsed := parseEnvYAML(t, envVals["values-prod.yaml"])
-	rc := toInt(prodParsed["replicaCount"])
-	if rc < 3 {
-		t.Errorf("prod should scale up to >=3, got %v", prodParsed["replicaCount"])
-	}
-}
-
-// ============================================================
-// Subtask 5: File naming convention
-// ============================================================
-
-func TestEnvValues_FileNaming(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(2))
-
-	expected := []string{"values-dev.yaml", "values-staging.yaml", "values-prod.yaml"}
-	for _, name := range expected {
-		if _, ok := envVals[name]; !ok {
-			t.Errorf("expected file %q in output, not found. Keys: %v", name, mapKeys(envVals))
-		}
-	}
-}
-
-func TestEnvValues_FileNaming_WithOutputDir(t *testing.T) {
-	envVals := GenerateEnvValues(baseVals(2))
-
-	// All files must use the standard naming convention
-	if len(envVals) != 3 {
-		t.Errorf("expected exactly 3 env value files, got %d: %v", len(envVals), mapKeys(envVals))
-	}
-}
-
-// ============================================================
-// Subtask 6: Values override structure (only differences from base)
-// ============================================================
-
-func TestEnvValues_OverrideOnly(t *testing.T) {
-	base := baseVals(3)
-	envVals := GenerateEnvValues(base)
-
-	devParsed := parseEnvYAML(t, envVals["values-dev.yaml"])
-
-	// Dev values MUST NOT include the full image section from base (override only)
-	// Dev changes: replicaCount, logLevel, podDisruptionBudget
-	// Dev should NOT change: image (not environment specific)
-	if _, hasImage := devParsed["image"]; hasImage {
-		t.Error("dev values should not include 'image' section (override-only principle)")
-	}
-}
-
-// ============================================================
-// Subtask 7: CLI flag integration (unit-level)
-// ============================================================
-
-func TestEnvValues_CLIFlag_Enabled(t *testing.T) {
-	// When EnvValues flag is enabled, GenerateEnvValues returns 3 files
-	result := GenerateEnvValues(baseVals(2))
-	if len(result) != 3 {
-		t.Errorf("expected 3 env value files when enabled, got %d", len(result))
-	}
-}
-
-func TestEnvValues_CLIFlag_Disabled(t *testing.T) {
-	// When EnvValues flag is disabled, no env files generated
-	// This is tested via Options.EnvValues field
-	opts := Options{}
-	if opts.EnvValues {
-		t.Error("EnvValues option should default to false (disabled)")
-	}
-}
-
-// ============================================================
-// Subtask 8: Works with all output modes
-// ============================================================
-
-func TestEnvValues_WithUniversalMode(t *testing.T) {
-	// GenerateEnvValues works independently of output mode
-	envVals := GenerateEnvValues(baseVals(2))
-	// Universal mode: single values.yaml → env files are supplements
-	if _, ok := envVals["values-dev.yaml"]; !ok {
-		t.Error("values-dev.yaml missing for universal mode context")
-	}
-	if _, ok := envVals["values-prod.yaml"]; !ok {
-		t.Error("values-prod.yaml missing for universal mode context")
-	}
-}
-
-func TestEnvValues_WithSeparateMode(t *testing.T) {
-	// GenerateEnvValues works for per-service values too
-	envVals := GenerateEnvValues(baseVals(1))
-	if len(envVals) != 3 {
-		t.Errorf("expected 3 env files for separate mode context, got %d", len(envVals))
-	}
-}
-
-func TestEnvValues_WithUmbrellaMode(t *testing.T) {
-	// GenerateEnvValues can be applied to umbrella parent values
-	envVals := GenerateEnvValues(map[string]interface{}{
-		"global":   map[string]interface{}{"imageRegistry": ""},
-		"frontend": map[string]interface{}{"replicaCount": 2, "enabled": true},
-		"backend":  map[string]interface{}{"replicaCount": 3, "enabled": true},
-	})
-	if len(envVals) != 3 {
-		t.Errorf("expected 3 env files for umbrella context, got %d", len(envVals))
-	}
-}
-
-// ============================================================
-// Helpers
-// ============================================================
-
 func mapKeys(m map[string][]byte) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -369,7 +43,7 @@ func mapKeys(m map[string][]byte) []string {
 }
 
 // ============================================================
-// Workload-Aware Environment Profiles (TDD — not yet implemented)
+// Workload detection
 // ============================================================
 
 // ============================================================
@@ -476,184 +150,6 @@ func TestWorkload_DetectCache_RedisImage(t *testing.T) {
 		t.Errorf("DetectWorkloadType with redis image (no PVC): got %q, want %q", got, WorkloadCache)
 	}
 }
-
-// ============================================================
-// Section B: GenerateEnvValuesForWorkload — profile correctness
-// ============================================================
-
-// TestWorkload_WebDevProfile — Web dev profile: replicas=1, no HPA enabled
-func TestWorkload_WebDevProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadWeb)
-
-	devData, ok := result["values-dev.yaml"]
-	if !ok {
-		t.Fatal("values-dev.yaml missing from web workload result")
-	}
-	parsed := parseEnvYAML(t, devData)
-
-	if toInt(parsed["replicaCount"]) != 1 {
-		t.Errorf("web dev replicas: got %v, want 1", parsed["replicaCount"])
-	}
-
-	// No HPA in dev — either absent or enabled=false
-	if hpa, hasHPA := parsed["autoscaling"]; hasHPA {
-		if hpaMap, ok := hpa.(map[string]interface{}); ok {
-			if hpaMap["enabled"] == true {
-				t.Error("web dev profile must not have HPA enabled")
-			}
-		}
-	}
-}
-
-// TestWorkload_WebProdProfile — Web prod: replicas=3, HPA min=3/max=10, PDB minAvailable=2
-func TestWorkload_WebProdProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadWeb)
-
-	prodData, ok := result["values-prod.yaml"]
-	if !ok {
-		t.Fatal("values-prod.yaml missing from web workload result")
-	}
-	parsed := parseEnvYAML(t, prodData)
-
-	// Replicas
-	if toInt(parsed["replicaCount"]) != 3 {
-		t.Errorf("web prod replicas: got %v, want 3", parsed["replicaCount"])
-	}
-
-	// HPA
-	hpa, hasHPA := parsed["autoscaling"]
-	if !hasHPA {
-		t.Fatal("web prod missing autoscaling section")
-	}
-	hpaMap, ok := hpa.(map[string]interface{})
-	if !ok {
-		t.Fatal("autoscaling is not a map")
-	}
-	if hpaMap["enabled"] != true {
-		t.Error("web prod HPA must be enabled")
-	}
-	if toInt(hpaMap["minReplicas"]) != 3 {
-		t.Errorf("web prod HPA minReplicas: got %v, want 3", hpaMap["minReplicas"])
-	}
-	if toInt(hpaMap["maxReplicas"]) != 10 {
-		t.Errorf("web prod HPA maxReplicas: got %v, want 10", hpaMap["maxReplicas"])
-	}
-
-	// PDB
-	pdb, hasPDB := parsed["podDisruptionBudget"]
-	if !hasPDB {
-		t.Fatal("web prod missing podDisruptionBudget section")
-	}
-	pdbMap, ok := pdb.(map[string]interface{})
-	if !ok {
-		t.Fatal("podDisruptionBudget is not a map")
-	}
-	if pdbMap["enabled"] != true {
-		t.Error("web prod PDB must be enabled")
-	}
-	if toInt(pdbMap["minAvailable"]) != 2 {
-		t.Errorf("web prod PDB minAvailable: got %v, want 2", pdbMap["minAvailable"])
-	}
-}
-
-// TestWorkload_DatabaseProdProfile — Database prod: anti-affinity, strict resources, PDB minAvailable=2
-func TestWorkload_DatabaseProdProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadDatabase)
-
-	prodData, ok := result["values-prod.yaml"]
-	if !ok {
-		t.Fatal("values-prod.yaml missing from database workload result")
-	}
-	parsed := parseEnvYAML(t, prodData)
-
-	// Anti-affinity must be present
-	affinity, hasAffinity := parsed["affinity"]
-	if !hasAffinity {
-		t.Fatal("database prod profile missing affinity section")
-	}
-	affinityMap, ok := affinity.(map[string]interface{})
-	if !ok {
-		t.Fatal("affinity is not a map")
-	}
-	if _, hasPAA := affinityMap["podAntiAffinity"]; !hasPAA {
-		t.Error("database prod affinity must contain podAntiAffinity")
-	}
-
-	// Strict resources (limits must be present)
-	resources, hasResources := parsed["resources"]
-	if !hasResources {
-		t.Fatal("database prod profile missing resources section")
-	}
-	resMap, ok := resources.(map[string]interface{})
-	if !ok {
-		t.Fatal("resources is not a map")
-	}
-	if _, hasLimits := resMap["limits"]; !hasLimits {
-		t.Error("database prod resources must have limits")
-	}
-	if _, hasRequests := resMap["requests"]; !hasRequests {
-		t.Error("database prod resources must have requests")
-	}
-
-	// PDB minAvailable=2
-	pdb, hasPDB := parsed["podDisruptionBudget"]
-	if !hasPDB {
-		t.Fatal("database prod profile missing podDisruptionBudget")
-	}
-	pdbMap, ok := pdb.(map[string]interface{})
-	if !ok {
-		t.Fatal("podDisruptionBudget is not a map")
-	}
-	if pdbMap["enabled"] != true {
-		t.Error("database prod PDB must be enabled")
-	}
-	if toInt(pdbMap["minAvailable"]) != 2 {
-		t.Errorf("database prod PDB minAvailable: got %v, want 2", pdbMap["minAvailable"])
-	}
-}
-
-// TestWorkload_BatchProdProfile — Batch prod: backoffLimit=3, no PDB, no HPA
-func TestWorkload_BatchProdProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadBatch)
-
-	prodData, ok := result["values-prod.yaml"]
-	if !ok {
-		t.Fatal("values-prod.yaml missing from batch workload result")
-	}
-	parsed := parseEnvYAML(t, prodData)
-
-	// backoffLimit must be 3
-	if toInt(parsed["backoffLimit"]) != 3 {
-		t.Errorf("batch prod backoffLimit: got %v, want 3", parsed["backoffLimit"])
-	}
-
-	// No HPA — batch workloads are not scaled horizontally
-	if hpa, hasHPA := parsed["autoscaling"]; hasHPA {
-		if hpaMap, ok := hpa.(map[string]interface{}); ok {
-			if hpaMap["enabled"] == true {
-				t.Error("batch prod profile must not have HPA enabled")
-			}
-		}
-	}
-
-	// No PDB — batch jobs run to completion, disruption budget does not apply
-	if pdb, hasPDB := parsed["podDisruptionBudget"]; hasPDB {
-		if pdbMap, ok := pdb.(map[string]interface{}); ok {
-			if pdbMap["enabled"] == true {
-				t.Error("batch prod profile must not have PDB enabled")
-			}
-		}
-	}
-}
-
-// ============================================================
-// Section C: MergeEnvProfiles
-// ============================================================
-
-// TestWorkload_MergeEnvProfiles_DeepMerge — nested maps are merged, not replaced
-
-// TestWorkload_MergeEnvProfiles_OverrideScalars — scalar values from override win;
-// map values are merged (not replaced by the override's map).
 
 // ============================================================
 // Workload Test Helpers
@@ -783,199 +279,6 @@ func makeGroupForEnv(name string, resources ...*types.ProcessedResource) *Servic
 	}
 }
 
-// TestWorkload_WorkerDevProfile — Worker dev: replicas=1, debug logging
-func TestWorkload_WorkerDevProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(3), WorkloadWorker)
-
-	devData, ok := result["values-dev.yaml"]
-	if !ok {
-		t.Fatal("values-dev.yaml missing from worker workload result")
-	}
-	parsed := parseEnvYAML(t, devData)
-
-	if toInt(parsed["replicaCount"]) != 1 {
-		t.Errorf("worker dev replicas: got %v, want 1", parsed["replicaCount"])
-	}
-	if parsed["logLevel"] != "debug" {
-		t.Errorf("worker dev logLevel: got %v, want debug", parsed["logLevel"])
-	}
-}
-
-// TestWorkload_WorkerStagingProfile — Worker staging: replicas=2
-func TestWorkload_WorkerStagingProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadWorker)
-
-	stagingData, ok := result["values-staging.yaml"]
-	if !ok {
-		t.Fatal("values-staging.yaml missing from worker workload result")
-	}
-	parsed := parseEnvYAML(t, stagingData)
-
-	if toInt(parsed["replicaCount"]) != 2 {
-		t.Errorf("worker staging replicas: got %v, want 2", parsed["replicaCount"])
-	}
-}
-
-// TestWorkload_WorkerProdProfile — Worker prod: replicas=3, PDB minAvailable=1, no HPA
-func TestWorkload_WorkerProdProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadWorker)
-
-	prodData, ok := result["values-prod.yaml"]
-	if !ok {
-		t.Fatal("values-prod.yaml missing from worker workload result")
-	}
-	parsed := parseEnvYAML(t, prodData)
-
-	// Replicas
-	if toInt(parsed["replicaCount"]) != 3 {
-		t.Errorf("worker prod replicas: got %v, want 3", parsed["replicaCount"])
-	}
-
-	// PDB minAvailable=1
-	pdb, hasPDB := parsed["podDisruptionBudget"]
-	if !hasPDB {
-		t.Fatal("worker prod missing podDisruptionBudget section")
-	}
-	pdbMap, ok := pdb.(map[string]interface{})
-	if !ok {
-		t.Fatal("podDisruptionBudget is not a map")
-	}
-	if pdbMap["enabled"] != true {
-		t.Error("worker prod PDB must be enabled")
-	}
-	if toInt(pdbMap["minAvailable"]) != 1 {
-		t.Errorf("worker prod PDB minAvailable: got %v, want 1", pdbMap["minAvailable"])
-	}
-
-	// No HPA — workers scale based on queue depth, not CPU
-	if hpa, hasHPA := parsed["autoscaling"]; hasHPA {
-		if hpaMap, ok := hpa.(map[string]interface{}); ok {
-			if hpaMap["enabled"] == true {
-				t.Error("worker prod profile must not have HPA enabled")
-			}
-		}
-	}
-}
-
-// TestWorkload_CacheProdProfile — Cache prod: replicas=2, PDB minAvailable=1, memory limits
-func TestWorkload_CacheProdProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadCache)
-
-	prodData, ok := result["values-prod.yaml"]
-	if !ok {
-		t.Fatal("values-prod.yaml missing from cache workload result")
-	}
-	parsed := parseEnvYAML(t, prodData)
-
-	// Cache prod replicas=2
-	if toInt(parsed["replicaCount"]) != 2 {
-		t.Errorf("cache prod replicas: got %v, want 2", parsed["replicaCount"])
-	}
-
-	// PDB minAvailable=1
-	pdb, hasPDB := parsed["podDisruptionBudget"]
-	if !hasPDB {
-		t.Fatal("cache prod missing podDisruptionBudget section")
-	}
-	pdbMap, ok := pdb.(map[string]interface{})
-	if !ok {
-		t.Fatal("podDisruptionBudget is not a map")
-	}
-	if pdbMap["enabled"] != true {
-		t.Error("cache prod PDB must be enabled")
-	}
-	if toInt(pdbMap["minAvailable"]) != 1 {
-		t.Errorf("cache prod PDB minAvailable: got %v, want 1", pdbMap["minAvailable"])
-	}
-
-	// Memory limits must be present (cache is memory-bound)
-	resources, hasResources := parsed["resources"]
-	if !hasResources {
-		t.Fatal("cache prod profile missing resources section")
-	}
-	resMap, ok := resources.(map[string]interface{})
-	if !ok {
-		t.Fatal("resources is not a map")
-	}
-	limits, hasLimits := resMap["limits"]
-	if !hasLimits {
-		t.Fatal("cache prod resources missing limits")
-	}
-	limitsMap, ok := limits.(map[string]interface{})
-	if !ok {
-		t.Fatal("limits is not a map")
-	}
-	if _, hasMemory := limitsMap["memory"]; !hasMemory {
-		t.Error("cache prod resources.limits must have memory")
-	}
-}
-
-// TestWorkload_CacheDevProfile — Cache dev: replicas=1, debug logging
-func TestWorkload_CacheDevProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(3), WorkloadCache)
-
-	devData, ok := result["values-dev.yaml"]
-	if !ok {
-		t.Fatal("values-dev.yaml missing from cache workload result")
-	}
-	parsed := parseEnvYAML(t, devData)
-
-	if toInt(parsed["replicaCount"]) != 1 {
-		t.Errorf("cache dev replicas: got %v, want 1", parsed["replicaCount"])
-	}
-	if parsed["logLevel"] != "debug" {
-		t.Errorf("cache dev logLevel: got %v, want debug", parsed["logLevel"])
-	}
-}
-
-// TestWorkload_CacheStagingProfile — Cache staging: replicas=2
-func TestWorkload_CacheStagingProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadCache)
-
-	stagingData, ok := result["values-staging.yaml"]
-	if !ok {
-		t.Fatal("values-staging.yaml missing from cache workload result")
-	}
-	parsed := parseEnvYAML(t, stagingData)
-
-	if toInt(parsed["replicaCount"]) != 2 {
-		t.Errorf("cache staging replicas: got %v, want 2", parsed["replicaCount"])
-	}
-}
-
-// TestWorkload_DatabaseDevProfile — Database dev: replicas=1, debug logging
-func TestWorkload_DatabaseDevProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(3), WorkloadDatabase)
-
-	devData, ok := result["values-dev.yaml"]
-	if !ok {
-		t.Fatal("values-dev.yaml missing from database workload result")
-	}
-	parsed := parseEnvYAML(t, devData)
-
-	if toInt(parsed["replicaCount"]) != 1 {
-		t.Errorf("database dev replicas: got %v, want 1", parsed["replicaCount"])
-	}
-	if parsed["logLevel"] != "debug" {
-		t.Errorf("database dev logLevel: got %v, want debug", parsed["logLevel"])
-	}
-}
-
-// TestWorkload_DatabaseStagingProfile — Database staging: replicas=2
-func TestWorkload_DatabaseStagingProfile(t *testing.T) {
-	result := GenerateEnvValuesForWorkload(baseVals(1), WorkloadDatabase)
-
-	stagingData, ok := result["values-staging.yaml"]
-	if !ok {
-		t.Fatal("values-staging.yaml missing from database workload result")
-	}
-	parsed := parseEnvYAML(t, stagingData)
-
-	if toInt(parsed["replicaCount"]) != 2 {
-		t.Errorf("database staging replicas: got %v, want 2", parsed["replicaCount"])
-	}
-}
-
 // T2-LR-5: Redis + PVC disambiguation test
 
 func TestDetectWorkloadType_RedisWithPVC_IsNotCache(t *testing.T) {
@@ -1016,5 +319,419 @@ func TestDetectWorkloadType_NilResourceInGroup_NoPanic(t *testing.T) {
 	wt := DetectWorkloadType(group)
 	if wt == "" {
 		t.Error("expected non-empty workload type")
+	}
+}
+
+// ============================================================
+// Overlays keyed on the real values paths of the generated chart
+// (F-S3-1/S4-F7: top-level replicaCount/logLevel/... were read by no template)
+// ============================================================
+
+// chartValues mimics the values.yaml of a universal chart: one service "web" with a
+// Deployment, an HPA and a PDB, one StatefulSet service, a Job and a CronJob.
+const chartValues = `
+global:
+  imagePullSecrets: []
+services:
+  web:
+    enabled: true
+    deployment:
+      replicas: 1
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: web
+      containers:
+      - name: web
+        image: {repository: nginx, tag: "1.27"}
+        resources: {limits: {cpu: "1"}}
+    hpa:
+      scaleTargetRef: {kind: Deployment, name: web}
+      minReplicas: 2
+      maxReplicas: 4
+    pdb:
+      minAvailable: 1
+  db:
+    enabled: true
+    statefulSet:
+      replicas: 1
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: db
+      containers:
+      - name: db
+        image: {repository: postgres}
+  migrate:
+    enabled: true
+    job:
+      backoffLimit: 6
+      containers:
+      - name: migrate
+        image: {repository: migrate}
+  nightly:
+    enabled: true
+    cronJob:
+      schedule: "0 3 * * *"
+      jobTemplate:
+        backoffLimit: 6
+`
+
+func chartBase(t *testing.T) map[string]interface{} {
+	t.Helper()
+	return parseEnvYAML(t, []byte(chartValues))
+}
+
+// lookup follows a dotted path in a decoded YAML document.
+func lookup(doc map[string]interface{}, path string) (interface{}, bool) {
+	var cur interface{} = doc
+	for _, k := range strings.Split(path, ".") {
+		m, ok := cur.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		if cur, ok = m[k]; !ok {
+			return nil, false
+		}
+	}
+	return cur, true
+}
+
+func mustInt(t *testing.T, doc map[string]interface{}, path string) int {
+	t.Helper()
+	v, ok := lookup(doc, path)
+	if !ok {
+		t.Fatalf("overlay has no %s; got %v", path, doc)
+	}
+	return toInt(v)
+}
+
+func hasPath(doc map[string]interface{}, path string) bool {
+	_, ok := lookup(doc, path)
+	return ok
+}
+
+// leafPaths returns the dotted paths of every scalar/list in doc; "affinity" is
+// treated as a leaf (the subtree is a new block the base does not have).
+func leafPaths(doc map[string]interface{}, prefix string) []string {
+	var out []string
+	for k, v := range doc {
+		p := k
+		if prefix != "" {
+			p = prefix + "." + k
+		}
+		if m, ok := v.(map[string]interface{}); ok && k != "affinity" {
+			out = append(out, leafPaths(m, p)...)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// TestEnvValues_OverlayKeysExistInBase is the regression for the dead overlays:
+// every key an overlay sets must be a key (or a new "affinity" block of an existing
+// block) of the base values - otherwise no template consumes it.
+func TestEnvValues_OverlayKeysExistInBase(t *testing.T) {
+	base := chartBase(t)
+	gens := map[string]map[string][]byte{
+		"generic": GenerateEnvValues(base),
+		"web":     GenerateEnvValuesForWorkload(base, WorkloadWeb),
+		"worker":  GenerateEnvValuesForWorkload(base, WorkloadWorker),
+		"db":      GenerateEnvValuesForWorkload(base, WorkloadDatabase),
+		"batch":   GenerateEnvValuesForWorkload(base, WorkloadBatch),
+		"cache":   GenerateEnvValuesForWorkload(base, WorkloadCache),
+	}
+	for name, files := range gens {
+		for file, data := range files {
+			overlay := parseEnvYAML(t, data)
+			for _, p := range leafPaths(overlay, "") {
+				if hasPath(base, p) {
+					continue
+				}
+				// A new key is only allowed for the affinity of an existing block.
+				i := strings.LastIndex(p, ".")
+				if i < 0 || !strings.HasSuffix(p, ".affinity") || !hasPath(base, p[:i]) {
+					t.Errorf("%s/%s: overlay key %s does not exist in the base values", name, file, p)
+				}
+			}
+		}
+	}
+}
+
+// TestEnvValues_NoLegacyTopLevelKeys: replicaCount, logLevel, resources,
+// podDisruptionBudget and autoscaling at the top level are consumed by no template.
+func TestEnvValues_NoLegacyTopLevelKeys(t *testing.T) {
+	for file, data := range GenerateEnvValues(chartBase(t)) {
+		overlay := parseEnvYAML(t, data)
+		for _, k := range []string{"replicaCount", "logLevel", "resources", "podDisruptionBudget", "autoscaling", "affinity", "backoffLimit"} {
+			if _, ok := overlay[k]; ok {
+				t.Errorf("%s: top-level key %q is read by no template", file, k)
+			}
+		}
+	}
+}
+
+// TestEnvValues_ReplicasAtRealPath: the overlays change what helm renders, i.e. the
+// replicas of the Deployment and the StatefulSet.
+func TestEnvValues_ReplicasAtRealPath(t *testing.T) {
+	files := GenerateEnvValues(chartBase(t))
+	want := map[string]int{"values-dev.yaml": 1, "values-staging.yaml": 2, "values-prod.yaml": 3}
+	for file, n := range want {
+		overlay := parseEnvYAML(t, files[file])
+		if got := mustInt(t, overlay, "services.web.deployment.replicas"); got != n {
+			t.Errorf("%s: deployment replicas %d, want %d", file, got, n)
+		}
+		if got := mustInt(t, overlay, "services.db.statefulSet.replicas"); got != n {
+			t.Errorf("%s: statefulSet replicas %d, want %d", file, got, n)
+		}
+	}
+}
+
+// TestEnvValues_ProdNeverLowersReplicas: prod is "at least", dev/staging are absolute.
+func TestEnvValues_ProdNeverLowersReplicas(t *testing.T) {
+	base := parseEnvYAML(t, []byte("services:\n  web:\n    deployment:\n      replicas: 5\n"))
+	files := GenerateEnvValues(base)
+	if got := mustInt(t, parseEnvYAML(t, files["values-prod.yaml"]), "services.web.deployment.replicas"); got != 5 {
+		t.Errorf("prod replicas: got %d, want 5 (base is higher than the profile)", got)
+	}
+	if got := mustInt(t, parseEnvYAML(t, files["values-dev.yaml"]), "services.web.deployment.replicas"); got != 1 {
+		t.Errorf("dev replicas: got %d, want 1", got)
+	}
+	if got := mustInt(t, parseEnvYAML(t, files["values-staging.yaml"]), "services.web.deployment.replicas"); got != 2 {
+		t.Errorf("staging replicas: got %d, want 2", got)
+	}
+}
+
+// TestEnvValues_OverlayChangesEffectiveValues: base merged with the overlay differs
+// from the base at a path the Deployment template reads.
+func TestEnvValues_OverlayChangesEffectiveValues(t *testing.T) {
+	base := chartBase(t)
+	overlay := parseEnvYAML(t, GenerateEnvValues(base)["values-prod.yaml"])
+	merged := deepMergeValues(base, overlay)
+	got, _ := lookup(merged, "services.web.deployment.replicas")
+	if toInt(got) != 3 {
+		t.Errorf("merged prod replicas: got %v, want 3", got)
+	}
+	// The container list (image, resources) is not part of the overlay: Helm replaces
+	// lists wholesale, so an overlay would freeze the image tag of the base.
+	if _, ok := lookup(overlay, "services.web.deployment.containers"); ok {
+		t.Error("overlay must not copy the containers list")
+	}
+}
+
+// deepMergeValues merges override over base the way Helm does (maps merge, the rest replaces).
+func deepMergeValues(base, override map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(base))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range override {
+		if ov, ok := v.(map[string]interface{}); ok {
+			if bv, ok := out[k].(map[string]interface{}); ok {
+				out[k] = deepMergeValues(bv, ov)
+				continue
+			}
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func TestEnvValues_HPAAndPDB(t *testing.T) {
+	files := GenerateEnvValuesForWorkload(chartBase(t), WorkloadWeb)
+
+	prod := parseEnvYAML(t, files["values-prod.yaml"])
+	if got := mustInt(t, prod, "services.web.hpa.minReplicas"); got != 3 {
+		t.Errorf("web prod HPA min: got %d, want 3", got)
+	}
+	if got := mustInt(t, prod, "services.web.hpa.maxReplicas"); got != 10 {
+		t.Errorf("web prod HPA max: got %d, want 10", got)
+	}
+	if got := mustInt(t, prod, "services.web.pdb.minAvailable"); got != 2 {
+		t.Errorf("web prod PDB minAvailable: got %d, want 2", got)
+	}
+
+	dev := parseEnvYAML(t, files["values-dev.yaml"])
+	if mustInt(t, dev, "services.web.hpa.minReplicas") != 1 || mustInt(t, dev, "services.web.hpa.maxReplicas") != 1 {
+		t.Errorf("web dev HPA must be pinned to one replica, got %v", dev)
+	}
+	if hasPath(dev, "services.web.pdb") {
+		t.Errorf("web dev must not touch the PDB, got %v", dev)
+	}
+}
+
+func TestEnvValues_ProdKeepsHigherHPABounds(t *testing.T) {
+	base := parseEnvYAML(t, []byte("services:\n  web:\n    hpa:\n      minReplicas: 5\n      maxReplicas: 40\n"))
+	prod := parseEnvYAML(t, GenerateEnvValuesForWorkload(base, WorkloadWeb)["values-prod.yaml"])
+	if got := mustInt(t, prod, "services.web.hpa.minReplicas"); got != 5 {
+		t.Errorf("prod HPA min: got %d, want 5", got)
+	}
+	if got := mustInt(t, prod, "services.web.hpa.maxReplicas"); got != 40 {
+		t.Errorf("prod HPA max: got %d, want 40", got)
+	}
+}
+
+// TestEnvValues_PDBOnlyNumericMinAvailable: a PDB with maxUnavailable or a percentage
+// minAvailable would become invalid (both set) or lose its meaning.
+func TestEnvValues_PDBOnlyNumericMinAvailable(t *testing.T) {
+	for name, pdb := range map[string]string{
+		"maxUnavailable":      "maxUnavailable: 1",
+		"percentMinAvailable": "minAvailable: 50%",
+		"both":                "minAvailable: 1\n      maxUnavailable: 1",
+	} {
+		base := parseEnvYAML(t, []byte("services:\n  web:\n    pdb:\n      "+pdb+"\n"))
+		for file, data := range GenerateEnvValues(base) {
+			if parsed := parseEnvYAML(t, data); hasPath(parsed, "services.web.pdb") {
+				t.Errorf("%s/%s: PDB must be left alone, got %v", name, file, parsed)
+			}
+		}
+	}
+}
+
+func TestEnvValues_ProdAntiAffinity(t *testing.T) {
+	prod := parseEnvYAML(t, GenerateEnvValues(chartBase(t))["values-prod.yaml"])
+	for _, p := range []string{"services.web.deployment.affinity", "services.db.statefulSet.affinity"} {
+		aff, ok := lookup(prod, p)
+		if !ok {
+			t.Fatalf("prod overlay has no %s", p)
+		}
+		if _, ok := lookup(aff.(map[string]interface{}), "podAntiAffinity"); !ok {
+			t.Errorf("%s must contain podAntiAffinity, got %v", p, aff)
+		}
+	}
+	// The selector comes from the block itself, not from a made-up label.
+	sel, _ := lookup(prod, "services.web.deployment.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution")
+	term := sel.([]interface{})[0].(map[string]interface{})["podAffinityTerm"].(map[string]interface{})
+	labels := term["labelSelector"].(map[string]interface{})["matchLabels"].(map[string]interface{})
+	if labels["app.kubernetes.io/name"] != "web" {
+		t.Errorf("anti-affinity selector: got %v, want app.kubernetes.io/name=web", labels)
+	}
+	for _, env := range []string{"values-dev.yaml", "values-staging.yaml"} {
+		if hasPath(parseEnvYAML(t, GenerateEnvValues(chartBase(t))[env]), "services.web.deployment.affinity") {
+			t.Errorf("%s must not set affinity", env)
+		}
+	}
+}
+
+func TestEnvValues_ProdAffinityKeepsExistingAndNeedsSelector(t *testing.T) {
+	withAffinity := parseEnvYAML(t, []byte("services:\n  web:\n    deployment:\n      replicas: 1\n      selector: {matchLabels: {a: b}}\n      affinity: {nodeAffinity: {}}\n"))
+	if hasPath(parseEnvYAML(t, GenerateEnvValues(withAffinity)["values-prod.yaml"]), "services.web.deployment.affinity") {
+		t.Error("an affinity of the base must not be merged with a generated one")
+	}
+	noSelector := parseEnvYAML(t, []byte("services:\n  web:\n    deployment:\n      replicas: 1\n"))
+	if hasPath(parseEnvYAML(t, GenerateEnvValues(noSelector)["values-prod.yaml"]), "services.web.deployment.affinity") {
+		t.Error("without a selector there is nothing to spread; affinity must not be generated")
+	}
+}
+
+func TestEnvValues_BatchBackoffLimit(t *testing.T) {
+	files := GenerateEnvValuesForWorkload(chartBase(t), WorkloadBatch)
+	want := map[string]int{"values-dev.yaml": 1, "values-staging.yaml": 2, "values-prod.yaml": 3}
+	for file, n := range want {
+		overlay := parseEnvYAML(t, files[file])
+		if got := mustInt(t, overlay, "services.migrate.job.backoffLimit"); got != n {
+			t.Errorf("%s: job backoffLimit %d, want %d", file, got, n)
+		}
+		if got := mustInt(t, overlay, "services.nightly.cronJob.jobTemplate.backoffLimit"); got != n {
+			t.Errorf("%s: cronJob backoffLimit %d, want %d", file, got, n)
+		}
+		// A batch profile does not scale Deployments.
+		if hasPath(overlay, "services.web.deployment.replicas") {
+			t.Errorf("%s: batch profile must not set deployment replicas", file)
+		}
+	}
+}
+
+func TestEnvValues_WorkloadProfiles(t *testing.T) {
+	cases := []struct {
+		wt       WorkloadType
+		replicas map[string]int
+		pdb      int // prod minAvailable, 0 = untouched
+	}{
+		{WorkloadWeb, map[string]int{"dev": 1, "staging": 2, "prod": 3}, 2},
+		{WorkloadWorker, map[string]int{"dev": 1, "staging": 2, "prod": 3}, 1},
+		{WorkloadDatabase, map[string]int{"dev": 1, "staging": 2, "prod": 3}, 2},
+		{WorkloadCache, map[string]int{"dev": 1, "staging": 2, "prod": 2}, 1},
+	}
+	for _, c := range cases {
+		files := GenerateEnvValuesForWorkload(chartBase(t), c.wt)
+		for env, n := range c.replicas {
+			overlay := parseEnvYAML(t, files["values-"+env+".yaml"])
+			if got := mustInt(t, overlay, "services.web.deployment.replicas"); got != n {
+				t.Errorf("%s %s: replicas %d, want %d", c.wt, env, got, n)
+			}
+		}
+		prod := parseEnvYAML(t, files["values-prod.yaml"])
+		if got := mustInt(t, prod, "services.web.pdb.minAvailable"); got != c.pdb {
+			t.Errorf("%s prod: PDB minAvailable %d, want %d", c.wt, got, c.pdb)
+		}
+		if c.wt != WorkloadWeb && hasPath(prod, "services.web.hpa") {
+			t.Errorf("%s prod: HPA must be left alone (only web scales by HPA)", c.wt)
+		}
+	}
+}
+
+// TestEnvValues_SeparateAndUmbrellaLayouts: the value blocks are found where the
+// layouts put them - at the top level, under a service key, under a subchart.
+func TestEnvValues_SeparateAndUmbrellaLayouts(t *testing.T) {
+	for path, doc := range map[string]string{
+		"deployment.replicas":                       "deployment:\n  replicas: 1\n",
+		"api.deployment.replicas":                   "api:\n  deployment:\n    replicas: 1\n",
+		"frontend.services.web.deployment.replicas": "frontend:\n  services:\n    web:\n      deployment:\n        replicas: 1\n",
+	} {
+		prod := parseEnvYAML(t, GenerateEnvValues(parseEnvYAML(t, []byte(doc)))["values-prod.yaml"])
+		if got := mustInt(t, prod, path); got != 3 {
+			t.Errorf("%s: prod replicas %d, want 3", path, got)
+		}
+	}
+}
+
+// TestEnvValues_NoSlots: nothing to override (nil base, or no workload blocks) still
+// yields three valid, empty overlays.
+func TestEnvValues_NoSlots(t *testing.T) {
+	for name, base := range map[string]map[string]interface{}{
+		"nil":      nil,
+		"empty":    {},
+		"no-slots": {"global": map[string]interface{}{"imageRegistry": ""}, "services": map[string]interface{}{"cm": map[string]interface{}{"configMaps": map[string]interface{}{"x": map[string]interface{}{"data": map[string]interface{}{"job": "x"}}}}}},
+	} {
+		files := GenerateEnvValues(base)
+		if len(files) != 3 {
+			t.Fatalf("%s: expected 3 files, got %v", name, mapKeys(files))
+		}
+		for file, data := range files {
+			if overlay := parseEnvYAML(t, data); len(overlay) != 0 {
+				t.Errorf("%s/%s: expected an empty overlay, got %v", name, file, overlay)
+			}
+		}
+	}
+}
+
+func TestEnvValues_Deterministic(t *testing.T) {
+	a := GenerateEnvValues(chartBase(t))
+	b := GenerateEnvValues(chartBase(t))
+	for file := range a {
+		if string(a[file]) != string(b[file]) {
+			t.Errorf("%s differs between runs", file)
+		}
+	}
+}
+
+func TestEnvValues_FileNaming(t *testing.T) {
+	files := GenerateEnvValues(chartBase(t))
+	for _, name := range []string{"values-dev.yaml", "values-staging.yaml", "values-prod.yaml"} {
+		if _, ok := files[name]; !ok {
+			t.Errorf("expected file %q in output, not found. Keys: %v", name, mapKeys(files))
+		}
+	}
+	if len(files) != 3 {
+		t.Errorf("expected exactly 3 env value files, got %d: %v", len(files), mapKeys(files))
+	}
+}
+
+func TestEnvValues_CLIFlag_Disabled(t *testing.T) {
+	// When EnvValues flag is disabled, no env files generated
+	// This is tested via Options.EnvValues field
+	opts := Options{}
+	if opts.EnvValues {
+		t.Error("EnvValues option should default to false (disabled)")
 	}
 }
