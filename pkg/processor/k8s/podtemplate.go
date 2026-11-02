@@ -130,8 +130,12 @@ func extractPodSpecSettings(podSpec, values map[string]interface{}) {
 			values["terminationGracePeriodSeconds"] = v
 		}
 	}
-	if v, ok := podSpec["shareProcessNamespace"].(bool); ok && v {
-		values["shareProcessNamespace"] = v
+	// All four are false by default. hostNetwork does not bring a dnsPolicy
+	// with it: a pod that needs ClusterFirstWithHostNet has it in the input.
+	for _, field := range []string{"shareProcessNamespace", "hostNetwork", "hostPID", "hostIPC"} {
+		if v, ok := podSpec[field].(bool); ok && v {
+			values[field] = v
+		}
 	}
 	// true is the default.
 	if v, ok := podSpec["enableServiceLinks"].(bool); ok && !v {
@@ -310,9 +314,11 @@ func podTemplate(chartName string, indent int, restartPolicy string, workloadKey
 		w(`    %s: {{ . | quote }}`, field)
 		w(`    {{- end }}`)
 	}
-	w(`    {{- with .shareProcessNamespace }}`)
-	w(`    shareProcessNamespace: {{ . }}`)
-	w(`    {{- end }}`)
+	for _, field := range []string{"shareProcessNamespace", "hostNetwork", "hostPID", "hostIPC"} {
+		w(`    {{- with .%s }}`, field)
+		w(`    %s: {{ . }}`, field)
+		w(`    {{- end }}`)
+	}
 	// false is stored, and with would skip it.
 	w(`    {{- if hasKey . "enableServiceLinks" }}`)
 	w(`    enableServiceLinks: {{ .enableServiceLinks }}`)

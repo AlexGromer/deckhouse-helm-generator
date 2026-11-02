@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -82,6 +84,154 @@ func TestClusterExtractor_Extract_NoNamespaceListsClusterScoped(t *testing.T) {
 	resources, _ := drainCluster(t, fake, ClusterExtractorConfig{}, Options{})
 	if len(resources) != 2 {
 		t.Fatalf("got %d resources; want 2 (cluster-wide extraction keeps cluster-scoped kinds)", len(resources))
+	}
+}
+
+func multiNamespaceFake() *fakeKubeAPIServer {
+	fake := scopedFake()
+	fake.setResponse("/api/v1/namespaces/staging/configmaps", itemList(configMapItem("cm-staging", "staging")))
+	fake.setResponse("/api/v1/namespaces/kube-extra/configmaps", itemList(configMapItem("cm-system", "kube-extra")))
+	return fake
+}
+
+func kindNames(resources []*types.ExtractedResource) []string {
+	var names []string
+	for _, r := range resources {
+		names = append(names, r.Object.GetKind()+"/"+r.Object.GetName())
+	}
+	sort.Strings(names)
+	return names
+}
+
+func TestClusterExtractor_Extract_NamespacesListsEach(t *testing.T) {
+	fake := multiNamespaceFake()
+	defer fake.close()
+
+	resources, errs := drainCluster(t, fake, ClusterExtractorConfig{}, Options{Namespaces: []string{"prod", "staging"}})
+	if len(errs) != 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	// The cluster-scoped PersistentVolume is skipped like with -n.
+	want := []string{"ConfigMap/cm", "ConfigMap/cm-staging"}
+	if got := kindNames(resources); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v; want %v", got, want)
+	}
+}
+
+func TestClusterExtractor_Extract_NamespacesCombineWithNamespace(t *testing.T) {
+	fake := multiNamespaceFake()
+	defer fake.close()
+
+	// A repeated namespace is listed once.
+	resources, _ := drainCluster(t, fake, ClusterExtractorConfig{}, Options{Namespace: "prod", Namespaces: []string{"staging", "prod"}})
+	want := []string{"ConfigMap/cm", "ConfigMap/cm-staging"}
+	if got := kindNames(resources); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v; want %v", got, want)
+	}
+}
+
+func TestClusterExtractor_Extract_NamespacesKeepExplicitClusterScopedKind(t *testing.T) {
+	fake := multiNamespaceFake()
+	defer fake.close()
+
+	opts := Options{Namespaces: []string{"prod", "staging"}, IncludeKinds: []string{"ConfigMap", "PersistentVolume"}}
+	resources, _ := drainCluster(t, fake, ClusterExtractorConfig{}, opts)
+	// The PersistentVolume is listed once, not once per namespace.
+	want := []string{"ConfigMap/cm", "ConfigMap/cm-staging", "PersistentVolume/pv1"}
+	if got := kindNames(resources); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v; want %v", got, want)
+	}
+}
+
+func TestClusterExtractor_Extract_NamespacesBypassDefaultExclusion(t *testing.T) {
+	fake := multiNamespaceFake()
+	defer fake.close()
+
+	resources, _ := drainCluster(t, fake, ClusterExtractorConfig{}, Options{Namespaces: []string{"prod", "kube-extra"}})
+	want := []string{"ConfigMap/cm", "ConfigMap/cm-system"}
+	if got := kindNames(resources); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v; want %v (an explicitly requested kube-* namespace is kept)", got, want)
+	}
+}
+
+func TestClusterExtractor_Extract_NamespacesNamedInForbidden(t *testing.T) {
+	fake := multiNamespaceFake()
+	defer fake.close()
+	fake.setResponse("/api/v1", coreResourceList(
+		k8sResourceEntry{Name: "configmaps", Kind: "ConfigMap", Namespaced: true, Verbs: []string{"get", "list"}},
+		k8sResourceEntry{Name: "services", Kind: "Service", Namespaced: true, Verbs: []string{"get", "list"}},
+	))
+	for _, ns := range []string{"prod", "staging"} {
+		fake.mux.HandleFunc("/api/v1/namespaces/"+ns+"/services", func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, `{"message":"forbidden: User cannot list resource"}`, http.StatusForbidden)
+		})
+	}
+
+	resources, errs := drainCluster(t, fake, ClusterExtractorConfig{}, Options{Namespaces: []string{"prod", "staging"}})
+	if len(resources) != 2 {
+		t.Fatalf("got %d resources; want the two ConfigMaps", len(resources))
+	}
+	var forbidden *ForbiddenKindsError
+	for _, err := range errs {
+		errors.As(err, &forbidden)
+	}
+	if forbidden == nil {
+		t.Fatalf("no ForbiddenKindsError in %v", errs)
+	}
+	if got := forbidden.Error(); got != "no permission to list 1 kinds in namespaces prod, staging: Service" {
+		t.Errorf("summary = %q", got)
+	}
+	if len(forbidden.Details) != 2 || !strings.Contains(forbidden.Details[0], "prod") || !strings.Contains(forbidden.Details[1], "staging") {
+		t.Errorf("details must name the namespace of each refusal: %v", forbidden.Details)
+	}
+}
+
+func TestClusterExtractor_Extract_ForbiddenSummaryNamesOnlyRefusedNamespaces(t *testing.T) {
+	fake := multiNamespaceFake()
+	defer fake.close()
+	fake.setResponse("/api/v1", coreResourceList(
+		k8sResourceEntry{Name: "configmaps", Kind: "ConfigMap", Namespaced: true, Verbs: []string{"get", "list"}},
+		k8sResourceEntry{Name: "services", Kind: "Service", Namespaced: true, Verbs: []string{"get", "list"}},
+	))
+	fake.setResponse("/api/v1/namespaces/prod/services", itemList())
+	fake.mux.HandleFunc("/api/v1/namespaces/staging/services", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"forbidden: User cannot list resource"}`, http.StatusForbidden)
+	})
+
+	_, errs := drainCluster(t, fake, ClusterExtractorConfig{}, Options{Namespaces: []string{"prod", "staging"}})
+	var forbidden *ForbiddenKindsError
+	for _, err := range errs {
+		errors.As(err, &forbidden)
+	}
+	if forbidden == nil {
+		t.Fatalf("no ForbiddenKindsError in %v", errs)
+	}
+	if got := forbidden.Error(); got != "no permission to list 1 kinds in staging: Service" {
+		t.Errorf("summary = %q; prod was listed fine and must not be named", got)
+	}
+}
+
+func TestClusterExtractor_Extract_ListErrorNamesNamespace(t *testing.T) {
+	fake := multiNamespaceFake()
+	defer fake.close()
+	fake.mux.HandleFunc("/api/v1/namespaces/staging/configmaps", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+	})
+
+	_, errs := drainCluster(t, fake, ClusterExtractorConfig{}, Options{Namespaces: []string{"prod", "staging"}})
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "error listing ConfigMap in staging:") {
+		t.Fatalf("a failure in one of several namespaces must name it, got %v", errs)
+	}
+
+	// A single namespace is already known to the user: no repetition.
+	fake2 := scopedFake()
+	defer fake2.close()
+	fake2.mux.HandleFunc("/api/v1/namespaces/prod/configmaps", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+	})
+	_, errs = drainCluster(t, fake2, ClusterExtractorConfig{Namespace: "prod"}, Options{})
+	if len(errs) != 1 || strings.Contains(errs[0].Error(), " in prod") {
+		t.Fatalf("single namespace error = %v", errs)
 	}
 }
 

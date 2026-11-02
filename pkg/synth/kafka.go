@@ -24,7 +24,7 @@ func ExtractKafkaFacts(props map[string]string, originPrefix string) (kafkaclien
 
 	var notes []string
 	for _, unresolved := range facts.Unresolved {
-		notes = append(notes, "Note: unresolved placeholder in Kafka property "+unresolved.Origin+": "+unresolved.Unresolved)
+		notes = append(notes, "unresolved placeholder in Kafka property "+unresolved.Origin+": "+unresolved.Unresolved)
 	}
 
 	return facts, notes

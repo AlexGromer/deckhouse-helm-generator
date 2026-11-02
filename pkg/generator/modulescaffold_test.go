@@ -55,7 +55,7 @@ func TestModuleScaffold_ChartYAML_NoDepWhenHelmLibUnused(t *testing.T) {
 
 func TestModuleScaffold_HelmLibInCommentOnly_NoDep(t *testing.T) {
 	chart := makeTestChart("mymodule")
-	chart.Templates["templates/deployment.yaml"] = "{{- /* TODO: {{ include \"helm_lib_module_labels\" . }} */ -}}\nkind: Deployment\n"
+	chart.Templates["templates/deployment.yaml"] = "{{- /* note: {{ include \"helm_lib_module_labels\" . }} */ -}}\nkind: Deployment\n"
 	result := GenerateDeckhouseModule(chart, nil)
 
 	if strings.Contains(result.ChartYAML, "deckhouse_lib_helm") {

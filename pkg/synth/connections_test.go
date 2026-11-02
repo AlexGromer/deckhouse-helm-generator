@@ -74,7 +74,7 @@ func TestExtractSynthConnections(t *testing.T) {
 				"spring.datasource.url": "${DB_URL}",
 			},
 			wantNotes: []string{
-				"Note: spring.datasource.url is unparseable placeholder \"${DB_URL}\"",
+				"spring.datasource.url is unparseable placeholder \"${DB_URL}\"",
 			},
 		},
 	}

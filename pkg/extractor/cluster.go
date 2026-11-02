@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -220,9 +221,12 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 			return
 		}
 
-		namespace := e.effectiveNamespace(opts)
+		namespaces := e.effectiveNamespaces(opts)
 		var forbidden ForbiddenKindsError
-		forbidden.Namespace = namespace
+		forbidden.Namespaces = namespaces
+		if len(namespaces) == 1 {
+			forbidden.Namespace = namespaces[0]
+		}
 		defer func() {
 			if len(forbidden.Kinds) > 0 {
 				errors <- &forbidden
@@ -237,7 +241,7 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 			// A namespace filter means "this namespace's objects": listing a
 			// cluster-scoped kind would pull in the whole cluster (and, with
 			// namespace-scoped RBAC, only produce permission errors).
-			if namespace != "" && !ar.Namespaced && !kindRequested(ar.Kind, opts) {
+			if len(namespaces) > 0 && !ar.Namespaced && !kindRequested(ar.Kind, opts) {
 				continue
 			}
 
@@ -250,47 +254,71 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 				continue
 			}
 
-			err := client.listResources(ctx, ar, namespace, e.effectiveSelector(opts), e.config.Pagination.Limit, func(obj *unstructured.Unstructured) {
-				// Apply namespace exclusion filter.
-				if e.isExcludedNamespace(obj.GetNamespace()) {
+			// A namespaced kind is listed in each requested namespace; anything
+			// else (cluster-scoped, or no namespace filter) once.
+			targets := []string{""}
+			if ar.Namespaced && len(namespaces) > 0 {
+				targets = namespaces
+			}
+			for _, namespace := range targets {
+				if ctx.Err() != nil {
 					return
 				}
-				finished := finishedJobState(obj)
-				if !prepareClusterObject(obj) {
-					return
-				}
-				if finished != "" {
+				err := client.listResources(ctx, ar, namespace, e.effectiveSelector(opts), e.config.Pagination.Limit, func(obj *unstructured.Unstructured) {
+					// Apply namespace exclusion filter.
+					if e.isExcludedNamespace(obj.GetNamespace(), namespaces) {
+						return
+					}
+					finished := finishedJobState(obj)
+					if !prepareClusterObject(obj) {
+						return
+					}
+					if finished != "" {
+						select {
+						case errors <- &NoteError{Msg: fmt.Sprintf("Job %s has already finished (%s); it is kept in the chart and will run again on install. Consider a Helm hook or excluding it", obj.GetName(), finished)}:
+						case <-ctx.Done():
+						}
+					}
+
+					// Apply secret strategy.
+					if obj.GetKind() == "Secret" {
+						e.applySecretStrategy(obj, opts)
+					}
+
+					resource := &types.ExtractedResource{
+						Object:     obj,
+						Source:     types.SourceCluster,
+						SourcePath: client.server,
+						GVK:        obj.GroupVersionKind(),
+					}
+
 					select {
-					case errors <- &NoteError{Msg: fmt.Sprintf("Job %s has already finished (%s); it is kept in the chart and will run again on install. Consider a Helm hook or excluding it", obj.GetName(), finished)}:
+					case resources <- resource:
 					case <-ctx.Done():
 					}
+				})
+				if err != nil {
+					var status *httpStatusError
+					if stderrors.As(err, &status) && status.Code == http.StatusForbidden {
+						if !slices.Contains(forbidden.Kinds, ar.Kind) {
+							forbidden.Kinds = append(forbidden.Kinds, ar.Kind)
+						}
+						detail := fmt.Sprintf("error listing %s: %v", ar.Kind, err)
+						if len(namespaces) > 1 && namespace != "" {
+							detail = fmt.Sprintf("error listing %s in %s: %v", ar.Kind, namespace, err)
+						}
+						if namespace != "" && !slices.Contains(forbidden.Refused, namespace) {
+							forbidden.Refused = append(forbidden.Refused, namespace)
+						}
+						forbidden.Details = append(forbidden.Details, detail)
+						continue
+					}
+					if len(namespaces) > 1 && namespace != "" {
+						errors <- fmt.Errorf("error listing %s in %s: %w", ar.Kind, namespace, err)
+						continue
+					}
+					errors <- fmt.Errorf("error listing %s: %w", ar.Kind, err)
 				}
-
-				// Apply secret strategy.
-				if obj.GetKind() == "Secret" {
-					e.applySecretStrategy(obj, opts)
-				}
-
-				resource := &types.ExtractedResource{
-					Object:     obj,
-					Source:     types.SourceCluster,
-					SourcePath: client.server,
-					GVK:        obj.GroupVersionKind(),
-				}
-
-				select {
-				case resources <- resource:
-				case <-ctx.Done():
-				}
-			})
-			if err != nil {
-				var status *httpStatusError
-				if stderrors.As(err, &status) && status.Code == http.StatusForbidden {
-					forbidden.Kinds = append(forbidden.Kinds, ar.Kind)
-					forbidden.Details = append(forbidden.Details, fmt.Sprintf("error listing %s: %v", ar.Kind, err))
-					continue
-				}
-				errors <- fmt.Errorf("error listing %s: %w", ar.Kind, err)
 			}
 		}
 	}()
@@ -325,11 +353,21 @@ func (e *ClusterExtractor) getClient(opts Options) (*clusterClient, error) {
 	return client, nil
 }
 
-func (e *ClusterExtractor) effectiveNamespace(opts Options) string {
-	if e.config.Namespace != "" {
-		return e.config.Namespace
+// effectiveNamespaces returns the requested namespaces without repeats: the
+// single namespace (config wins over the option) followed by the
+// --namespaces list. Empty means the whole cluster.
+func (e *ClusterExtractor) effectiveNamespaces(opts Options) []string {
+	single := e.config.Namespace
+	if single == "" {
+		single = opts.Namespace
 	}
-	return opts.Namespace
+	var namespaces []string
+	for _, ns := range append([]string{single}, opts.Namespaces...) {
+		if ns != "" && !slices.Contains(namespaces, ns) {
+			namespaces = append(namespaces, ns)
+		}
+	}
+	return namespaces
 }
 
 func (e *ClusterExtractor) effectiveSelector(opts Options) string {
@@ -341,10 +379,10 @@ func (e *ClusterExtractor) effectiveSelector(opts Options) string {
 
 // isExcludedNamespace reports namespaces skipped when extracting a whole
 // cluster: configured exclusions plus system namespaces (kube-*, and d8-*
-// managed by Deckhouse), unless that namespace was requested explicitly.
-// Entries ending in "*" are prefixes.
-func (e *ClusterExtractor) isExcludedNamespace(ns string) bool {
-	if ns == "" || ns == e.config.Namespace {
+// managed by Deckhouse), unless that namespace was requested explicitly (in
+// requested). Entries ending in "*" are prefixes.
+func (e *ClusterExtractor) isExcludedNamespace(ns string, requested []string) bool {
+	if ns == "" || slices.Contains(requested, ns) {
 		return false
 	}
 	for _, excluded := range append(append([]string{}, defaultExcludedNamespaces...), e.config.ExcludeNamespaces...) {
@@ -391,18 +429,35 @@ func (e *NoteError) Error() string { return e.Msg }
 // ForbiddenKindsError is the one error Extract sends for every kind the
 // API server refused to list (HTTP 403), e.g. with namespace-scoped RBAC.
 type ForbiddenKindsError struct {
-	// Namespace is the namespace that was listed ("" for the whole cluster).
+	// Namespace is the namespace that was listed ("" for the whole cluster
+	// or several namespaces).
 	Namespace string
+	// Namespaces are all the namespaces that were listed (empty for the
+	// whole cluster).
+	Namespaces []string
+	// Refused are the namespaces where at least one listing was refused, in
+	// discovery order. The summary names these, not every listed namespace.
+	Refused []string
 	// Kinds are the refused kinds, in discovery order.
 	Kinds []string
-	// Details has the full error of each kind, in the order of Kinds.
+	// Details has the full error of each refusal (one per kind and
+	// namespace), in the order of Kinds.
 	Details []string
 }
 
 func (e *ForbiddenKindsError) Error() string {
 	where := "the cluster"
-	if e.Namespace != "" {
+	switch {
+	case len(e.Refused) > 1:
+		where = "namespaces " + strings.Join(e.Refused, ", ")
+	case len(e.Refused) == 1:
+		where = e.Refused[0]
+	case len(e.Namespaces) > 1:
+		where = "namespaces " + strings.Join(e.Namespaces, ", ")
+	case e.Namespace != "":
 		where = e.Namespace
+	case len(e.Namespaces) == 1:
+		where = e.Namespaces[0]
 	}
 	return fmt.Sprintf("no permission to list %d kinds in %s: %s", len(e.Kinds), where, strings.Join(e.Kinds, ", "))
 }

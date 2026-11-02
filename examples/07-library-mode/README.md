@@ -24,7 +24,7 @@ dhg generate \
   --chart-version 1.0.0 \
   --mode library
 
-helm dependency build ./output/07/frontend   # vendors ../library into charts/
+# charts/library is vendored, no dependency build needed
 helm template frontend ./output/07/frontend
 ```
 
@@ -37,9 +37,10 @@ output/07/
 │   └── templates/
 │       └── _helpers.tpl      # define "library.fullname", "library.labels", ...
 ├── frontend/                 # application chart
-│   ├── Chart.yaml            # dependencies: library (file://../library)
+│   ├── Chart.yaml            # dependencies: library (file://charts/library, vendored)
 │   ├── values.yaml           # flat values: enabled, deployment, service, ...
 │   ├── README.md             # parameter table
+│   ├── charts/library/       # copy of the library chart, lint/template need no dependency build
 │   └── templates/
 │       ├── frontend-deployment.yaml   # {{ include "library.labels" $ }} ...
 │       ├── frontend-service.yaml
@@ -51,8 +52,8 @@ output/07/
 
 - Several services should share one definition of names and labels
 - Organisation-wide label or naming conventions are changed once, in the
-  library chart, and picked up by every service chart on its next
-  `helm dependency update`
+  library chart, and picked up by every service chart once the service charts
+  are regenerated
 
 Compared with `--mode separate`, the service charts are identical except
 that helpers come from the library instead of a per-chart `_helpers.tpl`.

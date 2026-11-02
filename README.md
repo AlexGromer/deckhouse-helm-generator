@@ -132,7 +132,7 @@ dhg generate -f ./manifests -o ./charts --chart-name shop --mode umbrella
 helm upgrade --install shop ./charts/shop --set database.enabled=false
 ```
 
-Для `library`-режима зависимость подключается как обычно: `helm dependency build ./charts/<chart>`.
+В `library`-режиме библиотека уже лежит в `charts/library` каждого chart'а, `helm dependency build` не нужен.
 
 ---
 

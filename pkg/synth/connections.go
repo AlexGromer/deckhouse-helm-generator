@@ -19,7 +19,7 @@ func ExtractSynthConnections(props map[string]string, fromKey types.ResourceKey,
 		}
 
 		if strings.Contains(v, "${") {
-			notes = append(notes, fmt.Sprintf("Note: %s is unparseable placeholder %q", k, v))
+			notes = append(notes, fmt.Sprintf("%s is unparseable placeholder %q", k, v))
 			continue
 		}
 

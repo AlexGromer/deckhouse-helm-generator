@@ -447,8 +447,8 @@ func TestPipelineLibrary_AllResourceTypes(t *testing.T) {
 		if len(wrapper.Templates) == 0 {
 			t.Errorf("wrapper chart %s has no templates", wrapper.Name)
 		}
-		if !strings.Contains(wrapper.ChartYAML, "repository: file://../library") {
-			t.Errorf("wrapper chart %s does not depend on file://../library", wrapper.Name)
+		if !strings.Contains(wrapper.ChartYAML, "repository: file://charts/library") {
+			t.Errorf("wrapper chart %s does not depend on file://charts/library", wrapper.Name)
 		}
 		if !strings.Contains(wrapper.ValuesYAML, "\nenabled: true\n") {
 			t.Errorf("wrapper chart %s values.yaml should enable the chart with a top-level enabled: true", wrapper.Name)
@@ -550,14 +550,7 @@ spec:
 					chart.Name, lintErr, string(lintOutput))
 			}
 		} else {
-			// For wrapper charts: dependency build first, then lint
-			depCmd := exec.Command("helm", "dependency", "build", chartDir)
-			depOut, depErr := depCmd.CombinedOutput()
-			if depErr != nil {
-				t.Logf("helm dependency build failed for wrapper %s (skipping lint): %v\nOutput: %s",
-					chart.Name, depErr, string(depOut))
-				continue
-			}
+			// Wrapper charts carry the library under charts/: no dependency build.
 			cmd := exec.Command("helm", "lint", chartDir)
 			lintOutput, lintErr := cmd.CombinedOutput()
 			if lintErr != nil {

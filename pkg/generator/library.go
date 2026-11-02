@@ -46,7 +46,7 @@ func (g *LibraryGenerator) Generate(ctx context.Context, graph *types.ResourceGr
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		wrapper, err := g.generateWrapperChart(group, libChart.Name, opts)
+		wrapper, err := g.generateWrapperChart(group, libChart, opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate chart for group %s: %w", group.Name, err)
 		}
@@ -82,7 +82,8 @@ func (g *LibraryGenerator) generateLibraryChart(opts Options) *types.GeneratedCh
 
 // generateWrapperChart creates the application chart for a service group.
 // It is a separate-mode chart whose helper references point at the library.
-func (g *LibraryGenerator) generateWrapperChart(group *ServiceGroup, libraryName string, opts Options) (*types.GeneratedChart, error) {
+func (g *LibraryGenerator) generateWrapperChart(group *ServiceGroup, library *types.GeneratedChart, opts Options) (*types.GeneratedChart, error) {
+	libraryName := library.Name
 	sep := &SeparateGenerator{}
 	chart, err := sep.generateChartForGroup(group, opts, opts.ChartName)
 	if err != nil {
@@ -99,9 +100,11 @@ func (g *LibraryGenerator) generateWrapperChart(group *ServiceGroup, libraryName
 		Keywords:    []string{"kubernetes", "deckhouse"},
 		Dependencies: []helm.Dependency{
 			{
-				Name:       libraryName,
-				Version:    opts.ChartVersion,
-				Repository: fmt.Sprintf("file://../%s", libraryName),
+				Name:    libraryName,
+				Version: opts.ChartVersion,
+				// The library is vendored into the chart (below), so lint and
+				// template work without helm dependency build.
+				Repository: "file://charts/" + libraryName,
 			},
 		},
 	})
@@ -110,5 +113,17 @@ func (g *LibraryGenerator) generateWrapperChart(group *ServiceGroup, libraryName
 	}
 	chart.Notes = rewriteHelperReferences(chart.Notes, group.Name, libraryName)
 	chart.Helpers = ""
+	chart.ExternalFiles = append(chart.ExternalFiles, vendorLibrary(library)...)
 	return chart, nil
+}
+
+// vendorLibrary returns the files of the library chart under charts/<name> of
+// an application chart, the way helm dependency build would unpack it.
+func vendorLibrary(library *types.GeneratedChart) []types.ExternalFileInfo {
+	prefix := "charts/" + library.Name + "/"
+	return []types.ExternalFileInfo{
+		{Path: prefix + "Chart.yaml", Content: library.ChartYAML},
+		{Path: prefix + "values.yaml", Content: library.ValuesYAML},
+		{Path: prefix + "templates/_helpers.tpl", Content: library.Helpers},
+	}
 }

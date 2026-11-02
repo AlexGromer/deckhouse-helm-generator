@@ -286,6 +286,11 @@ Examples:
 	cmd.Flags().BoolVar(&valuesFlat, "values-flat", false, "Add inline dot-notation path comments to values.yaml for --set reference")
 	cmd.Flags().StringSliceVar(&withFeatures, "with", nil, "Enable optional features, applied in order (list them with: dhg features)")
 	cmd.Flags().StringArrayVar(&featureOpts, "feature-opt", nil, "Feature parameter as <feature>.<key>=<value> (repeatable)")
+	cmd.Flags().BoolVar(&update, "update", false, "Merge the regenerated chart into the existing one in --output (3-way merge against the saved state)")
+	cmd.Flags().BoolVar(&force, "force", false, "Overwrite a chart that dhg already generated into --output")
+	cmd.Flags().BoolVar(&noState, "no-state", false, "Do not save the regeneration state next to the chart")
+	cmd.Flags().StringVar(&bump, "bump", "", "With --update, bump the version of changed charts: patch, minor, major or none")
+	cmd.Flags().StringVar(&baseDir, "base-dir", "", "With --update, read the saved state from this directory instead of --output")
 
 	// chart-name may come from the config file, so it is checked after loading it.
 	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {

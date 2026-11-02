@@ -13,7 +13,7 @@ import (
 // ============================================================
 
 func TestWrapperChart_ChartYAML_LibraryDependency(t *testing.T) {
-	// Expected: dependencies: [{name: library, version: "0.1.0", repository: "file://../library"}]
+	// Expected: dependencies: [{name: library, version: "0.1.0", repository: "file://charts/library"}]
 	deploy := makeProcessedResourceWithValues("Deployment", "frontend", "default",
 		map[string]string{"app.kubernetes.io/name": "frontend"},
 		map[string]interface{}{"replicaCount": 1}, "# deploy")
@@ -41,7 +41,7 @@ func TestWrapperChart_ChartYAML_LibraryDependency(t *testing.T) {
 	if !strings.Contains(wrapper.ChartYAML, "name: library") {
 		t.Error("wrapper Chart.yaml missing library dependency name")
 	}
-	if !strings.Contains(wrapper.ChartYAML, "repository: file://../library") {
+	if !strings.Contains(wrapper.ChartYAML, "repository: file://charts/library") {
 		t.Error("wrapper Chart.yaml missing file:// repository for library")
 	}
 }
@@ -360,8 +360,8 @@ func TestWrapperChart_MultipleWrappers_EachUsesLibrary(t *testing.T) {
 		if !strings.Contains(wrapper.ChartYAML, "name: "+name) {
 			t.Errorf("wrapper %s Chart.yaml has wrong name:\n%s", name, wrapper.ChartYAML)
 		}
-		if !strings.Contains(wrapper.ChartYAML, "repository: file://../library") {
-			t.Errorf("wrapper %s does not depend on file://../library", name)
+		if !strings.Contains(wrapper.ChartYAML, "repository: file://charts/library") {
+			t.Errorf("wrapper %s does not depend on file://charts/library", name)
 		}
 		if wrapper.Helpers != "" {
 			t.Errorf("wrapper %s should not carry its own _helpers.tpl", name)
@@ -496,5 +496,51 @@ func TestWrapperChart_Edge_WrapperWithManyResources(t *testing.T) {
 	cms, _ := values["configMaps"].(map[string]interface{})
 	if _, ok := cms["appConfig"]; !ok {
 		t.Errorf("wrapper values missing configMaps.appConfig:\n%s", wrapper.ValuesYAML)
+	}
+}
+
+// ============================================================
+// Vendored library: lint and template work without dependency build
+// ============================================================
+
+func TestWrapperChart_VendorsLibraryChart(t *testing.T) {
+	deploy := makeProcessedResourceWithValues("Deployment", "frontend", "default",
+		map[string]string{"app.kubernetes.io/name": "frontend"},
+		map[string]interface{}{"replicaCount": 1}, "# deploy")
+	graph := buildGraph([]*types.ProcessedResource{deploy}, nil)
+
+	charts, err := NewLibraryGenerator().Generate(context.Background(), graph, Options{ChartVersion: "0.1.0"})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	lib := findChartByName(charts, "library")
+	if lib == nil {
+		t.Fatalf("top-level library chart is gone, got %v", chartNamesOf(charts))
+	}
+	wrapper := findChartByName(charts, "frontend")
+	if wrapper == nil {
+		t.Fatalf("wrapper chart not found, got %v", chartNamesOf(charts))
+	}
+
+	if !strings.Contains(wrapper.ChartYAML, "repository: file://charts/library") {
+		t.Errorf("wrapper depends on the library outside its own directory:\n%s", wrapper.ChartYAML)
+	}
+	if strings.Contains(wrapper.ChartYAML, "file://../library") {
+		t.Errorf("wrapper still points at the sibling library:\n%s", wrapper.ChartYAML)
+	}
+
+	vendored := map[string]string{}
+	for _, f := range wrapper.ExternalFiles {
+		vendored[f.Path] = f.Content
+	}
+	if vendored["charts/library/Chart.yaml"] != lib.ChartYAML {
+		t.Errorf("charts/library/Chart.yaml is not the library Chart.yaml: %q", vendored["charts/library/Chart.yaml"])
+	}
+	if vendored["charts/library/templates/_helpers.tpl"] != lib.Helpers {
+		t.Errorf("charts/library/templates/_helpers.tpl is not the library helpers")
+	}
+	if _, ok := vendored["charts/library/values.yaml"]; !ok {
+		t.Error("charts/library/values.yaml is not vendored")
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/analyzer"
@@ -29,18 +31,42 @@ var referencedKinds = map[string]bool{
 	"ConfigMap": true, "Secret": true, "ServiceAccount": true, "PersistentVolumeClaim": true,
 }
 
+// Limits of missingReferenceNotes without -v.
+const (
+	maxNoteWorkloads = 3
+	maxMissingNotes  = 20
+)
+
 // missingReferenceNotes lists what workloads reference (envFrom, volumes,
-// ServiceAccount, imagePullSecrets) but the chart does not contain. Objects
-// every namespace gets on its own are not reported.
-func missingReferenceNotes(processed []*types.ProcessedResource, all map[types.ResourceKey]*types.ExtractedResource, source types.Source, clusterSecrets string) []string {
+// ServiceAccount, imagePullSecrets) but the chart does not contain: one note
+// per missing object, naming the workloads that reference it. Objects every
+// namespace gets on its own are not reported. Without verbose a note names at
+// most maxNoteWorkloads workloads and only the first maxMissingNotes objects
+// are listed, followed by a count of the rest.
+func missingReferenceNotes(processed []*types.ProcessedResource, all map[types.ResourceKey]*types.ExtractedResource, source types.Source, clusterSecrets string, verbose bool) []string {
 	secretsSkipped := source == types.SourceCluster && clusterSecrets != "mask" && clusterSecrets != "include"
-	var notes []string
-	seen := map[string]bool{}
+	// With workloads in several namespaces the same name can be missing in
+	// each of them: the notes then name the namespace.
+	namespaces := map[string]bool{}
+	for _, p := range processed {
+		if key := p.Original.ResourceKey(); workloadKinds[key.GVK.Kind] {
+			namespaces[key.Namespace] = true
+		}
+	}
+	qualify := func(namespace, name string) string {
+		if len(namespaces) > 1 && namespace != "" {
+			return namespace + "/" + name
+		}
+		return name
+	}
+	var missing []types.ResourceKey
+	referencedBy := map[types.ResourceKey][]string{}
 	for _, p := range processed {
 		owner := p.Original.ResourceKey()
 		if !workloadKinds[owner.GVK.Kind] {
 			continue
 		}
+		ownerName := owner.GVK.Kind + " " + qualify(owner.Namespace, owner.Name)
 		for _, dep := range p.Dependencies {
 			kind := dep.GVK.Kind
 			if !referencedKinds[kind] {
@@ -58,16 +84,32 @@ func missingReferenceNotes(processed []*types.ProcessedResource, all map[types.R
 			if _, ok := all[unscoped]; ok {
 				continue
 			}
-			note := fmt.Sprintf("%s %s is referenced by %s %s but is not in the chart (create it before install", kind, dep.Name, owner.GVK.Kind, owner.Name)
-			if kind == "Secret" && secretsSkipped {
-				note += "; Secrets are skipped by --cluster-secrets skip"
+			owners, seen := referencedBy[dep]
+			if !seen {
+				missing = append(missing, dep)
 			}
-			note += ")"
-			if !seen[note] {
-				seen[note] = true
-				notes = append(notes, note)
+			if !slices.Contains(owners, ownerName) {
+				referencedBy[dep] = append(owners, ownerName)
 			}
 		}
+	}
+
+	var notes []string
+	for i, dep := range missing {
+		if !verbose && i == maxMissingNotes {
+			notes = append(notes, fmt.Sprintf("... and %d more missing objects (use -v to list all)", len(missing)-maxMissingNotes))
+			break
+		}
+		owners := referencedBy[dep]
+		list := strings.Join(owners, ", ")
+		if !verbose && len(owners) > maxNoteWorkloads {
+			list = fmt.Sprintf("%s +%d more", strings.Join(owners[:maxNoteWorkloads], ", "), len(owners)-maxNoteWorkloads)
+		}
+		note := fmt.Sprintf("%s %s is referenced by %s but is not in the chart (create it before install", dep.GVK.Kind, qualify(dep.Namespace, dep.Name), list)
+		if dep.GVK.Kind == "Secret" && secretsSkipped {
+			note += "; Secrets are skipped by --cluster-secrets skip"
+		}
+		notes = append(notes, note+")")
 	}
 	return notes
 }
@@ -206,7 +248,7 @@ func processResources(ctx context.Context, opts pipelineOptions, extracted []*ty
 		}
 	}
 
-	for _, note := range missingReferenceNotes(processed, all, opts.source, opts.extract.ClusterSecrets) {
+	for _, note := range missingReferenceNotes(processed, all, opts.source, opts.extract.ClusterSecrets, opts.verbose) {
 		if !seenNotes[note] {
 			seenNotes[note] = true
 			allNotes = append(allNotes, note)

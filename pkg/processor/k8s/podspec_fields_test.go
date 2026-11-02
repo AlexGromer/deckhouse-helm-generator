@@ -230,3 +230,51 @@ spec:
 		}
 	}
 }
+
+func TestExtractPodTemplateValues_HostNamespaces(t *testing.T) {
+	obj := podSpecObj(map[string]interface{}{
+		"hostNetwork": true,
+		"hostPID":     true,
+		"hostIPC":     true,
+	})
+	values := map[string]interface{}{}
+	extractPodTemplateValues(obj, values, "spec", "template")
+	for _, k := range []string{"hostNetwork", "hostPID", "hostIPC"} {
+		if v, ok := values[k]; !ok || v != true {
+			t.Errorf("values[%q] = %#v (set %v), want true", k, v, ok)
+		}
+	}
+	// No dnsPolicy is invented for hostNetwork.
+	if v, ok := values["dnsPolicy"]; ok {
+		t.Errorf("values[dnsPolicy] = %#v, want it absent", v)
+	}
+}
+
+func TestExtractPodTemplateValues_HostNamespacesFalseNotCopied(t *testing.T) {
+	obj := podSpecObj(map[string]interface{}{
+		"hostNetwork": false,
+		"hostPID":     false,
+		"hostIPC":     false,
+	})
+	values := map[string]interface{}{}
+	extractPodTemplateValues(obj, values, "spec", "template")
+	for _, k := range []string{"hostNetwork", "hostPID", "hostIPC"} {
+		if v, ok := values[k]; ok {
+			t.Errorf("values[%q] = %#v, want it absent", k, v)
+		}
+	}
+}
+
+func TestPodTemplate_RendersHostNamespaces(t *testing.T) {
+	tmpl := podTemplate("app", 2, "", "Deployment/web")
+	for _, want := range []string{
+		`{{- with .hostNetwork }}`,
+		`hostNetwork: {{ . }}`,
+		`hostPID: {{ . }}`,
+		`hostIPC: {{ . }}`,
+	} {
+		if !strings.Contains(tmpl, want) {
+			t.Errorf("podTemplate lacks %q:\n%s", want, tmpl)
+		}
+	}
+}

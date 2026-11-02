@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -47,7 +48,7 @@ func TestMissingReferenceNotes(t *testing.T) {
 	}
 	all := map[types.ResourceKey]*types.ExtractedResource{web.ResourceKey(): web, cfg.ResourceKey(): cfg}
 
-	got := missingReferenceNotes(processed, all, types.SourceFile, "")
+	got := missingReferenceNotes(processed, all, types.SourceFile, "", false)
 	want := []string{
 		"ConfigMap missing-cm is referenced by Deployment web but is not in the chart (create it before install)",
 		"Secret db is referenced by Deployment web but is not in the chart (create it before install)",
@@ -64,7 +65,7 @@ func TestMissingReferenceNotes_ClusterSecretsSkipped(t *testing.T) {
 	all := map[types.ResourceKey]*types.ExtractedResource{job.ResourceKey(): job}
 
 	for _, mode := range []string{"", "skip"} {
-		got := missingReferenceNotes(processed, all, types.SourceCluster, mode)
+		got := missingReferenceNotes(processed, all, types.SourceCluster, mode, false)
 		if len(got) != 2 {
 			t.Fatalf("mode %q: got %v", mode, got)
 		}
@@ -75,8 +76,104 @@ func TestMissingReferenceNotes_ClusterSecretsSkipped(t *testing.T) {
 			t.Errorf("mode %q: ConfigMap note must not mention secrets: %q", mode, got[0])
 		}
 	}
-	if got := missingReferenceNotes(processed, all, types.SourceCluster, "mask"); strings.Contains(strings.Join(got, ""), "--cluster-secrets") {
+	if got := missingReferenceNotes(processed, all, types.SourceCluster, "mask", false); strings.Contains(strings.Join(got, ""), "--cluster-secrets") {
 		t.Errorf("mask mode extracts Secrets, nothing was skipped: %v", got)
+	}
+}
+
+func TestMissingReferenceNotes_OneNotePerObject(t *testing.T) {
+	a := extracted("apps/v1", "Deployment", "a")
+	b := extracted("batch/v1", "Job", "b")
+	processed := []*types.ProcessedResource{
+		processedWith(a, depKey("Secret", "db"), depKey("ConfigMap", "shared")),
+		processedWith(b, depKey("Secret", "db")),
+	}
+	all := map[types.ResourceKey]*types.ExtractedResource{a.ResourceKey(): a, b.ResourceKey(): b}
+
+	got := missingReferenceNotes(processed, all, types.SourceCluster, "skip", false)
+	want := []string{
+		"Secret db is referenced by Deployment a, Job b but is not in the chart (create it before install; Secrets are skipped by --cluster-secrets skip)",
+		"ConfigMap shared is referenced by Deployment a but is not in the chart (create it before install)",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("notes:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestMissingReferenceNotes_ManyWorkloadsCollapsed(t *testing.T) {
+	var processed []*types.ProcessedResource
+	all := map[types.ResourceKey]*types.ExtractedResource{}
+	for _, name := range []string{"w1", "w2", "w3", "w4", "w5"} {
+		w := extracted("apps/v1", "Deployment", name)
+		all[w.ResourceKey()] = w
+		processed = append(processed, processedWith(w, depKey("ConfigMap", "common")))
+	}
+
+	got := missingReferenceNotes(processed, all, types.SourceFile, "", false)
+	want := "ConfigMap common is referenced by Deployment w1, Deployment w2, Deployment w3 +2 more but is not in the chart (create it before install)"
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("notes = %q; want [%q]", got, want)
+	}
+
+	// Under -v every workload is listed, nothing is collapsed.
+	verbose := missingReferenceNotes(processed, all, types.SourceFile, "", true)
+	if len(verbose) != 1 || !strings.Contains(verbose[0], "Deployment w5") || strings.Contains(verbose[0], "+2 more") {
+		t.Errorf("verbose notes = %q; want all five workloads and no '+2 more'", verbose)
+	}
+}
+
+func TestMissingReferenceNotes_SeveralNamespaces(t *testing.T) {
+	inNS := func(ns, kind, name string) *types.ExtractedResource {
+		r := extracted("apps/v1", kind, name)
+		r.Object.SetNamespace(ns)
+		r.GVK = r.Object.GroupVersionKind()
+		return r
+	}
+	dep := func(ns, kind, name string) types.ResourceKey {
+		k := depKey(kind, name)
+		k.Namespace = ns
+		return k
+	}
+	prodWeb := inNS("prod", "Deployment", "web")
+	stagingWeb := inNS("staging", "Deployment", "web")
+	processed := []*types.ProcessedResource{
+		processedWith(prodWeb, dep("prod", "Secret", "db")),
+		processedWith(stagingWeb, dep("staging", "Secret", "db")),
+	}
+	all := map[types.ResourceKey]*types.ExtractedResource{prodWeb.ResourceKey(): prodWeb, stagingWeb.ResourceKey(): stagingWeb}
+
+	got := missingReferenceNotes(processed, all, types.SourceFile, "", false)
+	want := []string{
+		"Secret prod/db is referenced by Deployment prod/web but is not in the chart (create it before install)",
+		"Secret staging/db is referenced by Deployment staging/web but is not in the chart (create it before install)",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("notes:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestMissingReferenceNotes_ManyObjectsCapped(t *testing.T) {
+	web := extracted("apps/v1", "Deployment", "web")
+	var deps []types.ResourceKey
+	for i := 0; i < 25; i++ {
+		deps = append(deps, depKey("ConfigMap", fmt.Sprintf("cm-%02d", i)))
+	}
+	processed := []*types.ProcessedResource{processedWith(web, deps...)}
+	all := map[types.ResourceKey]*types.ExtractedResource{web.ResourceKey(): web}
+
+	got := missingReferenceNotes(processed, all, types.SourceFile, "", false)
+	if len(got) != 21 {
+		t.Fatalf("got %d notes; want 20 objects and one summary", len(got))
+	}
+	if !strings.Contains(got[19], "cm-19") {
+		t.Errorf("note 20 = %q", got[19])
+	}
+	if got[20] != "... and 5 more missing objects (use -v to list all)" {
+		t.Errorf("summary = %q", got[20])
+	}
+
+	if verbose := missingReferenceNotes(processed, all, types.SourceFile, "", true); len(verbose) != 25 {
+		t.Errorf("verbose: got %d notes; want all 25", len(verbose))
 	}
 }
 
@@ -86,7 +183,7 @@ func TestMissingReferenceNotes_NamespaceLessDefinition(t *testing.T) {
 	cfg.Object.SetNamespace("")
 	processed := []*types.ProcessedResource{processedWith(web, depKey("ConfigMap", "cfg"))}
 	all := map[types.ResourceKey]*types.ExtractedResource{web.ResourceKey(): web, cfg.ResourceKey(): cfg}
-	if got := missingReferenceNotes(processed, all, types.SourceFile, ""); len(got) != 0 {
+	if got := missingReferenceNotes(processed, all, types.SourceFile, "", false); len(got) != 0 {
 		t.Errorf("a ConfigMap defined without namespace satisfies the reference: %v", got)
 	}
 }

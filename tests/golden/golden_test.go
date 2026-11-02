@@ -218,9 +218,10 @@ func checkCharts(t *testing.T, helm, dir string) (rendered int, complete bool) {
 			complete = false
 			continue
 		}
-		if bytes.Contains(chartYAML, []byte("file://")) {
-			// Local dependencies (library/umbrella modes) are vendored the
-			// same way a user would: helm dependency build.
+		if bytes.Contains(chartYAML, []byte("file://../")) {
+			// Dependencies outside the chart are vendored the same way a user
+			// would: helm dependency build. Charts that carry theirs under
+			// charts/ (library and umbrella modes) need nothing.
 			if out, err := run(helm, "dependency", "build", chart); err != nil {
 				t.Errorf("helm dependency build %s failed:\n%s", rel, out)
 				continue
