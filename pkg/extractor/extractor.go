@@ -72,6 +72,16 @@ type Options struct {
 	// synthesizing sources: image, compose and source.
 	SynthProfile string
 
+	// KnownKeysFile is a file of variable names the platform provides
+	// ("KEY" or "source:KEY" per line) for --source source: ${NAME}
+	// placeholders with such a name are not emitted as empty variables.
+	KnownKeysFile string
+
+	// KnownKeysFromCluster adds the key names (never values) of the
+	// ConfigMaps that the synth profile's envFrom names, read from the
+	// cluster of KubeConfig/KubeContext in Namespace. Secrets are not read.
+	KnownKeysFromCluster bool
+
 	// profile is SynthProfile, loaded by the extractor that uses it.
 	profile *synth.Profile
 }

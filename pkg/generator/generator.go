@@ -63,21 +63,45 @@ type Options struct {
 	// (pre-upgrade, post-install, pre-delete).
 	IncludeHooks bool
 
-	// LibraryRef (library mode) is the OCI reference of the library chart in a
-	// registry, e.g. oci://registry.example.com/platform/platform-lib. When set,
-	// the library is not vendored into the service charts: they declare it as a
-	// dependency on that repository, at LibraryVersion.
+	// LibraryRef (library mode) is where the library chart comes from instead
+	// of being vendored into the service charts, which then declare it as a
+	// dependency on that repository, at LibraryVersion:
+	// oci://registry.example.com/platform/platform-lib (an OCI registry),
+	// file://../library (a chart directory, relative to the service chart or
+	// absolute) or https://charts.example.com/stable (a chart repository,
+	// needs LibraryName).
 	LibraryRef string
 
 	// LibraryVersion is the version or version range of the library dependency.
-	// Required with LibraryRef.
+	// Required with LibraryRef except for file://, where the default is the
+	// version in the Chart.yaml at that path, else the version of the library
+	// chart this run writes.
 	LibraryVersion string
+
+	// LibraryName is the chart name of the library for a LibraryRef that does
+	// not carry one: required for an http(s):// chart repository, optional
+	// for file:// (the name in the Chart.yaml there wins, and must agree).
+	LibraryName string
 
 	// SharedChart (separate and library modes) is the name of a chart that
 	// receives the objects several service charts reference, and those no
 	// workload references (see SplitShared). Empty: every object stays in the
 	// chart of its service group.
 	SharedChart string
+
+	// SharedKeep (with SharedChart) lists "Kind/name" objects that stay with
+	// a service group even when the rule moves them to the shared chart. One
+	// referenced by several groups stays with the first of them in sorted
+	// order.
+	SharedKeep []string
+
+	// SharedExclude (with SharedChart) lists "Kind/name" objects that are
+	// never moved: they stay where grouping put them.
+	SharedExclude []string
+
+	// OnSharedNote, when set, receives the observations about SharedKeep and
+	// SharedExclude entries and about objects of the shared chart.
+	OnSharedNote func(note string)
 
 	// OnShared, when set, is called by a generator that honours SharedChart
 	// with the shared chart's name and the objects that moved (none: no chart

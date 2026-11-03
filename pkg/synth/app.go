@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/secretname"
 )
 
 // App is one service to run.
@@ -68,6 +70,22 @@ type App struct {
 	ContainerPatch map[string]interface{}
 	PodPatch       map[string]interface{}
 
+	// DeploymentName, ContainerName and ServiceName override the names of
+	// the Deployment, the application container and the Service; empty is
+	// the DNS name of Name. Selector, when not empty, replaces the default
+	// selector (app.kubernetes.io/name) in the Deployment, its pod template
+	// and the Service. ServiceType, ExtraServicePorts and Strategy are set
+	// by a platform profile; ServiceType and Strategy are unset by default
+	// (the cluster's defaults apply), Strategy is a JSON-typed Deployment
+	// strategy.
+	DeploymentName    string
+	ContainerName     string
+	ServiceName       string
+	Selector          map[string]string
+	ServiceType       string
+	ExtraServicePorts []ServicePort
+	Strategy          map[string]interface{}
+
 	// Migrations lists the database migration tools ("liquibase", "flyway")
 	// found in modules next to the application.
 	Migrations []string
@@ -82,6 +100,17 @@ type Port struct {
 	Name     string
 	Port     int64
 	Protocol string // TCP or UDP
+}
+
+// ServicePort is a Service port that is not a container port of the
+// application. TargetPortName, when set, is a named container port and
+// TargetPort is ignored; both empty means the same number as Port.
+type ServicePort struct {
+	Name           string
+	Port           int64
+	TargetPort     int64
+	TargetPortName string
+	Protocol       string // TCP, UDP or SCTP
 }
 
 // EnvVar is an environment variable.
@@ -179,7 +208,7 @@ func DNSName(s string) string {
 // secret value (password, token, key, credential) by the built-in heuristic;
 // see SecretRules.
 func IsSensitive(name string) bool {
-	return builtinSensitive(name)
+	return secretname.Sensitive(name)
 }
 
 // AddPort adds a port unless the same number and protocol is already

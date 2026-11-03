@@ -1,0 +1,12 @@
+spring:
+  profiles:
+    include: kafka
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            client-secret: ${KEYCLOAK_CLIENT_SECRET}
+logging:
+  level:
+    root: ${LOGGING_LEVEL}

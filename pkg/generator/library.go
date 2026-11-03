@@ -2,9 +2,16 @@ package generator
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
+	"os"
+	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
+
+	"sigs.k8s.io/yaml"
 
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/helm"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
@@ -32,10 +39,21 @@ func (g *LibraryGenerator) Generate(ctx context.Context, graph *types.ResourceGr
 		return nil, ctx.Err()
 	}
 
-	libName, repository, err := libraryTarget(opts)
+	// Group first: a file:// library path is relative to a service chart, so
+	// the name of the library may come from its Chart.yaml.
+	groupResult, err := GroupResources(graph)
+	if err != nil {
+		return nil, fmt.Errorf("failed to group resources: %w", err)
+	}
+	groupDir := opts.ChartName
+	if len(groupResult.Groups) > 0 {
+		groupDir = groupResult.Groups[0].Name
+	}
+	target, err := resolveLibrary(opts, groupDir)
 	if err != nil {
 		return nil, err
 	}
+	libName := target.Name
 
 	charts := make([]*types.GeneratedChart, 0)
 
@@ -45,14 +63,8 @@ func (g *LibraryGenerator) Generate(ctx context.Context, graph *types.ResourceGr
 	// The library does not depend on the input: it is published once and
 	// shared. The names of the objects of a chart (global.namePrefix) are
 	// written into each service chart instead.
-	libChart := g.generateLibraryChart(libName, libraryChartVersion(opts), opts)
+	libChart := g.generateLibraryChart(libName, libraryChartVersion(opts, target.Version), opts)
 	charts = append(charts, libChart)
-
-	// Group resources and generate wrapper charts.
-	groupResult, err := GroupResources(graph)
-	if err != nil {
-		return nil, fmt.Errorf("failed to group resources: %w", err)
-	}
 
 	for _, group := range groupResult.Groups {
 		if group.Name == libChart.Name {
@@ -72,7 +84,7 @@ func (g *LibraryGenerator) Generate(ctx context.Context, graph *types.ResourceGr
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		wrapper, err := g.generateWrapperChart(group, libChart, repository, opts, plan.inChart)
+		wrapper, err := g.generateWrapperChart(group, libChart, target, opts, plan.inChart)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate chart for group %s: %w", group.Name, err)
 		}
@@ -106,9 +118,11 @@ func (g *LibraryGenerator) generateLibraryChart(chartName, version string, opts 
 
 // generateWrapperChart creates the application chart for a service group.
 // It is a separate-mode chart whose helper references point at the library.
-// repository is "" when the library is vendored into the chart, otherwise the
-// OCI repository the library is pulled from.
-func (g *LibraryGenerator) generateWrapperChart(group *ServiceGroup, library *types.GeneratedChart, repository string, opts Options, inChart map[string][]string) (*types.GeneratedChart, error) {
+// target.Repository is "" when the library is vendored into the chart,
+// otherwise the repository (OCI registry, file:// path or http(s) chart
+// repository) the library is pulled from, at target.Version.
+func (g *LibraryGenerator) generateWrapperChart(group *ServiceGroup, library *types.GeneratedChart, target libraryDependency, opts Options, inChart map[string][]string) (*types.GeneratedChart, error) {
+	repository := target.Repository
 	libraryName := library.Name
 	sep := &SeparateGenerator{}
 	chart, err := sep.generateChartForGroup(group, opts, opts.ChartName, inChart)
@@ -124,7 +138,7 @@ func (g *LibraryGenerator) generateWrapperChart(group *ServiceGroup, library *ty
 		Repository: "file://charts/" + libraryName,
 	}
 	if repository != "" {
-		dep.Version = opts.LibraryVersion
+		dep.Version = target.Version
 		dep.Repository = repository
 	}
 	chart.ChartYAML = helm.GenerateChartYAML(helm.ChartMetadata{
@@ -162,11 +176,11 @@ const inChartTemplatePath = "templates/_dhg-inchart.tpl"
 var exactVersion = regexp.MustCompile(`^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
 
 // libraryChartVersion is the version of the library chart that is written: an
-// exact --library-version (so the published chart satisfies the dependency),
+// exact version of the dependency (so the published chart satisfies it),
 // otherwise the chart version.
-func libraryChartVersion(opts Options) string {
-	if opts.LibraryRef != "" && exactVersion.MatchString(opts.LibraryVersion) {
-		return strings.TrimPrefix(opts.LibraryVersion, "v")
+func libraryChartVersion(opts Options, dependencyVersion string) string {
+	if opts.LibraryRef != "" && exactVersion.MatchString(dependencyVersion) {
+		return strings.TrimPrefix(dependencyVersion, "v")
 	}
 	return opts.ChartVersion
 }
@@ -175,23 +189,193 @@ func libraryChartVersion(opts Options) string {
 // the service charts.
 const defaultLibraryName = "library"
 
-// libraryTarget returns the library chart name and the repository the service
-// charts pull it from; the repository is "" when the library is vendored.
-func libraryTarget(opts Options) (name, repository string, err error) {
+// libraryDependency is the library as the service charts depend on it.
+type libraryDependency struct {
+	// Name is the name of the library chart.
+	Name string
+	// Repository is "" when the library is vendored into the service charts.
+	Repository string
+	// Version is the version or range of the dependency.
+	Version string
+}
+
+// resolveLibrary decides which library the service charts use. groupDir is the
+// name of the service chart directory a relative file:// path is resolved
+// from (the library is looked up there, as Helm will).
+func resolveLibrary(opts Options, groupDir string) (libraryDependency, error) {
+	if err := ValidateLibraryOptions(opts.LibraryRef, opts.LibraryName, opts.LibraryVersion); err != nil {
+		return libraryDependency{}, err
+	}
 	if opts.LibraryRef == "" {
-		if opts.LibraryVersion != "" {
-			return "", "", fmt.Errorf("--library-version requires --library-ref")
-		}
-		return defaultLibraryName, "", nil
+		return libraryDependency{Name: defaultLibraryName}, nil
 	}
-	name, repository, err = ParseLibraryRef(opts.LibraryRef)
+	src, err := ParseLibrarySource(opts.LibraryRef, opts.LibraryName)
 	if err != nil {
-		return "", "", err
+		return libraryDependency{}, err
 	}
-	if opts.LibraryVersion == "" {
-		return "", "", fmt.Errorf("--library-version is required with --library-ref")
+	dep := libraryDependency{Name: src.Name, Repository: src.Repository, Version: opts.LibraryVersion}
+	if src.Scheme != "file" {
+		return dep, nil
 	}
-	return name, repository, nil
+
+	// file://: the library may be there already; its Chart.yaml is the truth
+	// Helm checks the dependency against.
+	dir := src.Path
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(opts.OutputDir, groupDir, dir)
+	}
+	meta, found, err := readChartMeta(dir)
+	if err != nil {
+		return libraryDependency{}, fmt.Errorf("--library-ref %q: %w", opts.LibraryRef, err)
+	}
+	if found {
+		if opts.LibraryName != "" && opts.LibraryName != meta.Name {
+			return libraryDependency{}, fmt.Errorf("--library-ref %q: the chart at that path is named %q, --library-name says %q", opts.LibraryRef, meta.Name, opts.LibraryName)
+		}
+		if !libraryChartName.MatchString(meta.Name) {
+			return libraryDependency{}, fmt.Errorf("--library-ref %q: %q (name in %s) is not a valid chart name (lowercase letters, digits, '.', '_' and '-')", opts.LibraryRef, meta.Name, filepath.Join(dir, "Chart.yaml"))
+		}
+		dep.Name = meta.Name
+		if dep.Version == "" {
+			dep.Version = meta.Version
+		}
+	}
+	if dep.Name == "" {
+		return libraryDependency{}, fmt.Errorf("--library-ref %q: the chart name cannot be taken from the path, there is no Chart.yaml there yet; name it with --library-name", opts.LibraryRef)
+	}
+	if !found {
+		// Nothing there yet: the library this run writes is the one the
+		// dependency must find, and it goes to <out>/<name>.
+		written, werr := filepath.Abs(filepath.Join(opts.OutputDir, dep.Name))
+		want, derr := filepath.Abs(dir)
+		if werr != nil || derr != nil || written != want {
+			return libraryDependency{}, fmt.Errorf("--library-ref %q: no Chart.yaml at %s, and the library this run writes goes to %s (next to the service charts), where helm would not find it; use file://../%s, or create the library chart at that path first", opts.LibraryRef, dir, written, dep.Name)
+		}
+	}
+	if dep.Version == "" {
+		dep.Version = opts.ChartVersion
+	}
+	return dep, nil
+}
+
+// readChartMeta reads name and version from <dir>/Chart.yaml; found is false
+// when there is no such file.
+func readChartMeta(dir string) (meta struct{ Name, Version string }, found bool, err error) {
+	file := filepath.Join(dir, "Chart.yaml")
+	data, err := os.ReadFile(file)
+	if errors.Is(err, os.ErrNotExist) {
+		return meta, false, nil
+	}
+	if err != nil {
+		return meta, false, fmt.Errorf("reading %s: %w", file, err)
+	}
+	var doc struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return meta, false, fmt.Errorf("%s is not a valid Chart.yaml: %w", file, err)
+	}
+	if doc.Name == "" {
+		return meta, false, fmt.Errorf("%s has no name", file)
+	}
+	meta.Name, meta.Version = doc.Name, doc.Version
+	return meta, true, nil
+}
+
+// ValidateLibraryOptions checks --library-ref, --library-name and
+// --library-version against each other, without looking at the file system.
+func ValidateLibraryOptions(ref, name, version string) error {
+	if ref == "" {
+		if version != "" {
+			return fmt.Errorf("--library-version requires --library-ref")
+		}
+		if name != "" {
+			return fmt.Errorf("--library-name requires --library-ref")
+		}
+		return nil
+	}
+	src, err := ParseLibrarySource(ref, name)
+	if err != nil {
+		return err
+	}
+	if version == "" && src.Scheme != "file" {
+		return fmt.Errorf("--library-version is required with --library-ref %s", ref)
+	}
+	return nil
+}
+
+// LibrarySource is a parsed --library-ref.
+type LibrarySource struct {
+	// Scheme is oci, file, http or https.
+	Scheme string
+	// Name is the library chart name; empty for a file:// path whose name has
+	// to come from the Chart.yaml there.
+	Name string
+	// Repository is what is written to the dependency's repository field.
+	Repository string
+	// Path is the directory of a file:// reference, as given.
+	Path string
+}
+
+// ParseLibrarySource parses a library chart reference:
+//
+//   - oci://<registry>/<path>/<chart>: the chart is the last element;
+//   - file://<path>: a chart directory, relative to the service chart or
+//     absolute; the chart is the last element, unless the directory has a
+//     Chart.yaml (see resolveLibrary) or name is given;
+//   - https://<repository> and http://<repository>: a chart repository, which
+//     does not say which chart to take: name is required.
+func ParseLibrarySource(ref, name string) (LibrarySource, error) {
+	const fileScheme = "file://"
+	switch {
+	case strings.HasPrefix(ref, "oci://"):
+		chart, repository, err := ParseLibraryRef(ref)
+		if err != nil {
+			return LibrarySource{}, err
+		}
+		if name != "" && name != chart {
+			return LibrarySource{}, fmt.Errorf("--library-name %q: an oci:// reference names its chart (%q); --library-name applies to file:// and http(s):// references", name, chart)
+		}
+		return LibrarySource{Scheme: "oci", Name: chart, Repository: repository}, nil
+
+	case strings.HasPrefix(ref, fileScheme):
+		dir := strings.TrimPrefix(ref, fileScheme)
+		if dir == "" {
+			return LibrarySource{}, fmt.Errorf("--library-ref %q: the path is missing (file://<path to the library chart>)", ref)
+		}
+		chart := name
+		if chart == "" {
+			if last := path.Base(path.Clean(dir)); libraryChartName.MatchString(last) {
+				chart = last
+			}
+		} else if !libraryChartName.MatchString(chart) {
+			return LibrarySource{}, fmt.Errorf("--library-name %q is not a valid chart name (lowercase letters, digits, '.', '_' and '-', starting and ending with a letter or digit)", chart)
+		}
+		return LibrarySource{Scheme: "file", Name: chart, Repository: ref, Path: dir}, nil
+
+	case strings.HasPrefix(ref, "https://"), strings.HasPrefix(ref, "http://"):
+		u, err := url.Parse(ref)
+		if err != nil {
+			return LibrarySource{}, fmt.Errorf("--library-ref %q: %w", ref, err)
+		}
+		switch {
+		case u.Host == "":
+			return LibrarySource{}, fmt.Errorf("--library-ref %q: the host is missing", ref)
+		case u.RawQuery != "" || strings.Contains(ref, "?"):
+			return LibrarySource{}, fmt.Errorf("--library-ref %q: a query does not belong in a chart repository URL", ref)
+		case u.Fragment != "" || strings.Contains(ref, "#"):
+			return LibrarySource{}, fmt.Errorf("--library-ref %q: a fragment does not belong in a chart repository URL", ref)
+		}
+		if name == "" {
+			return LibrarySource{}, fmt.Errorf("--library-name is required with the %s:// repository --library-ref %q: a repository does not say which of its charts is the library", u.Scheme, ref)
+		}
+		if !libraryChartName.MatchString(name) {
+			return LibrarySource{}, fmt.Errorf("--library-name %q is not a valid chart name (lowercase letters, digits, '.', '_' and '-', starting and ending with a letter or digit)", name)
+		}
+		return LibrarySource{Scheme: u.Scheme, Name: name, Repository: ref}, nil
+	}
+	return LibrarySource{}, fmt.Errorf("--library-ref %q: supported are oci://<registry>/<path>/<chart>, file://<path>, https://<repository> and http://<repository>", ref)
 }
 
 // libraryChartName is what an OCI repository name element may be.

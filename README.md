@@ -79,7 +79,7 @@ dhg generate -f ./manifests -o ./charts --chart-name myapp \
 | `gitops` | `--git-repo`, `--git-branch`, `--git-path`, `--ssh-key` | `git clone --depth 1` во временный каталог, далее как `file` |
 | `image` | `--image` (можно несколько), `--platform`, `--insecure-registry` | Строит манифесты из конфигурации образа в registry (см. ниже) |
 | `compose` | `-f docker-compose.yml` (можно несколько) | Строит манифесты из сервисов docker-compose |
-| `source` | `-f <каталог проекта>`, `--image`, `--image-config` | Строит манифесты из Dockerfile (или config образа) и проекта Spring Boot, Quarkus или Micronaut |
+| `source` | `-f <каталог проекта>`, `--image`, `--image-config`, `--known-keys`, `--known-keys-from-cluster` | Строит манифесты из Dockerfile (или config образа) и проекта Spring Boot, Quarkus или Micronaut |
 
 Общие фильтры: `-n/--namespace`, `--namespaces`, `-l/--selector` (синтаксис kubectl), `--include-kinds`, `--exclude-kinds`. Одинаковый объект в нескольких файлах берётся один раз (первое определение), с предупреждением.
 
@@ -90,6 +90,8 @@ dhg generate -f ./manifests -o ./charts --chart-name myapp \
 - системные namespace `kube-*` и `d8-*` (Deckhouse), если namespace не задан явно.
 
 Кроме того, удаляются поля, проставленные сервером: `uid`, `resourceVersion`, `managedFields`, `status`, `last-applied-configuration`, `clusterIP`. Secrets по умолчанию не выгружаются.
+
+Пароли и токены в ConfigMap и в `env.value` (источники `file`, `gitops`, `cluster`) dhg по умолчанию заменяет на `<SET-ME>`: `--redact-credentials` (`true`; ключ `redact-credentials` в `.dhg.yaml`; `--redact-credentials=false` оставляет значения как есть). Заменяются значения ключей и переменных с именем `*_PASSWORD`, `*_SECRET`, `*_TOKEN`, `*_CREDENTIAL(S)`, `PRIVATE_KEY`, `API_KEY`, `ACCESS_KEY` (последняя часть имени; `TOKEN_URL`, `ACCESS_TOKEN_VALIDITY_SECONDS`, `*_CLIENTID` не затрагиваются) и значения JVM-опций `-D…Password=`, `-D…Secret=`, `-D…Token=` внутри `env.value`. Ссылки (`secretName`, `secretKeyRef`, `existingSecret`, `valueFrom`) не меняются. Одно `Note:` перечисляет заменённое как `<Kind>/<имя> <путь>` (все — с `-v`); значения задайте через `--set` или вынесите в Secret.
 
 ```bash
 dhg generate -s cluster -n shop --chart-name shop -o ./charts
@@ -113,6 +115,10 @@ dhg generate -s source  -f ./orders-service --image registry.example.com/orders:
 | `image` | Из конфигурации образа (манифест и config-блоб, слои не скачиваются): `ExposedPorts`, `User` (→ `runAsUser`/`runAsNonRoot`), `Volumes`, `Healthcheck` (→ exec-probes), имя из `org.opencontainers.image.title`. Мультиплатформенные образы — по `--platform`. Учётные данные — из `~/.docker/config.json`: `auths` и credential helpers (`credHelpers`, `credsStore`; бинарь `docker-credential-<имя>` из `PATH`). |
 | `compose` | `image`, `ports`/`expose`, `environment`/`env_file` (секретные имена → Secret), `command`/`entrypoint`, `user`, `volumes` (именованные → PVC, файлы ≤ 1 MiB → ConfigMap, остальное → emptyDir), `healthcheck`, `deploy.replicas`/`resources`, подстановка `${VAR:-default}` с `.env`. Service называется как сервис compose, поэтому адреса вида `db:5432` продолжают работать. |
 | `source` | Dockerfile (последняя стадия): `EXPOSE`, `USER`, `HEALTHCHECK`, `VOLUME`; с `--image-config` — те же факты из config образа в registry (включая то, что задаёт базовый образ). Spring Boot, Quarkus, Micronaut (`pom.xml`/`build.gradle`): имя, версия, HTTP-порт, health-зависимость → HTTP-probes (Actuator `/actuator/health/*`, SmallRye Health `/q/health/*`, Micronaut Management `/health/*` с учётом root/context/base-path и отдельного management-порта), datasource/Kafka/OIDC issuer (Keycloak) → env, пароли и client secrets — пустыми ключами в Secret. Профили фреймворка → `values-profile-<profile>.yaml` с тем, что профиль меняет в chart. |
+
+Конфигурация Spring Boot ищется в `src/main/resources`, в каталогах ресурсов из `pom.xml` (`<build><resources>`, `add-resource` build-helper, выход генератора кода) и в `<модуль>/*/generated-resources` (в том числе `target/generated-resources`). Подключённые файлы читаются рекурсивно: `spring.profiles.include`, `spring.profiles.active` (только профили, которые приложение включает по умолчанию; dev и test сами не включаются) и `spring.config.import` (`optional:`, `classpath:`, `file:`). Каталог, который создаёт сборка и которого нет в checkout, даёт `Note:` — перед dhg выполните `mvn generate-resources`.
+
+Плейсхолдеры `${NAME}` без значения по умолчанию становятся пустыми обязательными переменными. Имена, которые платформа и так передаёт контейнеру, не нужно выводить в values: `--known-keys <файл>` (строки `KEY` или `источник:KEY`, `#` — комментарий) и `--known-keys-from-cluster` (имена ключей ConfigMap'ов из `envFrom` профиля `--synth-profile`, читаются из кластера по `--context`, `--kubeconfig`, `-n`) исключают их из chart'а; в `SYNTHESIS.md` остаётся строка «N variables come from <источник>». Читаются только имена: значения ConfigMap'ов и любые Secret'ы dhg не запрашивает.
 
 Порт получает имя `http` только там, где протокол известен (Spring Boot, Quarkus, Micronaut); остальные — `tcp-<порт>`, потому что имя порта влияет на определение протокола в mesh. Подробности и границы — в [docs/SPEC_SYNTHESIS.md](docs/SPEC_SYNTHESIS.md).
 
@@ -153,9 +159,26 @@ dependencies:
     repository: oci://registry.example.com/platform # ссылка без имени chart'а
 ```
 
-- `--library-ref` принимает только `oci://<реестр>/<путь>/<chart>` без тега и digest и только с `--mode library`; `--library-version` — версия или диапазон Helm, без `--library-ref` он не допускается.
+- `--library-ref` принимает адрес OCI, локальный каталог или репозиторий chart'ов (см. ниже) и только с `--mode library`; `--library-version` — версия или диапазон Helm, без `--library-ref` он не допускается.
 - Верхнеуровневый library chart всё равно пишется (`./charts/platform-lib`), под именем из ссылки: его `define` называются `platform-lib.*`, как и `include` в шаблонах. При точной `--library-version` chart получает эту версию, при диапазоне (`^1.2.0`) — `--chart-version`, тогда опубликуйте версию, подходящую под диапазон. Опубликуйте его в реестр (`helm package` и `helm push`), затем выполните `helm dependency update` в каждом сервисном chart'е.
-- Оба параметра можно держать в `.dhg.yaml` (`library-ref`, `library-version`; версию берите в кавычки, иначе YAML прочтёт `1.20` как число); флаг командной строки перекрывает файл.
+- Параметры можно держать в `.dhg.yaml` (`library-ref`, `library-version`, `library-name`; версию берите в кавычки, иначе YAML прочтёт `1.20` как число); флаг командной строки перекрывает файл.
+
+Поддерживаются три вида ссылки; во всех библиотека не копируется в сервисные chart'ы:
+
+| `--library-ref` | Имя chart'а | `--library-version` | `repository` в `Chart.yaml` |
+|---|---|---|---|
+| `oci://<реестр>/<путь>/<chart>` | последний элемент ссылки | обязателен | ссылка без имени chart'а |
+| `file://<путь>` | `name` из `<путь>/Chart.yaml`, если каталог уже есть при генерации, иначе последний элемент пути (или `--library-name`) | не обязателен: версия из `<путь>/Chart.yaml`, иначе версия library chart'а, который пишет этот запуск | ссылка как есть |
+| `https://<репозиторий>` или `http://<репозиторий>` | обязателен `--library-name` | обязателен | URL как есть |
+
+`file://` — путь относительно каталога сервисного chart'а (`file://../library`: каталог рядом с сервисными chart'ами) или абсолютный. Library chart пишется в `--output` под своим именем (`<output>/<имя>`). Если по пути ещё нет `Chart.yaml`, путь обязан указывать именно туда (`file://../<имя>` или абсолютный путь `<output>/<имя>`), иначе dhg завершается ошибкой: `helm dependency build` не нашёл бы библиотеку. Библиотека, уже лежащая в другом месте (с `Chart.yaml`), используется как есть. Один запуск даёт готовый набор:
+
+```bash
+dhg generate -f ./manifests -o ./charts --chart-name shop --mode library --library-ref file://../library
+for c in ./charts/*/; do helm dependency build "$c"; done   # library chart не ставится, остальные — как обычно
+```
+
+Если каталог библиотеки уже есть (например, сгенерирован раньше или лежит в другом месте), имя и версия берутся из его `Chart.yaml`; `--library-name`, не совпавшее с ним, — ошибка. Для `https://`/`http://` репозиторий не говорит, какой из его chart'ов — библиотека, поэтому имя задаёт `--library-name`; библиотеку нужно опубликовать в этот репозиторий.
 
 #### Общий chart для общих объектов
 
@@ -175,6 +198,30 @@ helm upgrade --install api ./charts/api
 - объект, на который ссылается одна группа (workload, Ingress, RoleBinding и др.), остаётся в chart'е этой группы.
 
 Ссылки сервисных chart'ов на вынесенные объекты литеральны: `global.namePrefix` сервисного chart'а к ним не применяется, а сам shared chart называет объекты как во входе: его `global.namePrefix` должен оставаться пустым, иначе рендер shared chart'а завершается ошибкой (префикс переименовал бы объекты, а ссылки сервисов на них остались бы прежними). Shared chart — обычный chart со своими helpers (в `library`-режиме без зависимости от библиотеки), он проходит `helm lint` и `helm template` сам по себе. Сводка `N shared objects moved to chart <имя>` выводится всегда, список объектов — с `-v`; подсказка установки ставит shared chart первым. Если выносить нечего, chart не пишется. Для `universal` и `umbrella` флаг — ошибка (в umbrella у общих объектов нет места в родительском chart'е). Ключ `shared-chart` можно держать в `.dhg.yaml`; флаг командной строки перекрывает файл.
+
+Объекты shared chart'а получают аннотацию `helm.sh/resource-policy: keep`: `helm uninstall` релиза проекта их не удаляет (ConfigMap и Secret, на которые ссылаются остальные релизы, не пропадают вместе с релизом). Аннотация лежит в values объекта (`configMaps.<имя>.annotations`), существующие аннотации сохраняются без дублей, а уже заданное значение `helm.sh/resource-policy` у объекта не меняется. Если шаблон объекта не позволяет добавить аннотацию надёжно (аннотации под условием), `Note:` называет такой объект. Чтобы удалить объекты вместе с shared chart'ом, снимите аннотацию вручную (`kubectl annotate ... helm.sh/resource-policy-`) и выполните `helm uninstall`.
+
+Исключения из правила:
+
+```bash
+dhg generate -f ./manifests -o ./charts --chart-name shop --mode separate --shared-chart platform \
+  --shared-keep ConfigMap/common --shared-exclude PersistentVolumeClaim/data
+```
+
+- `--shared-keep Kind/name` (повторяемый, список через запятую; `Kind` без учёта регистра): объект остаётся в chart'е сервисной группы, даже если правило вынесло бы его. Если на него ссылаются несколько групп, он остаётся в первой из них в отсортированном порядке (при необходимости переезжает в её chart), остальные от неё зависят; `Note:` называет эту группу. Если на объект не ссылается ни один workload, он остаётся в своей группе (при отсутствии в ней workload'а это chart без workload'а), и `Note:` говорит об этом.
+- `--shared-exclude Kind/name`: объект никогда не выносится и не попадает в shared chart, он остаётся там, куда его поместила группировка.
+- Записи, которым нет объекта во входе, не ошибка: `Note:` называет такую запись, и она игнорируется. Запись не вида `Kind/name`, объект в обоих списках, а также любой из флагов без `--shared-chart` — ошибка. Ключи `shared-keep` и `shared-exclude` (списки) можно держать в `.dhg.yaml`.
+
+##### Правка общей конфигурации через values и `helm upgrade`
+
+Данные ConfigMap и Secret shared chart'а лежат в его `values.yaml` (`configMaps.<имя>.data`, `secrets.<имя>`), шаблон читает их оттуда. Менять общую конфигурацию можно, не трогая манифесты:
+
+```bash
+helm upgrade platform ./charts/platform --reuse-values --set configMaps.common.data.LOG_LEVEL=debug
+# или файлом значений: helm upgrade platform ./charts/platform -f platform-values.yaml
+```
+
+Сервисные chart'ы ссылаются на объект по имени, поэтому после `helm upgrade` shared chart'а поды сервисов подхватят новые значения при следующем перезапуске (переменные окружения из `envFrom` читаются при старте пода; перезапустите workload'ы, например `kubectl rollout restart`).
 
 ---
 
@@ -331,6 +378,7 @@ template-dir: ./chart-overrides
 | `dhg fix -f <path>` | Генерирует chart и применяет исправления best practices: securityContext (PSS restricted), resources по профилю `--workload-type`, probes, PDB |
 | `dhg migrate --from <chart> -f <manifests> --chart-name n` | Drift между существующим chart'ом и сгенерированным заново, план миграции |
 | `dhg features` | Список возможностей для `--with` |
+| `dhg profile infer [-s cluster\|file] [-n ns] [--min-share 0.9] -o profile.yaml [--values-out values-ns.yaml]` | Выводит платформенный профиль (`--synth-profile`) из Deployment'ов стенда или манифестов: что совпало у `--min-share` Deployment'ов (префикс имён, init-контейнеры, `envFrom`, тома, метки, пробы, ресурсы, стратегия, Service, поля контейнера и pod'а). Имена становятся шаблонами, адреса окружения — переменными, их значения — в `--values-out`. Флаги: `-s` (`cluster` по умолчанию, `file` с `-f`), `--context`, `--kubeconfig`, `-n`, `-l`. См. [docs/SYNTH_PROFILE.md](docs/SYNTH_PROFILE.md) |
 
 ---
 

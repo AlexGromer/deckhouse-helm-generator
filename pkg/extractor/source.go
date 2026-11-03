@@ -21,6 +21,8 @@ type SourceExtractor struct {
 	synthesized
 	// client is replaceable in tests.
 	client *registry.Client
+	// kube is replaceable in tests.
+	kube *clusterClient
 }
 
 // NewSourceExtractor creates a source extractor.
@@ -42,6 +44,14 @@ func (e *SourceExtractor) Validate(_ context.Context, opts Options) error {
 	}
 	if err := validateSynthProfile(opts); err != nil {
 		return err
+	}
+	if opts.KnownKeysFromCluster && opts.SynthProfile == "" {
+		return errors.New("--known-keys-from-cluster reads the ConfigMaps named in envFrom of the platform profile; give one with --synth-profile")
+	}
+	if opts.KnownKeysFile != "" {
+		if _, err := synth.LoadKnownKeys(opts.KnownKeysFile); err != nil {
+			return fmt.Errorf("--known-keys: %w", err)
+		}
 	}
 	for _, p := range opts.Paths {
 		info, err := os.Stat(p)
@@ -66,6 +76,15 @@ func (e *SourceExtractor) Extract(ctx context.Context, opts Options) (<-chan *ty
 	if opts.ImageConfig {
 		client, creds = registryClient(e.client, opts)
 	}
+	var fileKeys map[string][]string
+	if opts.KnownKeysFile != "" {
+		fileKeys, err = synth.LoadKnownKeys(opts.KnownKeysFile)
+		if err != nil {
+			return failed(fmt.Errorf("--known-keys: %w", err))
+		}
+		e.inputs = append(e.inputs, "known keys `"+opts.KnownKeysFile+"` (names only)")
+	}
+	cluster := &knownKeysCluster{opts: opts, ext: e}
 	var projects []*synth.SourceProject
 	images := make([]string, len(opts.Paths))
 	profiles := map[string]bool{}
@@ -94,6 +113,11 @@ func (e *SourceExtractor) Extract(ctx context.Context, opts Options) (<-chan *ty
 			s.ImageConfig = cfg
 			e.inputs = append(e.inputs, fmt.Sprintf("image `%s` (%s/%s, manifest %s)", ref.Name(), cfg.OS, cfg.Architecture, digest))
 		}
+		clusterKeys, err := cluster.keysFor(ctx, s.Name())
+		if err != nil {
+			return failed(err)
+		}
+		s.KnownKeys = synth.MergeKnownKeys(fileKeys, clusterKeys)
 		for _, p := range s.Profiles() {
 			profiles[p] = true
 		}
@@ -137,4 +161,63 @@ func dir0(paths []string) string {
 		return ""
 	}
 	return paths[0]
+}
+
+// knownKeysCluster reads the key names of the ConfigMaps of the profile's
+// envFrom once per ConfigMap, for --known-keys-from-cluster.
+type knownKeysCluster struct {
+	opts Options
+	ext  *SourceExtractor
+	read map[string][]string
+	ns   string
+}
+
+// keysFor returns the key names of the ConfigMaps the profile's envFrom
+// names for the app; nil when the flag is off.
+func (k *knownKeysCluster) keysFor(ctx context.Context, app string) (map[string][]string, error) {
+	if !k.opts.KnownKeysFromCluster {
+		return nil, nil
+	}
+	names, err := k.opts.profile.ConfigMapNames(app)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", app, err)
+	}
+	if len(names) == 0 {
+		k.ext.notes.Addf("%s: --known-keys-from-cluster: the platform profile has no envFrom configMapRef, so there is no ConfigMap to read", app)
+		return nil, nil
+	}
+	if k.read == nil {
+		k.read = map[string][]string{}
+		k.ns = knownKeysNamespace(k.opts)
+	}
+	var missing []string
+	for _, n := range names {
+		if _, ok := k.read[n]; !ok {
+			missing = append(missing, n)
+		}
+	}
+	if len(missing) > 0 {
+		client, err := k.ext.kubeClient(k.opts)
+		if err != nil {
+			return nil, fmt.Errorf("--known-keys-from-cluster: %w", err)
+		}
+		keys, notes, err := configMapKeys(ctx, client, k.ns, missing)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range missing {
+			k.read[n] = keys[n] // nil for a ConfigMap that is not there
+		}
+		for _, note := range notes {
+			k.ext.notes.Addf("%s", note)
+		}
+		k.ext.inputs = append(k.ext.inputs, fmt.Sprintf("ConfigMaps %s of namespace `%s` (key names only)", "`"+strings.Join(missing, "`, `")+"`", k.ns))
+	}
+	out := map[string][]string{}
+	for _, n := range names {
+		if len(k.read[n]) > 0 {
+			out[n] = k.read[n]
+		}
+	}
+	return out, nil
 }

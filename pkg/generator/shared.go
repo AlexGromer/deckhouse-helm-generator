@@ -3,6 +3,7 @@ package generator
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -58,6 +59,74 @@ type SharedSplit struct {
 	// Groups are the service groups without them; groups left without any
 	// object are dropped. The input groups are not changed.
 	Groups []*ServiceGroup
+	// Notes are the observations about --shared-keep and --shared-exclude
+	// entries (no such object, nothing to keep, where a kept object stays),
+	// sorted.
+	Notes []string
+
+	// relocated is true when a kept object changed its group.
+	relocated bool
+}
+
+// SharedOverrides are the exceptions to the rule of SplitShared; each entry
+// is "Kind/name" (the Kind is case-insensitive).
+type SharedOverrides struct {
+	// Keep objects stay with a service group even when the rule moves them.
+	// One referenced by several groups stays with the first of them in sorted
+	// order.
+	Keep []string
+	// Exclude objects are never moved: they stay where grouping put them.
+	Exclude []string
+}
+
+// sharedRef is a parsed "Kind/name" entry; kind is lowercase.
+type sharedRef struct{ kind, name string }
+
+var sharedRefKind = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
+
+func parseSharedRef(entry string) (sharedRef, error) {
+	kind, name, ok := strings.Cut(strings.TrimSpace(entry), "/")
+	if !ok || !sharedRefKind.MatchString(kind) || name == "" || strings.ContainsAny(name, "/ \t") {
+		return sharedRef{}, fmt.Errorf("%q is not Kind/name (e.g. ConfigMap/common)", entry)
+	}
+	return sharedRef{kind: strings.ToLower(kind), name: name}, nil
+}
+
+func (r sharedRef) String() string { return r.kind + "/" + r.name }
+
+// ValidateSharedOverrides checks the entries of --shared-keep and
+// --shared-exclude: each is Kind/name, and no object is in both lists.
+func ValidateSharedOverrides(keep, exclude []string) error {
+	parse := func(flag string, entries []string) (map[sharedRef]bool, error) {
+		set := map[sharedRef]bool{}
+		for _, e := range entries {
+			ref, err := parseSharedRef(e)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", flag, err)
+			}
+			set[ref] = true
+		}
+		return set, nil
+	}
+	keepSet, err := parse("--shared-keep", keep)
+	if err != nil {
+		return err
+	}
+	excludeSet, err := parse("--shared-exclude", exclude)
+	if err != nil {
+		return err
+	}
+	var both []string
+	for ref := range keepSet {
+		if excludeSet[ref] {
+			both = append(both, ref.String())
+		}
+	}
+	if len(both) > 0 {
+		sort.Strings(both)
+		return fmt.Errorf("%s is in both --shared-keep and --shared-exclude", strings.Join(both, ", "))
+	}
+	return nil
 }
 
 // SplitShared decides which objects of the service groups belong in a chart
@@ -74,6 +143,13 @@ type SharedSplit struct {
 // CustomResourceDefinitions (they go to crds/), objects without a template and
 // workloads themselves never move. The result does not depend on map order.
 func SplitShared(groups []*ServiceGroup) *SharedSplit {
+	return SplitSharedWith(groups, SharedOverrides{})
+}
+
+// SplitSharedWith is SplitShared with the exceptions of ov. Entries that do
+// not parse or name no object are reported in SharedSplit.Notes and
+// otherwise ignored (ValidateSharedOverrides rejects the former up front).
+func SplitSharedWith(groups []*ServiceGroup, ov SharedOverrides) *SharedSplit {
 	type placed struct {
 		resource *types.ProcessedResource
 		group    string
@@ -149,9 +225,24 @@ func SplitShared(groups []*ServiceGroup) *SharedSplit {
 		}
 	}
 
+	keep, exclude, notes := sharedOverrideSets(groups, ov)
+	hasWorkload := map[string]bool{}
+	for _, g := range groups {
+		for _, r := range g.Resources {
+			if r != nil && r.Original != nil && podOwnerKinds[r.Original.GVK.Kind] {
+				hasWorkload[g.Name] = true
+			}
+		}
+	}
+
 	moved := map[*types.ProcessedResource]bool{}
+	relocate := map[*types.ProcessedResource]string{}
 	var shared []SharedObject
 	for key, p := range index {
+		ref := refOf(p.resource)
+		if exclude[ref] {
+			continue
+		}
 		groupsOf := usedBy[key]
 		switch {
 		case len(groupsOf) >= 2:
@@ -164,21 +255,51 @@ func SplitShared(groups []*ServiceGroup) *SharedSplit {
 			users = append(users, name)
 		}
 		sort.Strings(users)
+		if keep[ref] {
+			if len(users) == 0 {
+				tail := ""
+				if !hasWorkload[p.group] {
+					tail = ", which has no workload"
+				}
+				notes = append(notes, fmt.Sprintf("--shared-keep: %s/%s is referenced by no workload; it stays in chart %s%s",
+					p.resource.Original.GVK.Kind, p.resource.Original.Object.GetName(), p.group, tail))
+			}
+			if len(users) >= 2 {
+				if p.group != users[0] {
+					relocate[p.resource] = users[0]
+				}
+				notes = append(notes, fmt.Sprintf("--shared-keep: %s/%s stays in chart %s, the first (in sorted order) of the charts that reference it (%s); the others depend on it, install %s first",
+					p.resource.Original.GVK.Kind, p.resource.Original.Object.GetName(), users[0], strings.Join(users, ", "), users[0]))
+			}
+			continue
+		}
 		moved[p.resource] = true
 		shared = append(shared, SharedObject{Resource: p.resource, UsedBy: users})
 	}
 	sort.Slice(shared, func(i, j int) bool {
 		return shared[i].Resource.Original.ResourceKey().Less(shared[j].Resource.Original.ResourceKey())
 	})
+	sort.Strings(notes)
 
-	split := &SharedSplit{Shared: shared}
+	arrivals := map[string][]*types.ProcessedResource{}
+	for r, owner := range relocate {
+		arrivals[owner] = append(arrivals[owner], r)
+	}
+	for _, rs := range arrivals {
+		sort.Slice(rs, func(i, j int) bool {
+			return rs[i].Original.ResourceKey().Less(rs[j].Original.ResourceKey())
+		})
+	}
+
+	split := &SharedSplit{Shared: shared, Notes: notes, relocated: len(relocate) > 0}
 	for _, g := range groups {
 		kept := make([]*types.ProcessedResource, 0, len(g.Resources))
 		for _, r := range g.Resources {
-			if !moved[r] {
+			if _, away := relocate[r]; !moved[r] && !away {
 				kept = append(kept, r)
 			}
 		}
+		kept = append(kept, arrivals[g.Name]...)
 		if len(kept) == 0 && len(g.Resources) > 0 {
 			continue
 		}
@@ -187,6 +308,48 @@ func SplitShared(groups []*ServiceGroup) *SharedSplit {
 		split.Groups = append(split.Groups, &clone)
 	}
 	return split
+}
+
+// refOf is the Kind/name entry that names r.
+func refOf(r *types.ProcessedResource) sharedRef {
+	return sharedRef{kind: strings.ToLower(r.Original.GVK.Kind), name: r.Original.Object.GetName()}
+}
+
+// sharedOverrideSets parses ov against the objects of groups. Notes report
+// entries that name no object, or an object that never moves.
+func sharedOverrideSets(groups []*ServiceGroup, ov SharedOverrides) (keep, exclude map[sharedRef]bool, notes []string) {
+	present := map[sharedRef]bool{}
+	immovable := map[sharedRef]bool{}
+	for _, g := range groups {
+		for _, r := range g.Resources {
+			if r == nil || r.Original == nil || r.Original.Object == nil {
+				continue
+			}
+			ref := refOf(r)
+			present[ref] = true
+			if !movable(r) {
+				immovable[ref] = true
+			}
+		}
+	}
+	parse := func(flag string, entries []string) map[sharedRef]bool {
+		set := map[sharedRef]bool{}
+		for _, e := range entries {
+			ref, err := parseSharedRef(e)
+			switch {
+			case err != nil:
+				notes = append(notes, fmt.Sprintf("%s: %v, ignored", flag, err))
+			case !present[ref]:
+				notes = append(notes, fmt.Sprintf("%s: no object %s in the input, ignored", flag, e))
+			case immovable[ref]:
+				notes = append(notes, fmt.Sprintf("%s: %s is a workload, a CRD or has no template of its own: it is never moved, the entry has no effect", flag, e))
+			default:
+				set[ref] = true
+			}
+		}
+		return set
+	}
+	return parse("--shared-keep", ov.Keep), parse("--shared-exclude", ov.Exclude), notes
 }
 
 // movable reports whether r can be written to a shared chart: a template of
@@ -218,7 +381,13 @@ func (g *SeparateGenerator) planShared(graph *types.ResourceGraph, groups []*Ser
 	plan := &sharedPlan{groups: groups, inChart: inChartNames(graph)}
 	name := opts.SharedChart
 	if name == "" {
+		if len(opts.SharedKeep) > 0 || len(opts.SharedExclude) > 0 {
+			return nil, errors.New("--shared-keep and --shared-exclude need --shared-chart")
+		}
 		return plan, nil
+	}
+	if err := ValidateSharedOverrides(opts.SharedKeep, opts.SharedExclude); err != nil {
+		return nil, err
 	}
 	if !libraryChartName.MatchString(name) {
 		return nil, fmt.Errorf("--shared-chart %q is not a chart name (lowercase letters, digits, '-', '.' and '_')", name)
@@ -234,9 +403,20 @@ func (g *SeparateGenerator) planShared(graph *types.ResourceGraph, groups []*Ser
 		}
 	}
 
-	split := SplitShared(groups)
+	split := SplitSharedWith(groups, SharedOverrides{Keep: opts.SharedKeep, Exclude: opts.SharedExclude})
+	note := func(text string) {
+		if opts.OnSharedNote != nil {
+			opts.OnSharedNote(text)
+		}
+	}
+	for _, n := range split.Notes {
+		note(n)
+	}
 	if opts.OnShared != nil {
 		opts.OnShared(name, split.Shared)
+	}
+	if split.relocated {
+		plan.groups = split.Groups
 	}
 	if len(split.Shared) == 0 {
 		return plan, nil
@@ -246,7 +426,11 @@ func (g *SeparateGenerator) planShared(graph *types.ResourceGraph, groups []*Ser
 	resources := make([]*types.ProcessedResource, 0, len(split.Shared))
 	for _, o := range split.Shared {
 		movedSet[o.Resource] = true
-		resources = append(resources, o.Resource)
+		kept, problem := withKeepPolicy(o.Resource)
+		if problem != "" {
+			note(problem)
+		}
+		resources = append(resources, kept)
 	}
 	var remaining []*types.ProcessedResource
 	for _, r := range graphResources(graph) {
@@ -267,6 +451,86 @@ func (g *SeparateGenerator) planShared(graph *types.ResourceGraph, groups []*Ser
 	}
 	plan.chart = chart
 	return plan, nil
+}
+
+// keepPolicyKey is the annotation that makes Helm leave an object in place on
+// helm uninstall (and when it drops out of a release).
+const keepPolicyKey = "helm.sh/resource-policy"
+
+// annotationsFromValues is how processor templates render metadata.annotations
+// from the values of the object.
+var annotationsFromValues = regexp.MustCompile(`(?m)^[ \t]*\{\{-?\s*with\s+[^}\n]*\.annotations\s*-?\}\}[ \t]*\n  annotations:[ \t]*\n`)
+
+// withKeepPolicy returns a copy of r that renders helm.sh/resource-policy:
+// keep, so that helm uninstall of the release of the shared chart never
+// deletes the object. An annotation of that name that the object has already
+// keeps its value. The problem is non-empty when the template has a shape the
+// annotation cannot be added to safely; r is then returned unchanged.
+func withKeepPolicy(r *types.ProcessedResource) (*types.ProcessedResource, string) {
+	clone := *r
+	label := r.Original.GVK.Kind + "/" + r.Original.Object.GetName()
+	tmpl := r.TemplateContent
+
+	switch {
+	case annotationsFromValues.MatchString(tmpl):
+		// The annotations come from the values of the object: put the
+		// annotation there, where `helm template --set` can see it.
+		annotations := map[string]interface{}{}
+		switch existing := r.Values["annotations"].(type) {
+		case nil:
+		case map[string]string:
+			for k, v := range existing {
+				annotations[k] = v
+			}
+		case map[string]interface{}:
+			for k, v := range existing {
+				annotations[k] = v
+			}
+		default:
+			return r, fmt.Sprintf("%s: annotations in values have an unexpected type, %s is not added; add %s: keep by hand", label, keepPolicyKey, keepPolicyKey)
+		}
+		if _, ok := annotations[keepPolicyKey]; !ok {
+			annotations[keepPolicyKey] = "keep"
+		}
+		values := make(map[string]interface{}, len(r.Values)+1)
+		for k, v := range r.Values {
+			values[k] = v
+		}
+		values["annotations"] = annotations
+		clone.Values = values
+	case strings.Contains(tmpl, keepPolicyKey):
+		// The template renders it itself.
+	case !strings.Contains(tmpl, "\n  annotations:"):
+		// No annotations at all: add the block as the first field of metadata.
+		const head = "\nmetadata:\n"
+		i := strings.Index(tmpl, head)
+		if i < 0 {
+			return r, fmt.Sprintf("%s: the template has no metadata block, %s is not added; add %s: keep by hand", label, keepPolicyKey, keepPolicyKey)
+		}
+		at := i + len(head)
+		clone.TemplateContent = tmpl[:at] + "  annotations:\n    " + keepPolicyKey + ": keep\n" + tmpl[at:]
+	default:
+		// Literal annotations (a plugin's, for instance) or ones under a
+		// condition: adding a line to a block that may not render could
+		// silently do nothing, so say it.
+		lines := strings.Split(tmpl, "\n")
+		for i, l := range lines {
+			if l != "  annotations:" {
+				continue
+			}
+			if i > 0 && strings.HasPrefix(strings.TrimSpace(lines[i-1]), "{{") {
+				break
+			}
+			if i+1 < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i+1]), "{{") {
+				break
+			}
+			lines = append(lines[:i+1], append([]string{"    " + keepPolicyKey + ": keep"}, lines[i+1:]...)...)
+			clone.TemplateContent = strings.Join(lines, "\n")
+			return &clone, ""
+		}
+		return r, fmt.Sprintf("%s: the annotations of its template are conditional, %s is not added; add %s: keep by hand", label, keepPolicyKey, keepPolicyKey)
+	}
+	return &clone, ""
 }
 
 // namePrefixRead is how the helpers of a chart read global.namePrefix.

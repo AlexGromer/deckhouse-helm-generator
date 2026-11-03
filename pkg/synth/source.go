@@ -22,6 +22,10 @@ type SourceProject struct {
 	// replaces the Dockerfile as the source of ports, user, volumes and
 	// health check: the image also carries what its base image sets.
 	ImageConfig *registry.ImageConfig
+	// KnownKeys are names of variables the platform provides, per source
+	// (a ConfigMap, a vault, a file): a ${NAME} placeholder with such a name
+	// is not emitted as an empty variable. Only names, never values.
+	KnownKeys map[string][]string
 
 	// profile is the platform profile, if any; root the build root of the
 	// project (Dir itself for a single project).
@@ -294,6 +298,7 @@ func (s *SourceProject) App(image, profile string, notes *Notes) App {
 		c := &config{
 			app: &app, props: p.properties(profile), notes: notes,
 			fallback: s.env.fallbackFor(app.secrets), fallbackFrom: strings.Join(s.env.files, ", "),
+			known: knownIndex(s.KnownKeys),
 		}
 		for _, v := range c.props {
 			debugTexts = append(debugTexts, v)

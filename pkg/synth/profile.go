@@ -11,6 +11,7 @@ import (
 	"text/template"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/yaml"
 )
 
@@ -52,6 +53,14 @@ type Profile struct {
 	// Maps merge key by key, the profile winning; lists are replaced.
 	Container map[string]interface{} `json:"container"`
 	Pod       map[string]interface{} `json:"pod"`
+	// Naming overrides the names of the Deployment, the application
+	// container and the Service (templates); Selector replaces the default
+	// selector; Service sets the Service type and adds ports; Strategy is
+	// the Deployment strategy. See profile_identity.go.
+	Naming   ProfileNaming     `json:"naming"`
+	Selector map[string]string `json:"selector"`
+	Service  ProfileService    `json:"service"`
+	Strategy *ProfileStrategy  `json:"strategy"`
 }
 
 // ProfileEnvFrom is one envFrom entry; exactly one reference is set and its
@@ -187,6 +196,11 @@ func (p *Profile) validate() error {
 		if (e.ConfigMapRef == "") == (e.SecretRef == "") {
 			return fmt.Errorf("envFrom[%d]: set exactly one of configMapRef and secretRef", i)
 		}
+		if name := e.ConfigMapRef + e.SecretRef; !strings.Contains(name, "{{") {
+			if err := checkRefName(fmt.Sprintf("envFrom[%d]", i), name); err != nil {
+				return err
+			}
+		}
 	}
 	for i, c := range p.InitContainers {
 		if s, _ := c["name"].(string); s == "" {
@@ -249,6 +263,9 @@ func (p *Profile) validate() error {
 		default:
 			return fmt.Errorf("jobs[%d]: manifest is required (a mapping or a string with Job YAML)", i)
 		}
+	}
+	if err := p.validateIdentity(); err != nil {
+		return err
 	}
 	return p.checkTemplates()
 }
@@ -323,6 +340,9 @@ func (p *Profile) checkTemplates() error {
 			}
 		}
 	}
+	if err := p.checkIdentityTemplates(check); err != nil {
+		return err
+	}
 	if err := check("container", p.Container); err != nil {
 		return err
 	}
@@ -357,6 +377,16 @@ func walkStrings(path string, v interface{}, fn func(path, s string)) {
 }
 
 // render executes the template s with data.
+// checkRefName refuses a ConfigMap or Secret name that is not a name of the
+// API (DNS-1123 subdomain): a "/" or ".." in it would address another
+// object when the name is used in a request.
+func checkRefName(path, name string) error {
+	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		return fmt.Errorf("%s: %q is not a valid ConfigMap or Secret name: %s", path, name, errs[0])
+	}
+	return nil
+}
+
 func render(path, s string, data profileData) (string, error) {
 	if !strings.Contains(s, "{{") {
 		return s, nil
@@ -470,6 +500,9 @@ func ApplyProfile(app *App, prof *Profile) error {
 		if err != nil {
 			return err
 		}
+		if err := checkRefName(path, name); err != nil {
+			return err
+		}
 		app.EnvFromExtra = append(app.EnvFromExtra, EnvFromRef{Secret: e.SecretRef != "", Name: name})
 	}
 	for i, c := range prof.InitContainers {
@@ -532,6 +565,9 @@ func ApplyProfile(app *App, prof *Profile) error {
 	}
 
 	if err := applyDefaults(app, prof.Defaults, data); err != nil {
+		return err
+	}
+	if err := applyIdentity(app, prof, data); err != nil {
 		return err
 	}
 	return applyJobs(app, prof.Jobs, data)

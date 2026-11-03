@@ -12,6 +12,29 @@ vars:
   toolbox: registry.example.com/platform/toolbox:2.3.0
   dbRegistry: registry.example.com/shop/db
 
+# Names of the objects dhg builds; the default is the application's name.
+# ConfigMaps, Secrets and claims keep the application's name.
+naming:
+  deployment: "{{ .Vars.prefix }}{{ .Name }}"
+  container: app
+  service: "{{ .Vars.prefix }}{{ .Name }}"
+
+# Replaces the default selector (app.kubernetes.io/name) in the Deployment, its
+# pod template and the Service. Use it to match objects that already run.
+selector:
+  app: "{{ .Name }}"
+  tier: backend
+
+service:
+  type: ClusterIP                          # ClusterIP | NodePort | LoadBalancer; nodePort is never set
+  extraPorts:                              # Service only, not container ports
+    - {name: metrics, port: 9090}
+    - {name: admin, port: 8081, targetPort: admin-http, protocol: TCP}
+
+strategy:
+  type: RollingUpdate                      # RollingUpdate | Recreate
+  rollingUpdate: {maxSurge: 1, maxUnavailable: 0}   # a number or a percentage like "25%"
+
 # Added to the container's envFrom, before the app's own ConfigMap/Secret.
 envFrom:
   - secretRef: "{{ .Vars.prefix }}platform-secret"

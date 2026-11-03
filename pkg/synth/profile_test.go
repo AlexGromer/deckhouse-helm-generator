@@ -370,10 +370,23 @@ func TestExampleProfileLoadsAndApplies(t *testing.T) {
 	if findObj(objs, "Job", "shop-dev-migrate-orders") == nil {
 		t.Errorf("no migration Job in %d objects", len(objs))
 	}
-	dep := findObj(objs, "Deployment", "orders")
+	dep := findObj(objs, "Deployment", "shop-dev-orders")
+	if dep == nil {
+		t.Fatalf("no Deployment shop-dev-orders in %d objects", len(objs))
+	}
 	pod, _, _ := unstructured.NestedMap(dep.Object, "spec", "template", "spec")
 	if len(pod["initContainers"].([]interface{})) != 1 {
 		t.Errorf("pod = %v", pod)
+	}
+	svc := findObj(objs, "Service", "shop-dev-orders")
+	if svc == nil {
+		t.Fatalf("no Service shop-dev-orders in %d objects", len(objs))
+	}
+	if ports, _, _ := unstructured.NestedSlice(svc.Object, "spec", "ports"); len(ports) < 3 {
+		t.Errorf("the extra ports are missing: %v", ports)
+	}
+	if typ, _, _ := unstructured.NestedString(dep.Object, "spec", "strategy", "type"); typ != "RollingUpdate" {
+		t.Errorf("strategy type = %q", typ)
 	}
 	if _, ok := envMap(app.SecretEnv)["DB_PASSWORD"]; !ok {
 		t.Errorf("secret = %+v", app.SecretEnv)

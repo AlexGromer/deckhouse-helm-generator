@@ -1,6 +1,9 @@
 package synth
 
 import (
+	"sort"
+	"strings"
+
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/kafkaclient"
 )
 
@@ -9,7 +12,13 @@ import (
 func ExtractKafkaFacts(props map[string]string, originPrefix string) (kafkaclient.Facts, []string) {
 	var kProps []kafkaclient.Property
 
-	for k, v := range props {
+	keys := make([]string, 0, len(props))
+	for k := range props {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := props[k]
 		// Use original key for parsing, but resolve placeholders for value
 
 		kProps = append(kProps, kafkaclient.Property{
@@ -24,8 +33,19 @@ func ExtractKafkaFacts(props map[string]string, originPrefix string) (kafkaclien
 
 	var notes []string
 	for _, unresolved := range facts.Unresolved {
+		if !isKafkaKey(strings.TrimPrefix(unresolved.Origin, originPrefix)) {
+			continue
+		}
 		notes = append(notes, "unresolved placeholder in Kafka property "+unresolved.Origin+": "+unresolved.Unresolved)
 	}
+	sort.Strings(notes)
 
 	return facts, notes
+}
+
+// isKafkaKey reports whether a property key is Kafka's: kafka.*,
+// spring.kafka.*, quarkus.kafka.*, micronaut.*.kafka.* and mp.messaging.*.
+func isKafkaKey(key string) bool {
+	key = strings.ToLower(key)
+	return strings.HasPrefix(key, "kafka.") || strings.Contains(key, ".kafka.") || strings.HasPrefix(key, "mp.messaging.")
 }

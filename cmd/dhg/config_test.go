@@ -135,6 +135,53 @@ func TestGenerate_LibraryRefFlagOverridesConfigFile(t *testing.T) {
 	}
 }
 
+func TestGenerate_LibraryRefFileFromConfigFile(t *testing.T) {
+	// No --library-version: the default is the version of the library this run writes.
+	cfg := "mode: library\nlibrary-ref: file://../library\n"
+	chartYAML, err := libraryRefChartYAML(t, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"name: library", "version: 0.1.0", "repository: file://../library"} {
+		if !strings.Contains(chartYAML, want) {
+			t.Errorf("Chart.yaml missing %q:\n%s", want, chartYAML)
+		}
+	}
+	chartYAML, err = libraryRefChartYAML(t, "mode: library\nlibrary-ref: file://../common-lib\nlibrary-version: \"^1.0.0\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"name: common-lib", "version: ^1.0.0", "repository: file://../common-lib"} {
+		if !strings.Contains(chartYAML, want) {
+			t.Errorf("Chart.yaml missing %q:\n%s", want, chartYAML)
+		}
+	}
+}
+
+func TestGenerate_LibraryRefHTTPSFromConfigFile(t *testing.T) {
+	cfg := "mode: library\nlibrary-ref: https://charts.example.com/stable\nlibrary-name: platform-lib\nlibrary-version: \"~1.4.0\"\n"
+	chartYAML, err := libraryRefChartYAML(t, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"name: platform-lib", "version: ~1.4.0", "repository: https://charts.example.com/stable"} {
+		if !strings.Contains(chartYAML, want) {
+			t.Errorf("Chart.yaml missing %q:\n%s", want, chartYAML)
+		}
+	}
+	// The flag overrides the file.
+	chartYAML, err = libraryRefChartYAML(t, cfg, "--library-name", "other-lib")
+	if err != nil || !strings.Contains(chartYAML, "name: other-lib") {
+		t.Errorf("err = %v, Chart.yaml:\n%s", err, chartYAML)
+	}
+}
+
+func TestGenerate_LibraryNameWithoutRef(t *testing.T) {
+	if _, err := libraryRefChartYAML(t, "mode: library\nlibrary-name: lib\n"); err == nil || !strings.Contains(err.Error(), "--library-name requires --library-ref") {
+		t.Errorf("error = %v", err)
+	}
+}
+
 func TestGenerate_LibraryRefErrors(t *testing.T) {
 	cases := map[string]struct {
 		cfg     string
@@ -143,7 +190,8 @@ func TestGenerate_LibraryRefErrors(t *testing.T) {
 		"version missing": {"mode: library\nlibrary-ref: oci://registry.example.com/p/lib\n", "--library-version"},
 		"version alone":   {"mode: library\nlibrary-version: \"1.0.0\"\n", "--library-ref"},
 		"wrong mode":      {"mode: separate\nlibrary-ref: oci://registry.example.com/p/lib\nlibrary-version: \"1.0.0\"\n", "--mode library"},
-		"not oci":         {"mode: library\nlibrary-ref: https://example.com/lib\nlibrary-version: \"1.0.0\"\n", "oci://"},
+		"unknown scheme":  {"mode: library\nlibrary-ref: ftp://example.com/lib\nlibrary-version: \"1.0.0\"\n", "oci://"},
+		"https no name":   {"mode: library\nlibrary-ref: https://example.com/lib\nlibrary-version: \"1.0.0\"\n", "--library-name"},
 	}
 	for name, tc := range cases {
 		_, err := libraryRefChartYAML(t, tc.cfg)

@@ -16,6 +16,7 @@ import (
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor/k8s"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/processor/value"
+	"github.com/AlexGromer/deckhouse-helm-generator/pkg/redact"
 	"github.com/AlexGromer/deckhouse-helm-generator/pkg/types"
 )
 
@@ -149,6 +150,9 @@ type pipelineOptions struct {
 	// lenient skips resources a processor fails on instead of failing.
 	lenient bool
 	verbose bool
+	// redactCredentials replaces credentials in ConfigMaps and container env
+	// of file, gitops and cluster sources with a placeholder (--redact-credentials).
+	redactCredentials bool
 	// quiet drops the notes of the process stage, for repeated runs.
 	quiet bool
 }
@@ -178,6 +182,21 @@ func runPipeline(ctx context.Context, opts pipelineOptions) (*pipelineResult, er
 	return result, nil
 }
 
+// redactExtracted applies --redact-credentials to the extracted objects of
+// sources that read manifests as they are (file, gitops, cluster) and returns
+// the note about what was redacted. Synthesized manifests keep credentials in
+// Secrets already.
+func redactExtracted(opts pipelineOptions, extracted []*types.ExtractedResource) string {
+	if !opts.redactCredentials {
+		return ""
+	}
+	switch opts.source {
+	case types.SourceFile, types.SourceGitOps, types.SourceCluster:
+		return redact.Note(redact.Credentials(extracted), opts.verbose)
+	}
+	return ""
+}
+
 // processResources runs the process and analyze stages on extracted
 // resources.
 func processResources(ctx context.Context, opts pipelineOptions, extracted []*types.ExtractedResource) (*pipelineResult, error) {
@@ -203,6 +222,10 @@ func processResources(ctx context.Context, opts pipelineOptions, extracted []*ty
 
 	var allNotes []string
 	seenNotes := map[string]bool{}
+	if note := redactExtracted(opts, extracted); note != "" {
+		seenNotes[note] = true
+		allNotes = append(allNotes, note)
+	}
 
 	processed := make([]*types.ProcessedResource, 0, len(extracted))
 	for _, r := range extracted {

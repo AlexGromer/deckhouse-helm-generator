@@ -38,6 +38,55 @@ func TestValidateSharedChart(t *testing.T) {
 	}
 }
 
+func TestValidateSharedOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts generateOptions
+		want string // "" = valid
+	}{
+		{"keep and exclude", generateOptions{mode: "separate", sharedChart: "platform", sharedKeep: []string{"ConfigMap/a"}, sharedExclude: []string{"secret/b"}}, ""},
+		{"keep without chart", generateOptions{mode: "separate", sharedKeep: []string{"ConfigMap/a"}}, "--shared-chart"},
+		{"exclude without chart", generateOptions{mode: "library", sharedExclude: []string{"ConfigMap/a"}}, "--shared-chart"},
+		{"bad entry", generateOptions{mode: "separate", sharedChart: "platform", sharedKeep: []string{"a"}}, "Kind/name"},
+		{"both", generateOptions{mode: "separate", sharedChart: "platform", sharedKeep: []string{"ConfigMap/a"}, sharedExclude: []string{"configmap/a"}}, "both"},
+	} {
+		err := validateSharedChart(tc.opts)
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestSharedOverridesFromConfigFile(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "dhg.yaml")
+	content := "chart-name: app\nmode: separate\nshared-chart: platform\nshared-keep:\n  - ConfigMap/common\n  - Secret/tls\nshared-exclude: [PersistentVolumeClaim/data]\n"
+	if err := os.WriteFile(cfg, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newGenerateCmd()
+	if err := applyConfigFile(cmd, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := cmd.Flags().GetStringSlice("shared-keep"); strings.Join(got, ",") != "ConfigMap/common,Secret/tls" {
+		t.Errorf("shared-keep = %v", got)
+	}
+	if got, _ := cmd.Flags().GetStringSlice("shared-exclude"); strings.Join(got, ",") != "PersistentVolumeClaim/data" {
+		t.Errorf("shared-exclude = %v", got)
+	}
+}
+
+func TestLibraryHint(t *testing.T) {
+	for ref, want := range map[string]string{
+		"oci://r.example.com/p/lib":         "publish the library chart to oci://r.example.com/p/lib (version 1.0.0)",
+		"file://../library":                 "was written to out/lib; run \"helm dependency build\"",
+		"https://charts.example.com/stable": "chart repository https://charts.example.com/stable (version 1.0.0)",
+	} {
+		if got := libraryHint(ref, "1.0.0", "out/lib"); !strings.Contains(got, want) {
+			t.Errorf("libraryHint(%q) = %q, want it to contain %q", ref, got, want)
+		}
+	}
+}
+
 func TestSharedChartFromConfigFile(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "dhg.yaml")
 	if err := os.WriteFile(cfg, []byte("chart-name: app\nmode: separate\nshared-chart: platform\n"), 0o644); err != nil {
@@ -115,5 +164,18 @@ func TestInstallHint_SharedChartAbsent(t *testing.T) {
 	printInstallHint(&sb, "/out", cs, "app", "prod", "platform")
 	if strings.Contains(sb.String(), "first") {
 		t.Errorf("nothing was shared, no order remark expected:\n%s", sb.String())
+	}
+}
+
+func TestLibraryChartDir(t *testing.T) {
+	charts := []*types.GeneratedChart{
+		{Name: "web", ChartYAML: "name: web\ntype: application\n"},
+		{Name: "common-lib", ChartYAML: "name: common-lib\ntype: library\n"},
+	}
+	if got := libraryChartDir("out", charts); got != filepath.Join("out", "common-lib") {
+		t.Errorf("libraryChartDir = %q", got)
+	}
+	if got := libraryChartDir("out", charts[:1]); got != "" {
+		t.Errorf("no library: %q", got)
 	}
 }

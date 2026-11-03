@@ -31,6 +31,7 @@ func writeProfileValues(ctx context.Context, p *pipelineResult, popts pipelineOp
 	variants := v.Variants()
 	popts.quiet, popts.verbose = true, false
 	genOpts.OnShared = nil // reported once, with the base chart
+	genOpts.OnSharedNote = nil
 
 	base, err := chartValues(ctx, popts, gen, genOpts, p.extracted)
 	if err != nil {

@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: orders
+  profiles:
+    include: shared
+  datasource:
+    url: ${DB_URL}
+server:
+  port: ${SERVICE_PORT:8080}

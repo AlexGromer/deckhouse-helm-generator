@@ -45,3 +45,41 @@ func TestSynthNotes_NoNotePrefix(t *testing.T) {
 		}
 	}
 }
+
+// The notes name Kafka properties only, and come in the same order on every
+// run.
+func TestExtractKafkaFactsNotes(t *testing.T) {
+	props := map[string]string{
+		"spring.kafka.bootstrap-servers":      "${KAFKA_URL}",
+		"spring.kafka.template.default-topic": "${TOPIC_A}",
+		"spring.kafka.consumer.group-id":      "${GROUP}",
+		"mp.messaging.incoming.in.topic":      "${TOPIC_B}",
+		"server.port":                         "${PORT}",
+		"spring.datasource.url":               "${DB_URL}",
+		"app.name":                            "${APP}",
+	}
+	var first []string
+	for i := 0; i < 20; i++ {
+		_, notes := ExtractKafkaFacts(props, "file ")
+		if first == nil {
+			first = notes
+			continue
+		}
+		if strings.Join(notes, "\n") != strings.Join(first, "\n") {
+			t.Fatalf("run %d: notes differ:\n%v\n%v", i, notes, first)
+		}
+	}
+	if len(first) != 4 {
+		t.Errorf("want 4 notes (the Kafka properties), got %v", first)
+	}
+	for _, n := range first {
+		if strings.Contains(n, "server.port") || strings.Contains(n, "datasource") || strings.Contains(n, "app.name") {
+			t.Errorf("note about a property that is not Kafka's: %s", n)
+		}
+	}
+	for i := 1; i < len(first); i++ {
+		if first[i-1] > first[i] {
+			t.Errorf("notes are not sorted: %v", first)
+		}
+	}
+}

@@ -87,6 +87,7 @@ It supports extracting resources from:
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newFeaturesCmd())
 	rootCmd.AddCommand(newGraphCmd())
+	rootCmd.AddCommand(newProfileCmd())
 
 	return rootCmd
 }
@@ -109,6 +110,7 @@ func newGenerateCmd() *cobra.Command {
 		kubeConfig         string
 		kubeContext        string
 		clusterSecrets     string
+		redactCredentials  bool
 		gitPath            string
 		gitRepo            string
 		gitBranch          string
@@ -118,6 +120,8 @@ func newGenerateCmd() *cobra.Command {
 		insecureRegistry   bool
 		imageConfig        bool
 		synthProfile       string
+		knownKeys          string
+		knownKeysCluster   bool
 		includeTests       bool
 		includeREADME      bool
 		includeSchema      bool
@@ -154,7 +158,10 @@ func newGenerateCmd() *cobra.Command {
 		baseDir            string
 		libraryRef         string
 		libraryVersion     string
+		libraryName        string
 		sharedChart        string
+		sharedKeep         []string
+		sharedExclude      []string
 	)
 
 	cmd := &cobra.Command{
@@ -192,6 +199,7 @@ Examples:
 				kubeConfig:         kubeConfig,
 				kubeContext:        kubeContext,
 				clusterSecrets:     clusterSecrets,
+				redactCredentials:  redactCredentials,
 				gitPath:            gitPath,
 				gitRepo:            gitRepo,
 				gitBranch:          gitBranch,
@@ -201,6 +209,8 @@ Examples:
 				insecureRegistry:   insecureRegistry,
 				imageConfig:        imageConfig,
 				synthProfile:       synthProfile,
+				knownKeys:          knownKeys,
+				knownKeysCluster:   knownKeysCluster,
 				includeTests:       includeTests,
 				includeREADME:      includeREADME,
 				includeSchema:      includeSchema,
@@ -236,7 +246,10 @@ Examples:
 				baseDir:            baseDir,
 				libraryRef:         libraryRef,
 				libraryVersion:     libraryVersion,
+				libraryName:        libraryName,
 				sharedChart:        sharedChart,
+				sharedKeep:         sharedKeep,
+				sharedExclude:      sharedExclude,
 			})
 		},
 	}
@@ -254,6 +267,8 @@ Examples:
 	cmd.Flags().BoolVar(&insecureRegistry, "insecure-registry", false, "Talk plain HTTP to the registry (--source image, --image-config)")
 	cmd.Flags().BoolVar(&imageConfig, "image-config", false, "With --source source, read each --image's config from the registry and prefer it to the Dockerfile (ports, user, volumes, health check)")
 	cmd.Flags().StringVar(&synthProfile, "synth-profile", "", "Platform profile (YAML) for --source image, compose or source: init containers, shared envFrom, labels, probes, resources, Jobs (see docs/SYNTH_PROFILE.md)")
+	cmd.Flags().StringVar(&knownKeys, "known-keys", "", "With --source source, file of variable names the platform provides (lines KEY or source:KEY, # comments); ${NAME} placeholders with such a name are not emitted as empty variables. Names only, values are never read")
+	cmd.Flags().BoolVar(&knownKeysCluster, "known-keys-from-cluster", false, "With --source source and --synth-profile, add the key names (never values) of the ConfigMaps named in the profile's envFrom, read from the cluster (--context, --kubeconfig, -n). Secrets are never read")
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "", "Filter by namespace")
 	cmd.Flags().StringSliceVar(&namespaces, "namespaces", []string{}, "Filter by multiple namespaces")
 	cmd.Flags().StringVarP(&labelSelector, "selector", "l", "", "Label selector filter")
@@ -263,6 +278,7 @@ Examples:
 	cmd.Flags().StringVar(&kubeConfig, "kubeconfig", "", "Path to kubeconfig file")
 	cmd.Flags().StringVar(&kubeContext, "context", "", "Kubeconfig context to use")
 	cmd.Flags().StringVar(&clusterSecrets, "cluster-secrets", "skip", "Secrets in cluster extraction: skip, mask (values replaced with REDACTED) or include")
+	cmd.Flags().BoolVar(&redactCredentials, "redact-credentials", true, "Replace credentials in ConfigMaps and container env values (keys such as *_PASSWORD, *_SECRET, *_TOKEN; -Dxxx.trustStorePassword=... options) with <SET-ME>; file, gitops and cluster sources")
 	cmd.Flags().StringVar(&gitRepo, "git-repo", "", "Git repository URL for gitops extraction (any URL git clone accepts)")
 	cmd.Flags().StringVar(&gitBranch, "git-branch", "", "Git branch or tag for gitops extraction (default: the remote's default branch)")
 	cmd.Flags().StringVar(&gitPath, "git-path", "", "Directory inside the repository to read manifests from (default: repository root)")
@@ -301,9 +317,12 @@ Examples:
 	cmd.Flags().BoolVar(&noState, "no-state", false, "Do not save the regeneration state next to the chart")
 	cmd.Flags().StringVar(&bump, "bump", "", "With --update, bump the version of changed charts: patch, minor, major or none")
 	cmd.Flags().StringVar(&baseDir, "base-dir", "", "With --update, read the saved state from this directory instead of --output")
-	cmd.Flags().StringVar(&libraryRef, "library-ref", "", "With --mode library, take the library chart from an OCI registry instead of vendoring it, e.g. oci://registry.example.com/platform/platform-lib (needs --library-version)")
-	cmd.Flags().StringVar(&libraryVersion, "library-version", "", "Version or version range of the library chart for --library-ref (quote it in the config file)")
+	cmd.Flags().StringVar(&libraryRef, "library-ref", "", "With --mode library, take the library chart from elsewhere instead of vendoring it: oci://registry.example.com/platform/platform-lib (OCI registry), file://../library (chart directory, relative to the service chart or absolute; the name is read from its Chart.yaml) or https://charts.example.com/stable (chart repository, needs --library-name)")
+	cmd.Flags().StringVar(&libraryVersion, "library-version", "", "Version or version range of the library chart for --library-ref (required, except for file://: default is the version in the Chart.yaml there; quote it in the config file)")
+	cmd.Flags().StringVar(&libraryName, "library-name", "", "Chart name of the library for an http(s):// --library-ref (required there); for file:// it names a library that is not generated yet")
 	cmd.Flags().StringVar(&sharedChart, "shared-chart", "", "With --mode separate or library, move the objects that several service charts reference (ConfigMap, Secret, ServiceAccount, PVC, ...), and those no workload references, to a chart of this name; install it first")
+	cmd.Flags().StringSliceVar(&sharedKeep, "shared-keep", nil, "With --shared-chart, Kind/name objects that stay with a service chart even if shared (one referenced by several stays with the first of them in sorted order; Kind is case-insensitive)")
+	cmd.Flags().StringSliceVar(&sharedExclude, "shared-exclude", nil, "With --shared-chart, Kind/name objects that are never moved to the shared chart: they stay where grouping put them")
 
 	// chart-name may come from the config file, so it is checked after loading it.
 	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
@@ -336,6 +355,7 @@ type generateOptions struct {
 	kubeConfig         string
 	kubeContext        string
 	clusterSecrets     string
+	redactCredentials  bool
 	gitPath            string
 	gitRepo            string
 	gitBranch          string
@@ -345,6 +365,8 @@ type generateOptions struct {
 	insecureRegistry   bool
 	imageConfig        bool
 	synthProfile       string
+	knownKeys          string
+	knownKeysCluster   bool
 	includeTests       bool
 	includeREADME      bool
 	includeSchema      bool
@@ -380,13 +402,19 @@ type generateOptions struct {
 	baseDir            string
 	libraryRef         string
 	libraryVersion     string
+	libraryName        string
 	sharedChart        string
+	sharedKeep         []string
+	sharedExclude      []string
 }
 
 // validateSharedChart checks --shared-chart before any input is read: only the
 // modes that write a chart per service group have a place for it.
 func validateSharedChart(opts generateOptions) error {
 	if opts.sharedChart == "" {
+		if len(opts.sharedKeep) > 0 || len(opts.sharedExclude) > 0 {
+			return fmt.Errorf("--shared-keep and --shared-exclude need --shared-chart")
+		}
 		return nil
 	}
 	if opts.mode != "separate" && opts.mode != "library" {
@@ -395,7 +423,7 @@ func validateSharedChart(opts generateOptions) error {
 	if !sharedChartName.MatchString(opts.sharedChart) {
 		return fmt.Errorf("--shared-chart %q is not a chart name (lowercase letters, digits, '-', '.' and '_')", opts.sharedChart)
 	}
-	return nil
+	return generator.ValidateSharedOverrides(opts.sharedKeep, opts.sharedExclude)
 }
 
 // sharedChartName is what a chart directory name may be.
@@ -416,23 +444,14 @@ func sharedSummary(chart string, moved []generator.SharedObject, verbose bool) [
 	return lines
 }
 
-// validateLibraryRef checks the --library-ref / --library-version pair before
-// any input is read.
+// validateLibraryRef checks --library-ref, --library-name and
+// --library-version before any input is read.
 func validateLibraryRef(opts generateOptions) error {
-	if opts.libraryRef == "" {
-		if opts.libraryVersion != "" {
-			return fmt.Errorf("--library-version requires --library-ref")
-		}
-		return nil
-	}
-	if opts.mode != "library" {
-		return fmt.Errorf("--library-ref only applies to --mode library (got %q)", opts.mode)
-	}
-	if _, _, err := generator.ParseLibraryRef(opts.libraryRef); err != nil {
+	if err := generator.ValidateLibraryOptions(opts.libraryRef, opts.libraryName, opts.libraryVersion); err != nil {
 		return err
 	}
-	if opts.libraryVersion == "" {
-		return fmt.Errorf("--library-version is required with --library-ref")
+	if opts.libraryRef != "" && opts.mode != "library" {
+		return fmt.Errorf("--library-ref only applies to --mode library (got %q)", opts.mode)
 	}
 	return nil
 }
@@ -493,6 +512,10 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		return fmt.Errorf("--synth-profile applies to the synthesizing sources (--source image, compose or source), not to --source %s", opts.source)
 	}
 
+	if (opts.knownKeys != "" || opts.knownKeysCluster) && sourceType != types.SourceCode {
+		return fmt.Errorf("--known-keys and --known-keys-from-cluster apply to --source source, not to --source %s", opts.source)
+	}
+
 	// Validate mutually exclusive flags
 	if opts.monorepo && opts.kustomize {
 		return fmt.Errorf("--monorepo and --kustomize are mutually exclusive")
@@ -516,24 +539,26 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	}
 
 	extractOpts := extractor.Options{
-		Paths:            opts.paths,
-		Namespace:        opts.namespace,
-		Namespaces:       opts.namespaces,
-		LabelSelector:    opts.labelSelector,
-		IncludeKinds:     opts.includeKinds,
-		ExcludeKinds:     opts.excludeKinds,
-		Recursive:        opts.recursive,
-		KubeConfig:       opts.kubeConfig,
-		KubeContext:      opts.kubeContext,
-		ClusterSecrets:   opts.clusterSecrets,
-		GitURL:           opts.gitRepo,
-		GitBranch:        opts.gitBranch,
-		GitPath:          opts.gitPath,
-		Images:           opts.images,
-		Platform:         opts.platform,
-		InsecureRegistry: opts.insecureRegistry,
-		ImageConfig:      opts.imageConfig,
-		SynthProfile:     opts.synthProfile,
+		Paths:                opts.paths,
+		Namespace:            opts.namespace,
+		Namespaces:           opts.namespaces,
+		LabelSelector:        opts.labelSelector,
+		IncludeKinds:         opts.includeKinds,
+		ExcludeKinds:         opts.excludeKinds,
+		Recursive:            opts.recursive,
+		KubeConfig:           opts.kubeConfig,
+		KubeContext:          opts.kubeContext,
+		ClusterSecrets:       opts.clusterSecrets,
+		GitURL:               opts.gitRepo,
+		GitBranch:            opts.gitBranch,
+		GitPath:              opts.gitPath,
+		Images:               opts.images,
+		Platform:             opts.platform,
+		InsecureRegistry:     opts.insecureRegistry,
+		ImageConfig:          opts.imageConfig,
+		SynthProfile:         opts.synthProfile,
+		KnownKeysFile:        opts.knownKeys,
+		KnownKeysFromCluster: opts.knownKeysCluster,
 	}
 	if opts.sshKey != "" {
 		extractOpts.GitAuth = &extractor.GitAuthOptions{SSHKeyPath: opts.sshKey}
@@ -546,6 +571,8 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		outputMode: outputMode,
 		plugins:    opts.plugins,
 		verbose:    opts.verbose,
+
+		redactCredentials: opts.redactCredentials,
 	}
 	pipeline, err := runPipeline(ctx, pipelineOpts)
 	if err != nil {
@@ -589,7 +616,13 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		ValuesFlat:          opts.valuesFlat,
 		LibraryRef:          opts.libraryRef,
 		LibraryVersion:      opts.libraryVersion,
+		LibraryName:         opts.libraryName,
 		SharedChart:         opts.sharedChart,
+		SharedKeep:          opts.sharedKeep,
+		SharedExclude:       opts.sharedExclude,
+		OnSharedNote: func(note string) {
+			fmt.Fprintln(os.Stderr, "Note: "+note)
+		},
 		OnShared: func(chart string, moved []generator.SharedObject) {
 			for i, line := range sharedSummary(chart, moved, opts.verbose) {
 				if i == 0 {
@@ -1128,13 +1161,40 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		installNS = opts.namespaces[0]
 	}
 	if opts.libraryRef != "" {
-		fmt.Printf("\nThe library is not vendored: publish the library chart to %s (version %s) and run \"helm dependency update\" in each service chart.\n",
-			opts.libraryRef, opts.libraryVersion)
+		fmt.Print(libraryHint(opts.libraryRef, opts.libraryVersion, libraryChartDir(opts.outputDir, charts)))
 	}
 	fmt.Println()
 	printInstallHint(os.Stdout, opts.outputDir, charts, opts.chartName, installNS, opts.sharedChart)
 
 	return nil
+}
+
+// libraryChartDir is the directory the run wrote the library chart to, ""
+// when there is none among charts.
+func libraryChartDir(outputDir string, charts []*types.GeneratedChart) string {
+	for _, c := range charts {
+		if strings.Contains(c.ChartYAML, "type: library") {
+			return filepath.Join(outputDir, c.Name)
+		}
+	}
+	return ""
+}
+
+// libraryHint says what to do with the library chart that --library-ref keeps
+// out of the service charts.
+func libraryHint(ref, version, writtenTo string) string {
+	switch {
+	case strings.HasPrefix(ref, "file://"):
+		where := "next to them"
+		if writtenTo != "" {
+			where = "to " + writtenTo
+		}
+		return fmt.Sprintf("\nThe library is not vendored: the service charts take it from %s (relative to the service chart). The library chart was written %s; run \"helm dependency build\" in each service chart.\n", ref, where)
+	case strings.HasPrefix(ref, "oci://"):
+		return fmt.Sprintf("\nThe library is not vendored: publish the library chart to %s (version %s) and run \"helm dependency update\" in each service chart.\n", ref, version)
+	default:
+		return fmt.Sprintf("\nThe library is not vendored: publish the library chart to the chart repository %s (version %s) and run \"helm dependency update\" in each service chart.\n", ref, version)
+	}
 }
 
 // installHintMax is how many chart paths the install hint lists.

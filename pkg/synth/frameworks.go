@@ -20,6 +20,9 @@ type config struct {
 	// fallbackFrom names the files, for a note.
 	fallback     map[string]string
 	fallbackFrom string
+	// known maps the names of variables the platform provides to the source
+	// that provides them (see knownIndex).
+	known map[string]string
 }
 
 // bareBrace matches "{NAME}" without the "$": a typo of a placeholder that
@@ -137,8 +140,13 @@ func (c *config) flush() {
 
 	var empty, secrets []string
 	fromTemplate := 0
+	provided := map[string][]string{}
 	for _, n := range names {
 		if c.app.hasEnv(n) {
+			continue
+		}
+		if source, ok := c.known[n]; ok {
+			provided[source] = append(provided[source], n)
 			continue
 		}
 		value := ""
@@ -153,6 +161,18 @@ func (c *config) flush() {
 				secrets = append(secrets, n)
 			}
 		}
+	}
+	providers := make([]string, 0, len(provided))
+	for source := range provided {
+		providers = append(providers, source)
+	}
+	sort.Strings(providers)
+	for _, source := range providers {
+		verb := "come"
+		if len(provided[source]) == 1 {
+			verb = "comes"
+		}
+		c.notes.Addf("%s: %s %s from %s (%s), so the chart does not set them", c.app.Name, plural(len(provided[source]), "variable", "variables"), verb, source, listed(provided[source]))
 	}
 	if len(empty) > 0 {
 		verb := "are"

@@ -20,10 +20,17 @@ var configMapKey = regexp.MustCompile(`[^-._a-zA-Z0-9]+`)
 func Manifests(app App) []*unstructured.Unstructured {
 	name := DNSName(app.Name)
 	labels := map[string]interface{}{nameLabel: name}
+	deploymentName := firstNonEmpty(app.DeploymentName, name)
+	containerName := firstNonEmpty(app.ContainerName, name)
+	serviceName := firstNonEmpty(app.ServiceName, name)
+	selector := copyMap(labels)
+	if len(app.Selector) > 0 {
+		selector = stringMap(app.Selector)
+	}
 
 	var objects []*unstructured.Unstructured
 	container := map[string]interface{}{
-		"name":  name,
+		"name":  containerName,
 		"image": app.Image,
 	}
 	if len(app.Command) > 0 {
@@ -37,22 +44,32 @@ func Manifests(app App) []*unstructured.Unstructured {
 	}
 
 	if len(app.Ports) > 0 {
-		var containerPorts, servicePorts []interface{}
+		var containerPorts []interface{}
 		for _, p := range app.Ports {
 			containerPorts = append(containerPorts, map[string]interface{}{
 				"name": p.Name, "containerPort": p.Port, "protocol": p.Protocol,
 			})
+		}
+		container["ports"] = containerPorts
+	}
+	if len(app.Ports) > 0 || len(app.ExtraServicePorts) > 0 {
+		var servicePorts []interface{}
+		for _, p := range app.Ports {
 			servicePorts = append(servicePorts, map[string]interface{}{
 				"name": p.Name, "port": p.Port, "targetPort": p.Port, "protocol": p.Protocol,
 			})
 		}
-		container["ports"] = containerPorts
-		objects = append(objects, object("v1", "Service", name, labels, map[string]interface{}{
-			"spec": map[string]interface{}{
-				"selector": copyMap(labels),
-				"ports":    servicePorts,
-			},
-		}))
+		for _, p := range app.ExtraServicePorts {
+			servicePorts = append(servicePorts, extraServicePort(p))
+		}
+		spec := map[string]interface{}{
+			"selector": copyMap(selector),
+			"ports":    servicePorts,
+		}
+		if app.ServiceType != "" {
+			spec["type"] = app.ServiceType
+		}
+		objects = append(objects, object("v1", "Service", serviceName, labels, map[string]interface{}{"spec": spec}))
 	}
 
 	var envFrom []interface{}
@@ -156,7 +173,7 @@ func Manifests(app App) []*unstructured.Unstructured {
 	}
 
 	podLabels := copyMap(labels)
-	for _, extra := range []map[string]string{app.Labels, app.PodLabels} {
+	for _, extra := range []map[string]string{app.Labels, app.PodLabels, app.Selector} {
 		for k, v := range extra {
 			podLabels[k] = v
 		}
@@ -193,20 +210,49 @@ func Manifests(app App) []*unstructured.Unstructured {
 	for k, v := range app.DeploymentLabels {
 		deploymentLabels[k] = v
 	}
-	deployment := object("apps/v1", "Deployment", name, deploymentLabels, map[string]interface{}{
-		"spec": map[string]interface{}{
-			"replicas": replicas,
-			"selector": map[string]interface{}{"matchLabels": copyMap(labels)},
-			"template": map[string]interface{}{
-				"metadata": podMeta,
-				"spec":     podSpec,
-			},
+	deploymentSpec := map[string]interface{}{
+		"replicas": replicas,
+		"selector": map[string]interface{}{"matchLabels": copyMap(selector)},
+		"template": map[string]interface{}{
+			"metadata": podMeta,
+			"spec":     podSpec,
 		},
+	}
+	if len(app.Strategy) > 0 {
+		deploymentSpec["strategy"] = deepCopyMap(app.Strategy)
+	}
+	deployment := object("apps/v1", "Deployment", deploymentName, deploymentLabels, map[string]interface{}{
+		"spec": deploymentSpec,
 	})
 	for _, j := range app.Jobs {
 		objects = append(objects, &unstructured.Unstructured{Object: deepCopyMap(j.Object)})
 	}
 	return append([]*unstructured.Unstructured{deployment}, objects...)
+}
+
+// extraServicePort is a Service port the profile adds.
+func extraServicePort(p ServicePort) map[string]interface{} {
+	protocol := p.Protocol
+	if protocol == "" {
+		protocol = "TCP"
+	}
+	var target interface{} = p.Port
+	switch {
+	case p.TargetPortName != "":
+		target = p.TargetPortName
+	case p.TargetPort > 0:
+		target = p.TargetPort
+	}
+	return map[string]interface{}{"name": p.Name, "port": p.Port, "targetPort": target, "protocol": protocol}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func object(apiVersion, kind, name string, labels map[string]interface{}, fields map[string]interface{}) *unstructured.Unstructured {
