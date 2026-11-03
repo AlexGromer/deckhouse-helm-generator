@@ -3,8 +3,8 @@ name: CodeQL
 on:
   push:
     branches: [main]
+  # every pull request, whatever its base, so stacked PRs are scanned too
   pull_request:
-    branches: [main]
   schedule:
     - cron: "0 6 * * 1"
 
