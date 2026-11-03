@@ -233,6 +233,20 @@ func (e *ClusterExtractor) Extract(ctx context.Context, opts Options) (<-chan *t
 			}
 		}()
 
+		helmObjects := 0
+		var helmReleases []string
+		defer func() {
+			if helmObjects == 0 {
+				return
+			}
+			slices.Sort(helmReleases)
+			msg := fmt.Sprintf("%d objects were managed by Helm release(s) %s; their Helm labels were dropped", helmObjects, strings.Join(helmReleases, ", "))
+			select {
+			case errors <- &NoteError{Msg: msg}:
+			case <-ctx.Done():
+			}
+		}()
+
 		for _, ar := range apiResources {
 			if ctx.Err() != nil {
 				return
@@ -511,6 +525,7 @@ func prepareClusterObject(obj *unstructured.Unstructured) bool {
 	if obj.GetKind() == "Job" {
 		stripJobControllerFields(obj)
 	}
+	stripHelmLabels(obj)
 	if annotations := obj.GetAnnotations(); annotations != nil {
 		for _, key := range []string{"kubectl.kubernetes.io/last-applied-configuration", "deployment.kubernetes.io/revision", "meta.helm.sh/release-name", "meta.helm.sh/release-namespace"} {
 			delete(annotations, key)
@@ -530,6 +545,47 @@ func prepareClusterObject(obj *unstructured.Unstructured) bool {
 		}
 	}
 	return true
+}
+
+// helmRelease reports whether obj was installed by Helm (label
+// app.kubernetes.io/managed-by: Helm or annotation meta.helm.sh/release-name)
+// and the release name from the annotation ("" if absent).
+func helmRelease(obj *unstructured.Unstructured) (string, bool) {
+	release := obj.GetAnnotations()["meta.helm.sh/release-name"]
+	return release, release != "" || obj.GetLabels()["app.kubernetes.io/managed-by"] == "Helm"
+}
+
+// stripHelmLabels removes the labels a Helm release added to obj and to its
+// pod templates, so they do not become literal input labels of the new chart:
+// helm.sh/chart and app.kubernetes.io/managed-by always; version and instance
+// only when instance names the release. Empty label maps are removed.
+func stripHelmLabels(obj *unstructured.Unstructured) {
+	release, ok := helmRelease(obj)
+	if !ok {
+		return
+	}
+	paths := [][]string{
+		{"metadata", "labels"},
+		{"spec", "template", "metadata", "labels"},
+		{"spec", "jobTemplate", "spec", "template", "metadata", "labels"},
+	}
+	for _, path := range paths {
+		labels, found, _ := unstructured.NestedStringMap(obj.Object, path...)
+		if !found {
+			continue
+		}
+		delete(labels, "helm.sh/chart")
+		delete(labels, "app.kubernetes.io/managed-by")
+		if release != "" && labels["app.kubernetes.io/instance"] == release {
+			delete(labels, "app.kubernetes.io/instance")
+			delete(labels, "app.kubernetes.io/version")
+		}
+		if len(labels) == 0 {
+			unstructured.RemoveNestedField(obj.Object, path...)
+		} else {
+			_ = unstructured.SetNestedStringMap(obj.Object, labels, path...)
+		}
+	}
 }
 
 // jobControllerLabels are set by the Job controller on the Job and its pod
