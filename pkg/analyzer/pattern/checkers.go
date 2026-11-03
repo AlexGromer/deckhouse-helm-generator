@@ -284,6 +284,8 @@ func (c *HighAvailabilityChecker) Check(graph *types.ResourceGraph) []BestPracti
 	singleReplica := make([]types.ResourceKey, 0)
 	missingProbes := make([]types.ResourceKey, 0)
 	missingPDB := make([]types.ResourceKey, 0)
+	rolloutDowntime := make([]types.ResourceKey, 0)
+	rolloutWaitEarly := false
 
 	deploymentCount := 0
 
@@ -298,6 +300,17 @@ func (c *HighAvailabilityChecker) Check(graph *types.ResourceGraph) []BestPracti
 		if replicasRaw, ok := resource.Values["replicas"]; ok {
 			if replicas, ok := replicasRaw.(int64); ok && replicas == 1 {
 				singleReplica = append(singleReplica, key)
+			}
+		}
+
+		// A rollout that stops the old pod before a new one is Ready.
+		if replicas, ok := resource.Values["replicas"].(int64); ok {
+			strategy, _ := resource.Values["strategy"].(map[string]interface{})
+			if types.RolloutStopsBeforeReady(replicas, strategy) != "" {
+				rolloutDowntime = append(rolloutDowntime, key)
+				if types.RolloutHelmWaitReturnsEarly(replicas, strategy) {
+					rolloutWaitEarly = true
+				}
 			}
 		}
 
@@ -349,6 +362,30 @@ func (c *HighAvailabilityChecker) Check(graph *types.ResourceGraph) []BestPracti
 			},
 			AffectedResources: singleReplica,
 			AutoFixable:       true,
+		})
+	}
+
+	// Rollout downtime
+	if len(rolloutDowntime) > 0 {
+		description := "The replica count is not above maxUnavailable (or the strategy is Recreate): a rollout stops the old pod before a new one is Ready, which means downtime"
+		if rolloutWaitEarly {
+			// helm --wait waits for the new pods of a Recreate Deployment.
+			description += "; where maxUnavailable is not below the replica count, helm --wait does not wait for readiness"
+		}
+		practices = append(practices, BestPractice{
+			ID:          "BP-HA-004",
+			Title:       "Rollout Stops Old Pods Before New Ones Are Ready",
+			Description: description,
+			Category:    c.Category(),
+			Severity:    SeverityWarning,
+			Compliant:   false,
+			Recommendations: []string{
+				"Set strategy.rollingUpdate.maxSurge: 1 and maxUnavailable: 0 so a new pod is Ready before the old one stops",
+				"For a Recreate strategy set strategy.type: RollingUpdate together with these values",
+				"Keep Recreate or maxUnavailable >= replicas only for workloads that cannot run two versions at once",
+			},
+			AffectedResources: rolloutDowntime,
+			AutoFixable:       false,
 		})
 	}
 

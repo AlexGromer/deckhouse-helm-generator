@@ -122,7 +122,7 @@ spec:
 	}
 	assertContainsAll(t, res.TemplateContent,
 		"  selector:\n    {{- toYaml .selector | nindent 4 }}\n",
-		`{{- toYaml (merge (dict) (.podLabels | default dict) (include "app.labels" $ | fromYaml)) | nindent 8 }}`,
+		`{{- toYaml (merge (dict) (.podLabels | default dict) (omit (include "app.labels" $ | fromYaml) "helm.sh/chart" "app.kubernetes.io/version" "app.kubernetes.io/managed-by")) | nindent 8 }}`,
 	)
 }
 

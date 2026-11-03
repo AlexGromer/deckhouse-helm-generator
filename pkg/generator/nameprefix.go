@@ -17,6 +17,12 @@ func inChartNames(graph *types.ResourceGraph) map[string][]string {
 	if graph == nil {
 		return nil
 	}
+	return inChartOf(graphResources(graph))
+}
+
+// graphResources returns every resource of the graph once: those of the graph,
+// of its groups and the orphans.
+func graphResources(graph *types.ResourceGraph) []*types.ProcessedResource {
 	seen := map[*types.ProcessedResource]bool{}
 	var all []*types.ProcessedResource
 	add := func(r *types.ProcessedResource) {
@@ -36,7 +42,12 @@ func inChartNames(graph *types.ResourceGraph) map[string][]string {
 	for _, r := range graph.Orphans {
 		add(r)
 	}
+	return all
+}
 
+// inChartOf returns the names of the objects among resources that a chart
+// rendering them lists for global.namePrefix, by Kind (see inChartNames).
+func inChartOf(all []*types.ProcessedResource) map[string][]string {
 	sets := map[string]map[string]bool{}
 	for _, r := range all {
 		if r.Original == nil || r.Original.Object == nil || isCRD(r) || r.TemplatePath == "" || r.TemplateContent == "" {

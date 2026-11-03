@@ -45,7 +45,6 @@ func (g *LibraryGenerator) Generate(ctx context.Context, graph *types.ResourceGr
 	// The library does not depend on the input: it is published once and
 	// shared. The names of the objects of a chart (global.namePrefix) are
 	// written into each service chart instead.
-	inChart := inChartNames(graph)
 	libChart := g.generateLibraryChart(libName, libraryChartVersion(opts), opts)
 	charts = append(charts, libChart)
 
@@ -60,11 +59,20 @@ func (g *LibraryGenerator) Generate(ctx context.Context, graph *types.ResourceGr
 			return nil, fmt.Errorf("the chart name %q of --library-ref is also the name of a service chart; the library would overwrite it, name the library chart differently", libChart.Name)
 		}
 	}
-	for _, group := range groupResult.Groups {
+	// The shared chart is a plain chart with helpers of its own: it needs no
+	// library. It is installed first.
+	plan, err := (&SeparateGenerator{}).planShared(graph, groupResult.Groups, opts, libChart.Name)
+	if err != nil {
+		return nil, err
+	}
+	if plan.chart != nil {
+		charts = append(charts, plan.chart)
+	}
+	for _, group := range plan.groups {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		wrapper, err := g.generateWrapperChart(group, libChart, repository, opts, inChart)
+		wrapper, err := g.generateWrapperChart(group, libChart, repository, opts, plan.inChart)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate chart for group %s: %w", group.Name, err)
 		}

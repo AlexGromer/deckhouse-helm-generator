@@ -84,6 +84,11 @@ const (
 	slotCronJob     = "cronJob"
 	slotHPA         = "hpa"
 	slotPDB         = "pdb"
+	// slotVaultAgent is the vaultAgent block of the vault-agent feature. The
+	// overlays carry only its switch: Vault Agent injection is off in dev (no
+	// Vault there) and on in staging and prod, so one chart can read plain
+	// Kubernetes Secrets in one environment and Vault in another.
+	slotVaultAgent = "vaultAgent"
 )
 
 // envMaxDepth bounds the search for value blocks: services.<svc>.<kind> is 3 levels,
@@ -149,6 +154,8 @@ func looksLikeSlot(key string, node map[string]interface{}) bool {
 		return has("scaleTargetRef", "minReplicas", "maxReplicas")
 	case slotPDB:
 		return has("minAvailable", "maxUnavailable")
+	case slotVaultAgent:
+		return has("secretPathPrefix")
 	}
 	return false
 }
@@ -168,6 +175,8 @@ func buildEnvOverlay(slots []envSlot, p envProfile, env string) map[string]inter
 	for _, s := range slots {
 		set := func(key string, val interface{}) { setPath(overlay, append(append([]string{}, s.path...), key), val) }
 		switch s.kind {
+		case slotVaultAgent:
+			set("enabled", env != "dev")
 		case slotDeployment, slotStatefulSet:
 			if p.replicas != nil {
 				set("replicas", raise(s.node, "replicas", *p.replicas))
@@ -523,5 +532,33 @@ func buildCacheProfile(env string) envProfile {
 		return envProfile{replicas: ip(2)}
 	default:
 		return envProfile{replicas: ip(2), pdbMinAvailable: ip(1), antiAffinity: true}
+	}
+}
+
+// MirrorSubchartVaultAgent copies the vaultAgent block of every subchart of the
+// umbrella chart parent into base, the values of the parent, under the key of
+// the subchart. Helm reads only the values files of the parent, so the overlays
+// of an umbrella chart switch Vault Agent as <subchart>.vaultAgent.enabled, and
+// the slot has to be in the base to get one. base is only used to find the
+// slots; it is not written to the chart. A subchart without the block, and a
+// parent without a section for the subchart, are left alone.
+func MirrorSubchartVaultAgent(base map[string]interface{}, parent string, charts []*types.GeneratedChart) {
+	prefix := parent + "/charts/"
+	for _, c := range charts {
+		sub, ok := strings.CutPrefix(c.Name, prefix)
+		if !ok || strings.Contains(sub, "/") || c.ValuesYAML == "" {
+			continue
+		}
+		section, ok := base[sub].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		var values map[string]interface{}
+		if err := yaml.Unmarshal([]byte(c.ValuesYAML), &values); err != nil {
+			continue
+		}
+		if block, ok := values[slotVaultAgent].(map[string]interface{}); ok && looksLikeSlot(slotVaultAgent, block) {
+			section[slotVaultAgent] = block
+		}
 	}
 }

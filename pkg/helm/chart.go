@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -177,6 +178,13 @@ type NOTESContext struct {
 	ServiceTypes []string // Kubernetes Service types present (e.g., "LoadBalancer", "ClusterIP")
 	HasIngress   bool     // Whether the chart includes Ingress resources
 	HasAuth      bool     // Whether the chart includes authentication configuration
+	// Deployments are the names of the chart's Deployments as the input has
+	// them (without global.namePrefix): NOTES.txt gives a rollout status
+	// command for each.
+	Deployments []string
+	// HasWorkloads is set when the chart has a Deployment, StatefulSet,
+	// DaemonSet, Job or CronJob: NOTES.txt then gives the drift check.
+	HasWorkloads bool
 }
 
 // GenerateNOTES generates the NOTES.txt content with context-aware sections.
@@ -230,6 +238,19 @@ func GenerateNOTES(chartName string, services []string, ctx NOTESContext) string
 	if ctx.HasAuth {
 		sb.WriteString("Authentication is enabled. Ensure auth secrets are configured:\n\n")
 		sb.WriteString("  kubectl get secret -l app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }}\n\n")
+	}
+
+	if len(ctx.Deployments) > 0 {
+		sb.WriteString("Wait for the Deployments to roll out (helm --wait may not wait for readiness when maxUnavailable is not below the replica count, e.g. one replica with maxUnavailable 1):\n\n")
+		for _, name := range ctx.Deployments {
+			fmt.Fprintf(&sb, "  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include \"%s.objname\" (list $ %s) }} --timeout=30m\n", chartName, strconv.Quote(name))
+		}
+		sb.WriteString("\n")
+	}
+
+	if ctx.HasWorkloads {
+		sb.WriteString("Check that the live objects match the release (exit code 1 = the live state differs from the release):\n\n")
+		sb.WriteString("  helm get manifest {{ .Release.Name }} -n {{ .Release.Namespace }} | kubectl -n {{ .Release.Namespace }} diff -f -\n\n")
 	}
 
 	sb.WriteString("To customize the installation, edit the values.yaml file and upgrade:\n\n")

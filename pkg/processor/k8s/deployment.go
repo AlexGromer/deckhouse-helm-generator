@@ -56,11 +56,39 @@ func (p *DeploymentProcessor) Process(ctx processor.Context, obj *unstructured.U
 		ValuesPath:      fmt.Sprintf("services.%s.deployment", serviceName),
 		Values:          values,
 		Dependencies:    deps,
+		Notes:           rolloutNotes(name, serviceName, values),
 		Metadata: map[string]interface{}{
 			"name":      name,
 			"namespace": namespace,
 		},
 	}, nil
+}
+
+// rolloutNotes warns about a Deployment whose rollout stops the old pod
+// before a new one is Ready (replicas not above maxUnavailable, or Recreate).
+// The strategy itself stays as the input has it; the note shows the values
+// that make the rollout surge instead.
+func rolloutNotes(name, serviceName string, values map[string]interface{}) []string {
+	replicas, _ := values["replicas"].(int64)
+	strategy, _ := values["strategy"].(map[string]interface{})
+	reason := types.RolloutStopsBeforeReady(replicas, strategy)
+	if reason == "" {
+		return nil
+	}
+	path := "services." + serviceName + ".deployment.strategy"
+	set := path + ".rollingUpdate.maxSurge=1 and " + path + ".rollingUpdate.maxUnavailable=0"
+	if t, _ := strategy["type"].(string); t == "Recreate" {
+		set = path + ".type=RollingUpdate, " + set
+	}
+	// helm --wait waits for the new pods of a Recreate Deployment; it returns
+	// early only for a RollingUpdate with maxUnavailable >= replicas.
+	wait := ""
+	if types.RolloutHelmWaitReturnsEarly(replicas, strategy) {
+		wait = ", and helm --wait does not wait for readiness"
+	}
+	return []string{fmt.Sprintf(
+		"Deployment %s (%s): a rollout stops the old pod before a new one is Ready (downtime)%s; the strategy is kept as in the input, set %s in values to surge instead",
+		name, reason, wait, set)}
 }
 
 func (p *DeploymentProcessor) extractValues(obj *unstructured.Unstructured) (map[string]interface{}, []types.ResourceKey) {

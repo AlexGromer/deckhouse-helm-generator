@@ -30,6 +30,7 @@ func TestPodTemplateParses(t *testing.T) {
 				"include":   func() string { return "" },
 				"fromYaml":  func() string { return "" },
 				"merge":     func() string { return "" },
+				"omit":      func() string { return "" },
 				"dict":      func() string { return "" },
 				"default":   func() string { return "" },
 				"concat":    func() string { return "" },

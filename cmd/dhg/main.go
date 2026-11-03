@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -153,6 +154,7 @@ func newGenerateCmd() *cobra.Command {
 		baseDir            string
 		libraryRef         string
 		libraryVersion     string
+		sharedChart        string
 	)
 
 	cmd := &cobra.Command{
@@ -234,6 +236,7 @@ Examples:
 				baseDir:            baseDir,
 				libraryRef:         libraryRef,
 				libraryVersion:     libraryVersion,
+				sharedChart:        sharedChart,
 			})
 		},
 	}
@@ -300,6 +303,7 @@ Examples:
 	cmd.Flags().StringVar(&baseDir, "base-dir", "", "With --update, read the saved state from this directory instead of --output")
 	cmd.Flags().StringVar(&libraryRef, "library-ref", "", "With --mode library, take the library chart from an OCI registry instead of vendoring it, e.g. oci://registry.example.com/platform/platform-lib (needs --library-version)")
 	cmd.Flags().StringVar(&libraryVersion, "library-version", "", "Version or version range of the library chart for --library-ref (quote it in the config file)")
+	cmd.Flags().StringVar(&sharedChart, "shared-chart", "", "With --mode separate or library, move the objects that several service charts reference (ConfigMap, Secret, ServiceAccount, PVC, ...), and those no workload references, to a chart of this name; install it first")
 
 	// chart-name may come from the config file, so it is checked after loading it.
 	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
@@ -376,6 +380,40 @@ type generateOptions struct {
 	baseDir            string
 	libraryRef         string
 	libraryVersion     string
+	sharedChart        string
+}
+
+// validateSharedChart checks --shared-chart before any input is read: only the
+// modes that write a chart per service group have a place for it.
+func validateSharedChart(opts generateOptions) error {
+	if opts.sharedChart == "" {
+		return nil
+	}
+	if opts.mode != "separate" && opts.mode != "library" {
+		return fmt.Errorf("--shared-chart applies to --mode separate and --mode library (got %q)", opts.mode)
+	}
+	if !sharedChartName.MatchString(opts.sharedChart) {
+		return fmt.Errorf("--shared-chart %q is not a chart name (lowercase letters, digits, '-', '.' and '_')", opts.sharedChart)
+	}
+	return nil
+}
+
+// sharedChartName is what a chart directory name may be.
+var sharedChartName = regexp.MustCompile(`^[a-z0-9]+([._-][a-z0-9]+)*$`)
+
+// sharedSummary is the report of what moved to the shared chart: one summary
+// line, followed by one line per object when verbose.
+func sharedSummary(chart string, moved []generator.SharedObject, verbose bool) []string {
+	if len(moved) == 0 {
+		return []string{fmt.Sprintf("no shared objects: every object stays in its service chart, chart %s is not written", chart)}
+	}
+	lines := []string{fmt.Sprintf("%d shared objects moved to chart %s", len(moved), chart)}
+	if verbose {
+		for _, o := range moved {
+			lines = append(lines, "  "+o.Describe())
+		}
+	}
+	return lines
 }
 
 // validateLibraryRef checks the --library-ref / --library-version pair before
@@ -423,6 +461,9 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 	}
 
 	if err := validateLibraryRef(opts); err != nil {
+		return err
+	}
+	if err := validateSharedChart(opts); err != nil {
 		return err
 	}
 
@@ -548,6 +589,15 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 		ValuesFlat:          opts.valuesFlat,
 		LibraryRef:          opts.libraryRef,
 		LibraryVersion:      opts.libraryVersion,
+		SharedChart:         opts.sharedChart,
+		OnShared: func(chart string, moved []generator.SharedObject) {
+			for i, line := range sharedSummary(chart, moved, opts.verbose) {
+				if i == 0 {
+					line = "Note: " + line
+				}
+				fmt.Fprintln(os.Stderr, line)
+			}
+		},
 	}
 
 	charts, err := gen.Generate(ctx, graph, genOpts)
@@ -968,6 +1018,9 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 			if chart.ValuesYAML != "" {
 				_ = yaml.Unmarshal([]byte(chart.ValuesYAML), &baseValues)
 			}
+			// Helm reads only the values files of an umbrella parent: its overlay
+			// switches Vault Agent of the subcharts.
+			generator.MirrorSubchartVaultAgent(baseValues, chart.Name, charts)
 
 			if group, ok := groupsByName[chart.Name]; ok {
 				// Workload-aware path: detect the workload type.
@@ -1079,7 +1132,7 @@ func runGenerate(ctx context.Context, opts generateOptions) error {
 			opts.libraryRef, opts.libraryVersion)
 	}
 	fmt.Println()
-	printInstallHint(os.Stdout, opts.outputDir, charts, opts.chartName, installNS)
+	printInstallHint(os.Stdout, opts.outputDir, charts, opts.chartName, installNS, opts.sharedChart)
 
 	return nil
 }
@@ -1091,13 +1144,24 @@ const installHintMax = 3
 // and library modes <outputDir>/<chartName> does not exist, so the hint lists
 // the charts that were written (first installHintMax and a count of the rest);
 // library charts and umbrella subcharts are not installable on their own.
-func printInstallHint(w io.Writer, outputDir string, charts []*types.GeneratedChart, chartName, namespace string) {
+//
+// sharedChart is the --shared-chart name: when that chart was written it is
+// listed first and the hint says so, since the other charts reference its
+// objects.
+func printInstallHint(w io.Writer, outputDir string, charts []*types.GeneratedChart, chartName, namespace, sharedChart string) {
 	var paths []string
+	hasShared := false
 	for _, c := range charts {
 		if strings.Contains(c.Name, "/") || strings.Contains(c.ChartYAML, "type: library") {
 			continue
 		}
-		paths = append(paths, filepath.Join(outputDir, c.Name))
+		p := filepath.Join(outputDir, c.Name)
+		if sharedChart != "" && c.Name == sharedChart {
+			hasShared = true
+			paths = append([]string{p}, paths...)
+			continue
+		}
+		paths = append(paths, p)
 	}
 	if len(paths) == 0 {
 		paths = []string{filepath.Join(outputDir, chartName)}
@@ -1110,6 +1174,9 @@ func printInstallHint(w io.Writer, outputDir string, charts []*types.GeneratedCh
 		fmt.Fprintf(w, "To install the chart, run:\n")
 	} else {
 		fmt.Fprintf(w, "To install the charts, run (one command per chart):\n")
+	}
+	if hasShared && len(paths) > 1 {
+		fmt.Fprintf(w, "Install %s first: the other charts reference the objects it holds.\n", sharedChart)
 	}
 	for i, p := range paths {
 		if i == installHintMax {

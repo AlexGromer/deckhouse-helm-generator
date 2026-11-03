@@ -493,3 +493,46 @@ func TestGenerateLibraryHelpers_IndependentOfInput(t *testing.T) {
 		t.Errorf("GenerateInChartTemplate =\n%s\nwant to contain\n%s", in, want)
 	}
 }
+
+func TestGenerateNOTES_RolloutStatusAndDriftCheck(t *testing.T) {
+	out := GenerateNOTES("myapp", []string{"web"}, NOTESContext{
+		Deployments:  []string{"web", "worker"},
+		HasWorkloads: true,
+	})
+	for _, want := range []string{
+		`kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "myapp.objname" (list $ "web") }} --timeout=30m`,
+		`kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "myapp.objname" (list $ "worker") }} --timeout=30m`,
+		`helm get manifest {{ .Release.Name }} -n {{ .Release.Namespace }} | kubectl -n {{ .Release.Namespace }} diff -f -`,
+		"helm --wait may not wait",
+		"exit code 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("NOTES lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Recreate") {
+		t.Errorf("helm --wait waits for the new pods of a Recreate Deployment, NOTES must not list it among the cases that return early:\n%s", out)
+	}
+	if strings.Index(out, "rollout status deploy/") > strings.Index(out, "helm get manifest") {
+		t.Error("rollout status comes before the drift check")
+	}
+}
+
+func TestGenerateNOTES_DriftCheckWithoutDeployments(t *testing.T) {
+	out := GenerateNOTES("myapp", []string{"db"}, NOTESContext{HasWorkloads: true})
+	if strings.Contains(out, "rollout status") {
+		t.Error("no Deployment, no rollout status")
+	}
+	if !strings.Contains(out, "helm get manifest") {
+		t.Error("a chart with workloads gets the drift check")
+	}
+}
+
+func TestGenerateNOTES_NoWorkloadsNoCommands(t *testing.T) {
+	out := GenerateNOTES("myapp", []string{"cfg"}, NOTESContext{})
+	for _, bad := range []string{"rollout status", "helm get manifest"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("a chart without workloads must not suggest %q", bad)
+		}
+	}
+}

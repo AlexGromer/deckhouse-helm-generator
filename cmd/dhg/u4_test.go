@@ -275,14 +275,14 @@ func TestInstallHint(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	printInstallHint(&sb, "/out", mk("web"), "app", "prod")
+	printInstallHint(&sb, "/out", mk("web"), "app", "prod", "")
 	if want := "helm install my-release /out/web --namespace prod\n"; !strings.Contains(sb.String(), want) {
 		t.Errorf("missing %q in:\n%s", want, sb.String())
 	}
 
 	// Separate mode: <out>/<chartName> does not exist, list the real charts.
 	sb.Reset()
-	printInstallHint(&sb, "/out", mk("a", "b", "c", "d", "e"), "app", "")
+	printInstallHint(&sb, "/out", mk("a", "b", "c", "d", "e"), "app", "", "")
 	got := sb.String()
 	// One release name per chart: the same name twice fails in one namespace.
 	for _, want := range []string{"helm install a /out/a ", "helm install b /out/b ", "helm install c /out/c ", "--namespace <namespace>", "2 more"} {
@@ -298,7 +298,7 @@ func TestInstallHint(t *testing.T) {
 	sb.Reset()
 	cs := mk("app", "app/charts/x")
 	cs = append(cs, &types.GeneratedChart{Name: "library", ChartYAML: "name: library\ntype: library\n"})
-	printInstallHint(&sb, "/out", cs, "app", "")
+	printInstallHint(&sb, "/out", cs, "app", "", "")
 	got = sb.String()
 	if !strings.Contains(got, "/out/app --namespace") || strings.Contains(got, "library") || strings.Contains(got, "charts/x") {
 		t.Errorf("unexpected hint:\n%s", got)

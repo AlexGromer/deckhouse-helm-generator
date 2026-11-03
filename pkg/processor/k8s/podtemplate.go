@@ -255,10 +255,12 @@ const workloadSelectorTemplate = `  selector:
 // the indentation of the `template:` key. restartPolicy, when not empty, is
 // the default spec.restartPolicy (Jobs need one).
 //
-// Pod labels are the input's pod labels plus the chart labels the input does
-// not set: the input's labels win, so every selector of the input (the
-// workload's own, Services, PodDisruptionBudgets, NetworkPolicies) keeps
-// selecting these pods.
+// Pod labels are the input's pod labels plus the stable chart labels
+// (app.kubernetes.io/name and instance) the input does not set: the input's
+// labels win, so every selector of the input (the workload's own, Services,
+// PodDisruptionBudgets, NetworkPolicies) keeps selecting these pods. The
+// chart, version and managed-by labels are left out: they change with every
+// chart release and would restart the pods.
 func podTemplate(chartName string, indent int, restartPolicy string, workloadKey string) string {
 	pad := strings.Repeat(" ", indent)
 	n := func(extra int) int { return indent + extra }
@@ -292,7 +294,8 @@ func podTemplate(chartName string, indent int, restartPolicy string, workloadKey
 	w(`    {{- end }}`)
 	w(`    labels:`)
 	w(`      {{- /* Pod labels from the input win over the chart labels: the input's selectors must keep matching. */}}`)
-	w(`      {{- toYaml (merge (dict) (.podLabels | default dict) (include "%s.labels" $ | fromYaml)) | nindent %d }}`, chartName, n(6))
+	w(`      {{- /* The chart, version and managed-by labels stay on the object only: in a pod template they restart the pods on every version bump. */}}`)
+	w(`      {{- toYaml (merge (dict) (.podLabels | default dict) (omit (include "%s.labels" $ | fromYaml) "helm.sh/chart" "app.kubernetes.io/version" "app.kubernetes.io/managed-by")) | nindent %d }}`, chartName, n(6))
 	w(`  spec:`)
 	if restartPolicy != "" {
 		w(`    restartPolicy: {{ .restartPolicy | default %q }}`, restartPolicy)

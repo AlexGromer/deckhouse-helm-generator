@@ -27,6 +27,9 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
+	if opts.SharedChart != "" {
+		return nil, errSharedChartMode
+	}
 
 	// Build chart metadata
 	chartMeta := helm.ChartMetadata{
@@ -136,7 +139,7 @@ func (g *UniversalGenerator) Generate(ctx context.Context, graph *types.Resource
 	}
 
 	// Generate NOTES.txt
-	notes := helm.GenerateNOTES(opts.ChartName, serviceNames, helm.NOTESContext{})
+	notes := helm.GenerateNOTES(opts.ChartName, serviceNames, notesWorkloads(allResources))
 
 	// Generate values.schema.json if requested
 	var valuesSchema string
@@ -368,4 +371,29 @@ func addTestsAndHooks(chart *types.GeneratedChart, opts Options) {
 			chart.Templates[path] = content
 		}
 	}
+}
+
+// notesWorkloads tells NOTES.txt which workloads the chart has: the names of
+// its Deployments (for the rollout status commands) and whether it has any
+// workload at all (for the drift check).
+func notesWorkloads(resources []*types.ProcessedResource) helm.NOTESContext {
+	var ctx helm.NOTESContext
+	seen := map[string]bool{}
+	for _, r := range resources {
+		if r == nil || r.Original == nil || r.Original.Object == nil || isCRD(r) {
+			continue
+		}
+		switch r.Original.Object.GetKind() {
+		case "Deployment":
+			ctx.HasWorkloads = true
+			if name := r.Original.Object.GetName(); name != "" && !seen[name] {
+				seen[name] = true
+				ctx.Deployments = append(ctx.Deployments, name)
+			}
+		case "StatefulSet", "DaemonSet", "Job", "CronJob", "Rollout":
+			ctx.HasWorkloads = true
+		}
+	}
+	sort.Strings(ctx.Deployments)
+	return ctx
 }

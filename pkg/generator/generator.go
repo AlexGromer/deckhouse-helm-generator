@@ -72,6 +72,17 @@ type Options struct {
 	// LibraryVersion is the version or version range of the library dependency.
 	// Required with LibraryRef.
 	LibraryVersion string
+
+	// SharedChart (separate and library modes) is the name of a chart that
+	// receives the objects several service charts reference, and those no
+	// workload references (see SplitShared). Empty: every object stays in the
+	// chart of its service group.
+	SharedChart string
+
+	// OnShared, when set, is called by a generator that honours SharedChart
+	// with the shared chart's name and the objects that moved (none: no chart
+	// is written).
+	OnShared func(chart string, moved []SharedObject)
 }
 
 // Generator generates Helm charts from a resource graph.

@@ -89,6 +89,12 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 	}
 
 	// Pass 2: Group ungrouped resources by relationship connected components.
+	// A component may reach label groups through a shared object; their
+	// members stay in their own groups.
+	labelled := make(map[types.ResourceKey]bool, len(grouped))
+	for key := range grouped {
+		labelled[key] = true
+	}
 	var ungrouped []types.ResourceKey
 	for _, key := range keys {
 		if !grouped[key] {
@@ -177,7 +183,7 @@ func GroupResources(graph *types.ResourceGraph) (*GroupingResult, error) {
 					}
 					for _, r := range component {
 						rKey := r.Original.ResourceKey()
-						if !existingKeys[rKey] {
+						if !existingKeys[rKey] && !labelled[rKey] {
 							existing.Resources = append(existing.Resources, r)
 						}
 					}

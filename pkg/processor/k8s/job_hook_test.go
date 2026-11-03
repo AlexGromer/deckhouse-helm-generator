@@ -249,6 +249,11 @@ spec:
 		testutil.AssertContains(t, custom, want)
 	}
 
+	// A values file without the enabled key (null removes it) still renders
+	// the Job: a missing key means enabled.
+	noKey := render("--set", "services.migrate.job.enabled=null")
+	testutil.AssertContains(t, noKey, "kind: Job")
+
 	off := render("--set", "services.migrate.job.enabled=false")
 	if strings.Contains(off, "kind: Job") {
 		t.Errorf("job.enabled=false must render no Job:\n%s", off)

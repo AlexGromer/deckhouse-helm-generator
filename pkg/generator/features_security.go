@@ -46,6 +46,7 @@ func init() {
 		Name:        "vault-agent",
 		Description: "Annotate Deployments/StatefulSets/DaemonSets that use Secrets for HashiCorp Vault Agent injection (secrets rendered to /vault/secrets/<name>)",
 		Params: map[string]string{
+			"enabled":           "true",
 			"role":              "",
 			"auth-path":         "",
 			"path-prefix":       "secret/data",

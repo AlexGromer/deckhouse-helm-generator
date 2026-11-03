@@ -42,15 +42,23 @@ func (g *SeparateGenerator) Generate(ctx context.Context, graph *types.ResourceG
 		return []*types.GeneratedChart{}, nil
 	}
 
-	charts := make([]*types.GeneratedChart, 0, len(groupResult.Groups))
-	inChart := inChartNames(graph)
+	plan, err := g.planShared(graph, groupResult.Groups, opts)
+	if err != nil {
+		return nil, err
+	}
 
-	for _, group := range groupResult.Groups {
+	charts := make([]*types.GeneratedChart, 0, len(plan.groups)+1)
+	// The shared chart comes first: it is installed first.
+	if plan.chart != nil {
+		charts = append(charts, plan.chart)
+	}
+
+	for _, group := range plan.groups {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
-		chart, err := g.generateChartForGroup(group, opts, opts.ChartName, inChart)
+		chart, err := g.generateChartForGroup(group, opts, opts.ChartName, plan.inChart)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate chart for group %s: %w", group.Name, err)
 		}
@@ -66,13 +74,17 @@ func (g *SeparateGenerator) Generate(ctx context.Context, graph *types.ResourceG
 // inChart is what inChartNames returns for the whole graph.
 func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Options, sourceChartName string, inChart map[string][]string) (*types.GeneratedChart, error) {
 	chartName := group.Name
+	description := fmt.Sprintf("Helm chart for %s", chartName)
+	if chartName == opts.SharedChart {
+		description = fmt.Sprintf("Objects shared by the service charts (%s), install it first", chartName)
+	}
 
 	// Build Chart.yaml.
 	chartMeta := helm.ChartMetadata{
 		Name:        chartName,
 		Version:     opts.ChartVersion,
 		AppVersion:  opts.AppVersion,
-		Description: fmt.Sprintf("Helm chart for %s", chartName),
+		Description: description,
 		APIVersion:  "v2",
 		Type:        "application",
 		Keywords:    []string{"kubernetes", "deckhouse"},
@@ -106,7 +118,7 @@ func (g *SeparateGenerator) generateChartForGroup(group *ServiceGroup, opts Opti
 	helpers := helm.GenerateHelpersWithRefs(chartName, inChart)
 
 	// Generate NOTES.txt.
-	notes := helm.GenerateNOTES(chartName, []string{chartName}, helm.NOTESContext{})
+	notes := helm.GenerateNOTES(chartName, []string{chartName}, notesWorkloads(group.Resources))
 
 	var valuesSchema string
 	if opts.IncludeSchema {

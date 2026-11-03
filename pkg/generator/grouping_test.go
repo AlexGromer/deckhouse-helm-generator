@@ -652,3 +652,39 @@ func TestResourceKeyLessAndSortedKeys(t *testing.T) {
 		t.Errorf("SortedKeys = %v", keys)
 	}
 }
+
+// An unlabelled object that two labelled workloads reference joins one of
+// their groups; the other group's members are not copied into it (a resource
+// in two groups lands in two charts).
+func TestGroupResources_SharedUnlabelledObjectDoesNotDuplicateGroups(t *testing.T) {
+	web := makeProcessedResource("Deployment", "web", "ns", map[string]string{"app.kubernetes.io/name": "web"})
+	webCfg := makeProcessedResource("ConfigMap", "web-own", "ns", map[string]string{"app.kubernetes.io/name": "web"})
+	api := makeProcessedResource("Deployment", "api", "ns", map[string]string{"app.kubernetes.io/name": "api"})
+	common := makeProcessedResource("ConfigMap", "common", "ns", nil)
+	graph := buildGraph([]*types.ProcessedResource{web, webCfg, api, common}, []types.Relationship{
+		{From: resourceKey(web), To: resourceKey(common), Type: types.RelationEnvFrom},
+		{From: resourceKey(web), To: resourceKey(webCfg), Type: types.RelationEnvFrom},
+		{From: resourceKey(api), To: resourceKey(common), Type: types.RelationEnvFrom},
+	})
+
+	result, err := GroupResources(graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]string{}
+	for _, g := range result.Groups {
+		for _, r := range g.Resources {
+			name := r.Original.Object.GetName()
+			if other, dup := seen[name]; dup {
+				t.Errorf("%s is in groups %s and %s", name, other, g.Name)
+			}
+			seen[name] = g.Name
+		}
+	}
+	if len(seen) != 4 {
+		t.Errorf("grouped %d of 4 resources: %v", len(seen), seen)
+	}
+	if g := findGroup(result, "web"); g == nil || len(g.Resources) < 2 {
+		t.Errorf("web group = %v", g)
+	}
+}

@@ -1334,7 +1334,7 @@ func TestProcessDeployment_GeneratesTemplate(t *testing.T) {
 	if strings.Contains(tpl, `selectorLabels`) {
 		t.Error("chart selector labels must not replace the input's selector")
 	}
-	testutil.AssertContains(t, tpl, `merge (dict) (.podLabels | default dict) (include "myapp.labels" $ | fromYaml)`, "pod labels from the input win over chart labels")
+	testutil.AssertContains(t, tpl, `merge (dict) (.podLabels | default dict) (omit (include "myapp.labels" $ | fromYaml) "helm.sh/chart" "app.kubernetes.io/version" "app.kubernetes.io/managed-by")`, "pod labels from the input win over the stable chart labels")
 	testutil.AssertContains(t, tpl, ".replicas", "template should reference replicas")
 	testutil.AssertContains(t, tpl, ".image.repository", "template should reference image repo")
 	testutil.AssertContains(t, tpl, ".image.tag", "template should reference image tag")

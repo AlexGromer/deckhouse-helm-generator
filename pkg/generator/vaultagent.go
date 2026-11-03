@@ -16,6 +16,11 @@ import (
 // format=env). The annotations are computed at render time from the
 // vaultAgent values block, so the role, paths and the whole injection can be
 // changed per environment.
+//
+// vaultAgent.enabled is the switch: the feature option enabled=false sets the
+// default off, and the environment overlays (--env-values) switch it per
+// environment, so one chart reads plain Kubernetes Secrets in one environment
+// and gets the Vault Agent in another.
 
 // vaultAgentPodAnnotationsHook is the pod-annotations block of the generated
 // Deployment/StatefulSet/DaemonSet templates that the feature extends.
@@ -29,6 +34,10 @@ func applyVaultAgentFeature(chart *types.GeneratedChart, fc FeatureContext) (*ty
 	kv, err := strconv.Atoi(fc.Param("kv-version"))
 	if err != nil || (kv != 1 && kv != 2) {
 		return nil, fmt.Errorf("kv-version must be 1 or 2, got %q", fc.Param("kv-version"))
+	}
+	enabled, err := strconv.ParseBool(fc.Param("enabled"))
+	if err != nil {
+		return nil, fmt.Errorf("enabled must be true or false, got %q", fc.Param("enabled"))
 	}
 	format := fc.Param("format")
 	if format != "env" && format != "raw" {
@@ -77,9 +86,11 @@ func applyVaultAgentFeature(chart *types.GeneratedChart, fc FeatureContext) (*ty
 	if err := secAddValues(out, "vaultAgent",
 		"# HashiCorp Vault Agent injection (dhg feature: vault-agent).\n"+
 			"# Workloads using a Secret <name> get it from <secretPathPrefix>/<name>\n"+
-			"# rendered to /vault/secrets/<name> (secretFormat env: KEY=value lines).\n",
+			"# rendered to /vault/secrets/<name> (secretFormat env: KEY=value lines).\n"+
+			"# enabled switches the injection per environment (values-<env>.yaml); off, the\n"+
+			"# workloads read the Kubernetes Secrets of the chart.\n",
 		map[string]interface{}{
-			"enabled":          true,
+			"enabled":          enabled,
 			"role":             role,
 			"authPath":         fc.Param("auth-path"),
 			"secretPathPrefix": fc.Param("path-prefix"),

@@ -157,6 +157,25 @@ dependencies:
 - Верхнеуровневый library chart всё равно пишется (`./charts/platform-lib`), под именем из ссылки: его `define` называются `platform-lib.*`, как и `include` в шаблонах. При точной `--library-version` chart получает эту версию, при диапазоне (`^1.2.0`) — `--chart-version`, тогда опубликуйте версию, подходящую под диапазон. Опубликуйте его в реестр (`helm package` и `helm push`), затем выполните `helm dependency update` в каждом сервисном chart'е.
 - Оба параметра можно держать в `.dhg.yaml` (`library-ref`, `library-version`; версию берите в кавычки, иначе YAML прочтёт `1.20` как число); флаг командной строки перекрывает файл.
 
+#### Общий chart для общих объектов
+
+В режимах `separate` и `library` ConfigMap, Secret, ServiceAccount и PVC, на которые ссылаются разные сервисы, попадают в chart одного из них, а остальные зависят от него. `--shared-chart <имя>` выносит их в отдельный chart:
+
+```bash
+dhg generate -f ./manifests -o ./charts --chart-name shop --mode separate --shared-chart platform
+helm upgrade --install platform ./charts/platform   # сначала
+helm upgrade --install web ./charts/web
+helm upgrade --install api ./charts/api
+```
+
+Правило детерминировано и берёт граф зависимостей (envFrom, env, volumes, serviceAccountName, imagePullSecrets у workload'ов, а также ссылки Ingress на TLS Secret, RoleBinding на ServiceAccount и т. п.). Argo Rollout считается workload'ом. Namespace входа при сопоставлении не учитывается: все шаблоны рендерятся в `.Release.Namespace`:
+
+- объект, на который ссылаются ресурсы двух и более сервисных групп, переезжает в shared chart;
+- объект, на который не ссылается ни один ресурс (ConfigMap, Secret, ServiceAccount, PVC и виды, на которые ссылается какой-либо workload), тоже;
+- объект, на который ссылается одна группа (workload, Ingress, RoleBinding и др.), остаётся в chart'е этой группы.
+
+Ссылки сервисных chart'ов на вынесенные объекты литеральны: `global.namePrefix` сервисного chart'а к ним не применяется, а сам shared chart называет объекты как во входе: его `global.namePrefix` должен оставаться пустым, иначе рендер shared chart'а завершается ошибкой (префикс переименовал бы объекты, а ссылки сервисов на них остались бы прежними). Shared chart — обычный chart со своими helpers (в `library`-режиме без зависимости от библиотеки), он проходит `helm lint` и `helm template` сам по себе. Сводка `N shared objects moved to chart <имя>` выводится всегда, список объектов — с `-v`; подсказка установки ставит shared chart первым. Если выносить нечего, chart не пишется. Для `universal` и `umbrella` флаг — ошибка (в umbrella у общих объектов нет места в родительском chart'е). Ключ `shared-chart` можно держать в `.dhg.yaml`; флаг командной строки перекрывает файл.
+
 ---
 
 ## Что генерируется
@@ -236,6 +255,44 @@ dhg generate -f ./manifests --chart-name app \
 | Оба (миграция с другого контроллера) | по умолчанию |
 
 Секрет из `credentialName` нужно создать в namespace ingress gateway (например, `Certificate` cert-manager в `istio-system`); селектор gateway — `--feature-opt istio-ingress.gateway-selector=istio=ingressgateway`.
+
+### Секреты по окружениям: Kubernetes Secrets и Vault
+
+Один chart может читать обычные Kubernetes Secrets в одном окружении и получать их через Vault Agent в другом. Переключатель — `vaultAgent.enabled` в values: `--with vault-agent` вычисляет аннотации инъекции при рендере, а при `enabled: false` не выводит ни одной (workload'ы читают Secret'ы chart'а как есть). Secret'ы остаются в chart'е в обоих случаях; в окружении с Vault их значения можно не хранить (`services.<svc>.secrets.<имя>.enabled=false` убирает объект) или оставить заглушками.
+
+`.dhg.yaml` (имена Vault, роли и путей нейтральные, подставьте свои):
+
+```yaml
+chart-name: shop
+mode: universal
+env-values: true
+with: [vault-agent]
+feature-opt:
+  - vault-agent.role=shop
+  - vault-agent.path-prefix=secret/data/shop
+  - vault-agent.enabled=false   # base: обычные Kubernetes Secrets
+```
+
+`dhg generate -f ./manifests` кладёт рядом с `values.yaml` файлы `values-dev.yaml`, `values-staging.yaml`, `values-prod.yaml`. Если в chart'е есть блок `vaultAgent`, в каждом из них лежит только его переключатель: `enabled: false` в dev (Vault там нет) и `enabled: true` в staging и prod. Своя роль или путь окружения — в том же overlay:
+
+```yaml
+# values-prod.yaml
+vaultAgent:
+  enabled: true
+  role: shop-prod
+  secretPathPrefix: secret/data/shop-prod
+```
+
+```bash
+helm template shop ./shop                           # Kubernetes Secrets, аннотаций Vault нет
+helm template shop ./shop -f shop/values-dev.yaml   # то же
+helm template shop ./shop -f shop/values-prod.yaml  # аннотации vault.hashicorp.com/* на workload'ах
+helm template shop ./shop -f shop/values-prod.yaml --set vaultAgent.enabled=false   # явный --set важнее overlay'я
+```
+
+В режиме `umbrella` helm читает только values родителя, а блок `vaultAgent` лежит в values подчартов: overlay'и родителя переключают `<сервис>.vaultAgent.enabled` (`--set web.vaultAgent.enabled=false` выключает один сервис).
+
+Без `vault-agent.enabled=false` base включает инъекцию (значение по умолчанию — `true`), и dev-overlay её выключает. Для Vault нужен установленный Vault Agent injector; роль и пути создаются на стороне Vault.
 
 ---
 

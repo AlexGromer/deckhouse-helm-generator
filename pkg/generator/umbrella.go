@@ -29,6 +29,10 @@ func (g *UmbrellaGenerator) Generate(ctx context.Context, graph *types.ResourceG
 		return nil, ctx.Err()
 	}
 
+	if opts.SharedChart != "" {
+		return nil, errSharedChartMode
+	}
+
 	groupResult, err := GroupResources(graph)
 	if err != nil {
 		return nil, fmt.Errorf("failed to group resources: %w", err)
