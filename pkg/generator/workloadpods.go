@@ -55,6 +55,11 @@ func workloadPDBTemplate(chartName string, wl *resourceTemplate, nameSuffix, con
 // template: a plain or templated name gets the suffix appended, a quoted
 // name is re-quoted with it.
 func suffixedName(name, suffix string) string {
+	if strings.HasPrefix(name, "{{ ") && strings.HasSuffix(name, " | quote }}") {
+		// a quoted action (processor.ObjName): join inside the template, then quote
+		inner := strings.TrimSuffix(strings.TrimPrefix(name, "{{ "), " | quote }}")
+		return "{{ print (" + inner + ") " + strconv.Quote(suffix) + " | quote }}"
+	}
 	if strings.HasPrefix(name, `"{{`) && strings.HasSuffix(name, `}}"`) {
 		return name[:len(name)-1] + suffix + `"` // a quoted action (processor.ObjName)
 	}

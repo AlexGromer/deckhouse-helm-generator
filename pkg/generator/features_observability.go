@@ -113,7 +113,7 @@ var (
 	reIncludeNm = regexp.MustCompile(`^\{\{ include "([^"]+)" \$ \}\}([A-Za-z0-9.-]*)$`)
 	// reObjNm is processor.ObjName: the name with global.namePrefix, quoted
 	// when YAML would read the plain name as another type.
-	reObjNm     = regexp.MustCompile(`^"?\{\{ include "([^"]+\.objname)" \(list \$ ("[^"]*")\) \}\}([A-Za-z0-9.-]*)"?$`)
+	reObjNm     = regexp.MustCompile(`^"?\{\{ include "([^"]+\.objname)" \(list \$ ("[^"]*")\)(?: \| quote)? \}\}([A-Za-z0-9.-]*)"?$`)
 	reLiteralNm = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`)
 )
 

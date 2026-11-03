@@ -246,11 +246,12 @@ func ObjectName(name string) string {
 // it renders exactly what ObjectName writes. The expression refers to the
 // root context as $, which every generated template does.
 func ObjName(chartName, name string) string {
-	expr := fmt.Sprintf(`{{ include "%s.objname" (list $ %s) }}`, chartName, strconv.Quote(name))
 	if ObjectName(name) != name {
-		return `"` + expr + `"` // a name YAML reads as another type stays a string
+		// A name YAML reads as another type stays a string; quote escapes
+		// the rendered value, so no character of it can end the string.
+		return fmt.Sprintf(`{{ include "%s.objname" (list $ %s) | quote }}`, chartName, strconv.Quote(name))
 	}
-	return expr
+	return fmt.Sprintf(`{{ include "%s.objname" (list $ %s) }}`, chartName, strconv.Quote(name))
 }
 
 // Prefixable reports whether global.namePrefix applies to the name of an

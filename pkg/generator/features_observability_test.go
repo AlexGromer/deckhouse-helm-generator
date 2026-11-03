@@ -393,7 +393,7 @@ func TestNameExpressions(t *testing.T) {
 		{name: `"123"`},
 		// processor.ObjName, plain and quoted, with and without a suffix.
 		{name: `{{ include "app.objname" (list $ "db") }}`},
-		{name: `"{{ include "app.objname" (list $ "true") }}"`},
+		{name: `{{ include "app.objname" (list $ "true") | quote }}`},
 		{name: `{{ include "app.objname" (list $ "api") }}-v2`},
 	}
 	got := nameExpressions(templates)

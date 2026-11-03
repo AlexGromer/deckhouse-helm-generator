@@ -366,8 +366,8 @@ func TestGenerateGenericTemplate_HasEnabledCheck(t *testing.T) {
 func TestGenerateGenericTemplate_KeepsInputName(t *testing.T) {
 	for name, want := range map[string]string{
 		"my-widget":       "  name: {{ include \"app.objname\" (list $ \"my-widget\") }}\n",
-		"system:auth":     "  name: \"{{ include \"app.objname\" (list $ \"system:auth\") }}\"\n",
-		"1st-widget":      "  name: \"{{ include \"app.objname\" (list $ \"1st-widget\") }}\"\n",
+		"system:auth":     "  name: {{ include \"app.objname\" (list $ \"system:auth\") | quote }}\n",
+		"1st-widget":      "  name: {{ include \"app.objname\" (list $ \"1st-widget\") | quote }}\n",
 		"widgets.example": "  name: {{ include \"app.objname\" (list $ \"widgets.example\") }}\n",
 	} {
 		obj := makeObj("Widget", name, "default")
@@ -555,9 +555,9 @@ func TestObjName(t *testing.T) {
 		"web":         `{{ include "app.objname" (list $ "web") }}`,
 		"web.example": `{{ include "app.objname" (list $ "web.example") }}`,
 		// YAML would read these as a bool and a number: the result stays quoted.
-		"true":        `"{{ include "app.objname" (list $ "true") }}"`,
-		"1st":         `"{{ include "app.objname" (list $ "1st") }}"`,
-		"system:auth": `"{{ include "app.objname" (list $ "system:auth") }}"`,
+		"true":        `{{ include "app.objname" (list $ "true") | quote }}`,
+		"1st":         `{{ include "app.objname" (list $ "1st") | quote }}`,
+		"system:auth": `{{ include "app.objname" (list $ "system:auth") | quote }}`,
 	} {
 		if got := ObjName("app", name); got != want {
 			t.Errorf("ObjName(app, %q) = %s, want %s", name, got, want)
